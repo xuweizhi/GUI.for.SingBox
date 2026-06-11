@@ -45,17 +45,6 @@ export const ExecBackground = async (
   const outEvent = (onOut && sampleID()) || ''
   const endEvent = (onEnd && sampleID()) || (outEvent && sampleID()) || ''
 
-  const { flag, data } = await App.ExecBackground(
-    path,
-    args,
-    outEvent,
-    endEvent,
-    mergeExecOptions(options),
-  )
-  if (!flag) {
-    throw data
-  }
-
   if (outEvent) {
     EventsOn(outEvent, onOut!)
   }
@@ -68,6 +57,13 @@ export const ExecBackground = async (
     })
   }
 
+  const { flag, data } = await App.ExecBackground(path, args, outEvent, endEvent, mergeExecOptions(options))
+  if (!flag) {
+    outEvent && EventsOff(outEvent)
+    endEvent && EventsOff(endEvent)
+    throw data
+  }
+
   return Number(data)
 }
 
@@ -77,6 +73,14 @@ export const ProcessInfo = async (pid: number) => {
     throw data
   }
   return data
+}
+
+export const FindListeningProcess = async (port: number) => {
+  const { flag, data } = await App.FindListeningProcess(port)
+  if (!flag) {
+    throw data
+  }
+  return Number(data)
 }
 
 export const ProcessMemory = async (pid: number) => {

@@ -1,7 +1,7 @@
 import { Request } from '@/api/request'
 import { WebSockets } from '@/api/websocket'
 import { useProfilesStore } from '@/stores'
-import { formatProxyHost, normalizeProxyHost } from '@/utils'
+import { isWebui, formatProxyHost, normalizeProxyHost } from '@/utils'
 
 import type {
   CoreApiConfig,
@@ -64,13 +64,22 @@ const resolveController = (controller: string, defaultPort: number) => {
 const setupCoreApi = (protocol: 'http' | 'ws') => {
   const { currentProfile: profile } = useProfilesStore()
 
-  let base = `${protocol}://127.0.0.1:20123`
+  const controller = profile?.experimental.clash_api.external_controller || '127.0.0.1:20123'
+  const { host, port } = resolveController(controller, 20123)
+
+  let base = `${protocol}://${formatProxyHost(host)}:${port}`
   let bearer = ''
 
+  if (isWebui) {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const controllerPath = encodeURIComponent(`${formatProxyHost(host)}:${port}`)
+    base =
+      protocol === 'http'
+        ? `${window.location.origin}/__webui/core/${controllerPath}`
+        : `${wsProtocol}://${window.location.host}/__webui/core/ws/${controllerPath}`
+  }
+
   if (profile) {
-    const controller = profile.experimental.clash_api.external_controller || '127.0.0.1:20123'
-    const { host, port } = resolveController(controller, 20123)
-    base = `${protocol}://${formatProxyHost(host)}:${port}`
     bearer = profile.experimental.clash_api.secret
   }
 

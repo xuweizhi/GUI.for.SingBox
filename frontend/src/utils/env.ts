@@ -12,4 +12,8 @@ export const TG_GROUP = import.meta.env.VITE_APP_TG_GROUP
 
 export const TG_CHANNEL = import.meta.env.VITE_APP_TG_CHANNEL
 
+export const APP_RUNTIME = import.meta.env.VITE_APP_RUNTIME
+
+export const isWebui = APP_RUNTIME === 'webui'
+
 export const isDev = import.meta.env.DEV

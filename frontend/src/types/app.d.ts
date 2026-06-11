@@ -24,6 +24,7 @@ export interface AppEnv {
   os: OS
   arch: string
   isPrivileged: boolean
+  runtimeMode: 'desktop' | 'webui'
 }
 
 export interface TrayContent {

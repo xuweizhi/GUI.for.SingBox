@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"embed"
+	"fmt"
 	"guiforcores/bridge"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v2"
@@ -24,6 +27,21 @@ var icon []byte
 
 func main() {
 	app := bridge.CreateApp(assets)
+
+	cliOptions := parseCLIOptions(os.Args[1:])
+	if cliOptions.Help {
+		return
+	}
+	if cliOptions.Headless {
+		err := bridge.RunHeadless(assets, app, bridge.HeadlessOptions{
+			Listen: cliOptions.WebUIListen,
+			Token:  cliOptions.WebUIToken,
+		})
+		if err != nil {
+			println("Error:", err.Error())
+		}
+		return
+	}
 
 	trayStart, trayEnd := bridge.CreateTray(app, icon)
 
@@ -77,8 +95,8 @@ func main() {
 				return bridge.Env.AppName
 			}(),
 			OnSecondInstanceLaunch: func(data options.SecondInstanceData) {
-				runtime.Show(app.Ctx)
-				runtime.EventsEmit(app.Ctx, "onLaunchApp", data.Args)
+				app.ShowMainWindow()
+				app.EventsEmit("onLaunchApp", data.Args)
 			},
 		},
 		OnStartup: func(ctx context.Context) {
@@ -92,7 +110,7 @@ func main() {
 				runtime.CleanupNotifications(ctx)
 				return false
 			}
-			runtime.EventsEmit(ctx, "onBeforeExitApp")
+			app.EventsEmit("onBeforeExitApp")
 			return true
 		},
 		Bind: []any{
@@ -107,4 +125,41 @@ func main() {
 	if err != nil {
 		println("Error:", err.Error())
 	}
+}
+
+type cliOptions struct {
+	Headless    bool
+	Help        bool
+	WebUIListen string
+	WebUIToken  string
+}
+
+func parseCLIOptions(args []string) cliOptions {
+	options := cliOptions{
+		WebUIListen: "127.0.0.1:18080",
+	}
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--headless":
+			options.Headless = true
+		case strings.HasPrefix(arg, "--webui-listen="):
+			options.WebUIListen = strings.TrimPrefix(arg, "--webui-listen=")
+		case arg == "--webui-listen" && i+1 < len(args):
+			i++
+			options.WebUIListen = args[i]
+		case strings.HasPrefix(arg, "--webui-token="):
+			options.WebUIToken = strings.TrimPrefix(arg, "--webui-token=")
+		case arg == "--webui-token" && i+1 < len(args):
+			i++
+			options.WebUIToken = args[i]
+		case arg == "--help" || arg == "-h":
+			println("Usage:")
+			println(fmt.Sprintf("  %s [--headless] [--webui-listen host:port] [--webui-token token]", os.Args[0]))
+			options.Help = true
+		}
+	}
+
+	return options
 }

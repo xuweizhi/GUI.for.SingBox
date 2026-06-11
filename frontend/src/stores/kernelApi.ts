@@ -13,7 +13,15 @@ import {
   destroyWebsocket,
   probeApiAvailability,
 } from '@/api/kernel'
-import { ProcessInfo, KillProcess, ExecBackground, ReadFile, RemoveFile } from '@/bridge'
+import {
+  ProcessInfo,
+  KillProcess,
+  ExecBackground,
+  ReadFile,
+  RemoveFile,
+  WriteFile,
+  FindListeningProcess,
+} from '@/bridge'
 import {
   CoreConfigFilePath,
   CoreLogFilePath,
@@ -251,6 +259,44 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   let isCoreStartedByThisInstance = false
   let { promise: coreStoppedPromise, resolve: coreStoppedResolver } = Promise.withResolvers()
 
+  const getCoreControllerPort = () => {
+    const controller = profilesStore.currentProfile?.experimental.clash_api.external_controller || '127.0.0.1:20123'
+
+    if (controller.startsWith('[')) {
+      const match = controller.match(/^\[[^\]]+\](?::(\d+))?$/)
+      return Number(match?.[1] || 20123)
+    }
+
+    const separatorIndex = controller.lastIndexOf(':')
+    if (separatorIndex === -1) {
+      return 20123
+    }
+
+    return Number(controller.slice(separatorIndex + 1)) || 20123
+  }
+
+  const syncExistingCoreState = async () => {
+    const apiOk = await probeApiAvailability().catch(() => false)
+    if (!apiOk) {
+      return false
+    }
+
+    corePid.value = await FindListeningProcess(getCoreControllerPort()).catch(() => -1)
+    if (corePid.value > 0) {
+      await WriteFile(CorePidFilePath, String(corePid.value)).catch(() => 0)
+    }
+
+    running.value = true
+    needRestart.value = false
+    isCoreStartedByThisInstance = false
+
+    initWebsocket()
+    await Promise.all([refreshConfig(), refreshProviderProxies()])
+    await envStore.updateSystemProxyStatus()
+
+    return true
+  }
+
   const initCoreState = async () => {
     corePid.value = Number(await ReadFile(CorePidFilePath).catch(() => -1))
     const processName = corePid.value === -1 ? '' : await ProcessInfo(corePid.value).catch(() => '')
@@ -262,6 +308,8 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       initWebsocket()
       await Promise.all([refreshConfig(), refreshProviderProxies()])
       await envStore.updateSystemProxyStatus()
+    } else if (await syncExistingCoreState()) {
+      return
     } else if (appSettingsStore.app.autoStartKernel) {
       await startCore()
     }
@@ -337,6 +385,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
 
   const startCore = async (_profile?: IProfile) => {
     if (running.value) throw 'The core is already running'
+    if (await syncExistingCoreState()) return
 
     logsStore.clearKernelLog()
 

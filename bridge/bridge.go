@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	sysruntime "runtime"
 
@@ -27,12 +28,14 @@ var Env = &EnvResult{
 	PreventExit:  true,
 	FromTaskSch:  false,
 	WebviewPath:  "",
+	Args:         nil,
 	AppName:      "",
 	AppVersion:   "v1.25.1",
 	BasePath:     "",
 	OS:           sysruntime.GOOS,
 	ARCH:         sysruntime.GOARCH,
 	IsPrivileged: false,
+	RuntimeMode:  RuntimeModeDesktop,
 }
 
 // NewApp creates a new App application struct
@@ -50,6 +53,7 @@ func CreateApp(fs embed.FS) *App {
 
 	Env.BasePath = filepath.ToSlash(filepath.Dir(exePath))
 	Env.AppName = filepath.Base(exePath)
+	Env.Args = append([]string(nil), os.Args[1:]...)
 
 	if slices.Contains(os.Args, "tasksch") {
 		Env.FromTaskSch = true
@@ -88,6 +92,13 @@ func (a *App) IsStartup() bool {
 func (a *App) ExitApp() {
 	log.Printf("ExitApp")
 	Env.PreventExit = false
+	if a.IsHeadless() {
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			a.RequestHeadlessShutdown()
+		}()
+		return
+	}
 	runtime.Quit(a.Ctx)
 }
 
@@ -95,7 +106,7 @@ func (a *App) RestartApp() FlagResult {
 	log.Printf("RestartApp")
 	exePath := resolvePath(Env.AppName)
 
-	cmd := exec.Command(exePath)
+	cmd := exec.Command(exePath, Env.Args...)
 	SetCmdWindowHidden(cmd)
 
 	if err := cmd.Start(); err != nil {
@@ -119,6 +130,7 @@ func (a *App) GetEnv(key string) any {
 		OS:           Env.OS,
 		ARCH:         Env.ARCH,
 		IsPrivileged: Env.IsPrivileged,
+		RuntimeMode:  Env.RuntimeMode,
 	}
 }
 
@@ -141,6 +153,9 @@ func (a *App) GetInterfaces() FlagResult {
 
 func (a *App) ShowMainWindow() {
 	log.Printf("ShowMainWindow")
+	if a.IsHeadless() {
+		return
+	}
 	runtime.WindowShow(a.Ctx)
 }
 
@@ -167,14 +182,16 @@ func createMacOSSymlink() {
 func createMacOSMenus(app *App) {
 	appMenu := app.AppMenu.AddSubmenu("App")
 	appMenu.AddText("Show", keys.CmdOrCtrl("s"), func(_ *menu.CallbackData) {
-		runtime.WindowShow(app.Ctx)
+		app.ShowMainWindow()
 	})
 	appMenu.AddText("Hide", keys.CmdOrCtrl("h"), func(_ *menu.CallbackData) {
-		runtime.WindowHide(app.Ctx)
+		if !app.IsHeadless() {
+			runtime.WindowHide(app.Ctx)
+		}
 	})
 	appMenu.AddSeparator()
 	appMenu.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
-		runtime.EventsEmit(app.Ctx, "onExitApp")
+		app.EventsEmit("onExitApp")
 	})
 
 	// on macos platform, we should append EditMenu to enable Cmd+C,Cmd+V,Cmd+Z... shortcut

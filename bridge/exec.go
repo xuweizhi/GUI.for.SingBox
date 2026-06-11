@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
+	psnet "github.com/shirou/gopsutil/v3/net"
 	"github.com/shirou/gopsutil/v3/process"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) Exec(path string, args []string, options ExecOptions) FlagResult {
@@ -148,10 +148,10 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 		}
 		if endEvent != "" {
 			if err != nil {
-				runtime.EventsEmit(a.Ctx, endEvent, err.Error())
+				a.EventsEmit(endEvent, err.Error())
 				return
 			}
-			runtime.EventsEmit(a.Ctx, endEvent)
+			a.EventsEmit(endEvent)
 		}
 	}()
 
@@ -221,6 +221,32 @@ func (a *App) ProcessMemory(pid int32) FlagResult {
 	}
 
 	return FlagResult{false, err.Error()}
+}
+
+func (a *App) FindListeningProcess(port uint32) FlagResult {
+	log.Printf("FindListeningProcess: %d", port)
+
+	connections, err := psnet.Connections("tcp")
+	if err != nil {
+		return FlagResult{false, err.Error()}
+	}
+
+	for _, conn := range connections {
+		if conn.Status == "LISTEN" && conn.Laddr.Port == port && conn.Pid > 0 {
+			return FlagResult{true, strconv.Itoa(int(conn.Pid))}
+		}
+	}
+
+	connections, err = psnet.Connections("tcp6")
+	if err == nil {
+		for _, conn := range connections {
+			if conn.Status == "LISTEN" && conn.Laddr.Port == port && conn.Pid > 0 {
+				return FlagResult{true, strconv.Itoa(int(conn.Pid))}
+			}
+		}
+	}
+
+	return FlagResult{false, "process not found"}
 }
 
 func (a *App) KillProcess(pid int, timeout int) FlagResult {
@@ -311,7 +337,7 @@ func scanAndEmitOutput(a *App, reader io.Reader, outEvent string, options ExecOp
 		}
 
 		if !stopOutput {
-			runtime.EventsEmit(a.Ctx, outEvent, text)
+			a.EventsEmit(outEvent, text)
 
 			if options.StopOutputKeyword != "" && strings.Contains(text, options.StopOutputKeyword) {
 				stopOutput = true
@@ -338,7 +364,7 @@ func tailAndEmitLogFile(a *App, path string, outEvent string, options ExecOption
 			return false
 		}
 
-		runtime.EventsEmit(a.Ctx, outEvent, text)
+		a.EventsEmit(outEvent, text)
 		return options.StopOutputKeyword != "" && strings.Contains(text, options.StopOutputKeyword)
 	}
 

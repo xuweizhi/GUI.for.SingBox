@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) Requests(method string, url string, headers map[string]string, body string, options RequestOptions) HTTPResult {
@@ -30,11 +28,11 @@ func (a *App) Requests(method string, url string, headers map[string]string, bod
 	req.Header = requestHeaders(headers)
 
 	if options.CancelId != "" {
-		runtime.EventsOn(a.Ctx, options.CancelId, func(data ...any) {
+		a.EventsOn(options.CancelId, func(data ...any) {
 			log.Printf("Requests Canceled: %v %v", method, url)
 			cancel()
 		})
-		defer runtime.EventsOff(a.Ctx, options.CancelId)
+		defer a.EventsOff(options.CancelId)
 	}
 
 	resp, err := client.Do(req)
@@ -149,11 +147,11 @@ func (a *App) Download(method string, url string, path string, headers map[strin
 	req.Header = requestHeaders(headers)
 
 	if options.CancelId != "" {
-		runtime.EventsOn(a.Ctx, options.CancelId, func(data ...any) {
+		a.EventsOn(options.CancelId, func(data ...any) {
 			log.Printf("Download Canceled: %v %v", url, path)
 			cancel()
 		})
-		defer runtime.EventsOff(a.Ctx, options.CancelId)
+		defer a.EventsOff(options.CancelId)
 	}
 
 	resp, err := client.Do(req)
@@ -230,11 +228,11 @@ func (a *App) Upload(method string, url string, path string, headers map[string]
 	defer cancel()
 
 	if options.CancelId != "" {
-		runtime.EventsOn(a.Ctx, options.CancelId, func(data ...any) {
+		a.EventsOn(options.CancelId, func(data ...any) {
 			log.Printf("Upload Canceled: %v %v", url, path)
 			cancel()
 		})
-		defer runtime.EventsOff(a.Ctx, options.CancelId)
+		defer a.EventsOff(options.CancelId)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
@@ -273,7 +271,7 @@ func (wt *WriteTracker) Write(p []byte) (n int, err error) {
 
 	shouldEmit := wt.Total <= 0 || wt.Progress-wt.LastEmitted >= wt.EmitThreshold || wt.Progress == wt.Total
 	if shouldEmit {
-		runtime.EventsEmit(wt.App.Ctx, wt.ProgressChange, wt.Progress, wt.Total)
+		wt.App.EventsEmit(wt.ProgressChange, wt.Progress, wt.Total)
 		wt.LastEmitted = wt.Progress
 	}
 

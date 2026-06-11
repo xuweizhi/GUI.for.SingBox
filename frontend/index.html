@@ -29,7 +29,9 @@
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
     <script>
-      if (!window.WailsInvoke) {
+      const runtimeMode = '%VITE_APP_RUNTIME%'
+
+      if (runtimeMode !== 'webui' && !window.WailsInvoke) {
         document.getElementById('ipc-error').style.display = 'block'
         document.getElementById('app').style.display = 'none'
       }

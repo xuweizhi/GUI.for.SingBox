@@ -16,8 +16,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 var requestCounter uint64
@@ -169,7 +167,7 @@ func handleHttpRequest(a *App, serverID string) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(a.Ctx, 60*time.Second) // 60s
 		defer cancel()
 
-		runtime.EventsOn(ctx, requestID, func(data ...any) {
+		a.EventsOn(requestID, func(data ...any) {
 			resp := buildResponse(data)
 			select {
 			case respChan <- resp:
@@ -177,9 +175,9 @@ func handleHttpRequest(a *App, serverID string) http.HandlerFunc {
 				log.Printf("Ignoring duplicate response for %s", requestID)
 			}
 		})
-		defer runtime.EventsOff(ctx, requestID)
+		defer a.EventsOff(requestID)
 
-		runtime.EventsEmit(a.Ctx, serverID, requestID, r.Method, r.URL.RequestURI(), r.Header, body)
+		a.EventsEmit(serverID, requestID, r.Method, r.URL.RequestURI(), r.Header, body)
 
 		select {
 		case res := <-respChan:

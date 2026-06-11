@@ -9,21 +9,29 @@ import (
 
 // App struct
 type App struct {
-	Ctx     context.Context
-	AppMenu *menu.Menu
+	Ctx      context.Context
+	AppMenu  *menu.Menu
+	Headless *HeadlessRuntime
 }
 
+const (
+	RuntimeModeDesktop = "desktop"
+	RuntimeModeWebUI   = "webui"
+)
+
 type EnvResult struct {
-	IsStartup    bool   `json:"-"`
-	PreventExit  bool   `json:"-"`
-	FromTaskSch  bool   `json:"-"`
-	WebviewPath  string `json:"-"`
-	AppName      string `json:"appName"`
-	AppVersion   string `json:"appVersion"`
-	BasePath     string `json:"basePath"`
-	OS           string `json:"os"`
-	ARCH         string `json:"arch"`
-	IsPrivileged bool   `json:"isPrivileged"`
+	IsStartup    bool     `json:"-"`
+	PreventExit  bool     `json:"-"`
+	FromTaskSch  bool     `json:"-"`
+	WebviewPath  string   `json:"-"`
+	Args         []string `json:"-"`
+	AppName      string   `json:"appName"`
+	AppVersion   string   `json:"appVersion"`
+	BasePath     string   `json:"basePath"`
+	OS           string   `json:"os"`
+	ARCH         string   `json:"arch"`
+	IsPrivileged bool     `json:"isPrivileged"`
+	RuntimeMode  string   `json:"runtimeMode"`
 }
 
 type RequestOptions struct {

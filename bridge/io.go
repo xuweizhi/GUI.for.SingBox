@@ -226,6 +226,10 @@ func (a *App) ReadDir(path string) FlagResult {
 func (a *App) OpenDir(path string) FlagResult {
 	log.Printf("OpenDir: %s", path)
 
+	if a.IsHeadless() {
+		return FlagResult{false, "OpenDir is not supported in headless WebUI mode"}
+	}
+
 	fullPath := resolvePath(path)
 
 	err := browser.OpenURL(fullPath)
@@ -238,6 +242,10 @@ func (a *App) OpenDir(path string) FlagResult {
 
 func (a *App) OpenURI(uri string) FlagResult {
 	log.Printf("OpenURI: %s", uri)
+
+	if a.IsHeadless() {
+		return FlagResult{false, "OpenURI is not supported in headless WebUI mode"}
+	}
 
 	err := browser.OpenURL(uri)
 	if err != nil {

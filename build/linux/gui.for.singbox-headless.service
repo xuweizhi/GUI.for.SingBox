@@ -1,0 +1,25 @@
+[Unit]
+Description=GUI.for.SingBox Headless WebUI
+Documentation=https://github.com/GUI-for-Cores/GUI.for.SingBox
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Adjust these paths if you install the app somewhere else.
+User=gui-for-singbox
+Group=gui-for-singbox
+WorkingDirectory=/opt/GUI.for.SingBox
+Environment="WEBUI_LISTEN=127.0.0.1:18080"
+Environment="WEBUI_TOKEN="
+EnvironmentFile=-/etc/default/gui.for.singbox-headless
+ExecStart=/opt/GUI.for.SingBox/GUI.for.SingBox --headless --webui-listen=${WEBUI_LISTEN} --webui-token=${WEBUI_TOKEN}
+Restart=on-failure
+RestartSec=5
+
+# Keep the service usable for TUN / privileged ports when needed.
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_DAC_OVERRIDE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_DAC_OVERRIDE
+
+[Install]
+WantedBy=multi-user.target

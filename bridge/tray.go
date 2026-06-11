@@ -72,7 +72,7 @@ func createMenuItem(menu MenuItem, a *App, parent *systray.MenuItem) {
 			}
 		}
 
-		m.Click(func() { go runtime.EventsEmit(a.Ctx, "onMenuItemClick", menu.Event) })
+		m.Click(func() { go a.EventsEmit("onMenuItemClick", menu.Event) })
 
 		if menu.Checked && !checkable {
 			m.Check()
@@ -87,6 +87,9 @@ func createMenuItem(menu MenuItem, a *App, parent *systray.MenuItem) {
 }
 
 func updateTray(a *App, tray TrayContent) {
+	if a.IsHeadless() {
+		return
+	}
 	if tray.Icon != "" {
 		ico, err := os.ReadFile(resolvePath(tray.Icon))
 		if err == nil {
@@ -103,6 +106,9 @@ func updateTray(a *App, tray TrayContent) {
 }
 
 func updateTrayMenus(a *App, menus []MenuItem) {
+	if a.IsHeadless() {
+		return
+	}
 	systray.ResetMenu()
 
 	for _, menu := range menus {

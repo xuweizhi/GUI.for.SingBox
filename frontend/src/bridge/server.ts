@@ -58,10 +58,6 @@ export const StartServer = async (
     MaxUploadSize: 50 * 1024 * 1024, // 50MB
     ...options,
   }
-  const { flag, data } = await App.StartServer(address, id, _options)
-  if (!flag) {
-    throw data
-  }
 
   EventsOn(id, async (...args) => {
     const [id, method, url, headers, body] = args
@@ -91,6 +87,13 @@ export const StartServer = async (
       )
     }
   })
+
+  const { flag, data } = await App.StartServer(address, id, _options)
+  if (!flag) {
+    EventsOff(id)
+    throw data
+  }
+
   return { close: () => StopServer(id) }
 }
 
