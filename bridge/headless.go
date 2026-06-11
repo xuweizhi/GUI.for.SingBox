@@ -690,18 +690,18 @@ func (a *headlessAuth) authorize(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		cookie, err := r.Cookie(webUITokenCookie)
-		if err == nil {
-			token = cookie.Value
-		}
+	matched := false
+	if cookie, err := r.Cookie(webUITokenCookie); err == nil && cookie.Value == a.token {
+		matched = true
 	}
-	if token == "" {
-		token = strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if !matched && strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) == a.token {
+		matched = true
+	}
+	if !matched && r.URL.Query().Get("token") == a.token {
+		matched = true
 	}
 
-	if token != a.token {
+	if !matched {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return false
 	}

@@ -118,8 +118,14 @@ const getCoreMemoryUsage = async (fallback: number) => {
   return useage
 }
 
+const updateDisplayedMemoryUsage = (usage: number) => {
+  if (usage > 0) {
+    statistics.value.inuse = usage
+  }
+}
+
 const unregisterMemoryHandler = kernelApiStore.onMemory(async (data) => {
-  statistics.value.inuse = data.inuse
+  updateDisplayedMemoryUsage(data.inuse)
   if (appSettings.app.kernel.realMemoryUsage) {
     getCoreMemoryUsage(statistics.value.memUsage || data.inuse).then((usage) => {
       statistics.value.memUsage = usage
@@ -145,6 +151,7 @@ const unregisterConnectionsHandler = kernelApiStore.onConnections((data) => {
   statistics.value.downloadTotal = data.downloadTotal
   statistics.value.uploadTotal = data.uploadTotal
   statistics.value.connections = data.connections || []
+  updateDisplayedMemoryUsage(data.memory)
 })
 
 onUnmounted(() => {
