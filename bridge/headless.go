@@ -95,9 +95,9 @@ func RunHeadless(assets embed.FS, app *App, options HeadlessOptions) error {
 	mux.Handle(webUISSEEndpoint, auth.wrap(http.HandlerFunc(app.handleEventStream)))
 	mux.Handle(webUICoreWSEndpoint, auth.wrap(http.HandlerFunc(app.handleCoreWebSocketProxy)))
 	mux.Handle(webUICoreEndpoint, auth.wrap(http.HandlerFunc(app.handleCoreProxy)))
-	mux.Handle("/", auth.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveHeadlessAssets(webuiFS, w, r)
-	})))
+	}))
 
 	server := &http.Server{
 		Addr:    listen,
