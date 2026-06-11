@@ -131,7 +131,7 @@ Keep the existing `data/` directory unless you intentionally want to replace run
 - `WEBUI_LISTEN` defaults to `127.0.0.1:18080`
 - `WEBUI_TOKEN` can be left empty only for loopback-only access
 - For any remote bind (`0.0.0.0` / non-loopback), set an explicit token
-- The sample service keeps `CAP_NET_ADMIN`, `CAP_NET_BIND_SERVICE`, and `CAP_NET_DAC_OVERRIDE` so the app can still work with TUN and privileged ports when needed
+- The sample service keeps `CAP_NET_ADMIN`, `CAP_NET_BIND_SERVICE`, `CAP_NET_DAC_OVERRIDE`, and `CAP_NET_RAW` so the app can still work with TUN, privileged ports, and raw-socket DNS/bootstrap when needed
 
 ### Common operations
 

@@ -18,7 +18,7 @@ import {
   useRulesetsStore,
   useSubscribesStore,
 } from '@/stores'
-import { deepAssign, deepClone, APP_TITLE, createTextMatcher } from '@/utils'
+import { deepAssign, deepClone, APP_TITLE, createTextMatcher, isValidIPv4, isValidIPv6 } from '@/utils'
 
 const _generateRule = (rule: IRule | IDNSRule, rule_set: IRuleSet[], inbounds: IInbound[]) => {
   const getInbound = (id: string) => inbounds.find((v) => v.id === id)?.tag
@@ -266,7 +266,9 @@ const generateDns = (
             extra.detour = outbound?.tag
           }
         }
-        server.domain_resolver && (extra.domain_resolver = getDnsServer(server.domain_resolver))
+        const needsDomainResolver =
+          server.domain_resolver && server.server && !isValidIPv4(server.server) && !isValidIPv6(server.server)
+        needsDomainResolver && (extra.domain_resolver = getDnsServer(server.domain_resolver))
         if (
           [
             DnsServer.Tcp,
