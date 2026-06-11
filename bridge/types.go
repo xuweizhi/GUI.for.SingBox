@@ -92,14 +92,27 @@ type HTTPResult struct {
 }
 
 type AppConfig struct {
-	WindowStartState  int  `yaml:"windowStartState"`
-	WebviewGpuPolicy  int  `yaml:"webviewGpuPolicy"`
-	ContentProtection bool `yaml:"contentProtection"`
-	Width             int  `yaml:"width"`
-	Height            int  `yaml:"height"`
-	MultipleInstance  bool `yaml:"multipleInstance"`
-	RollingRelease    bool `yaml:"rollingRelease" default:"true"`
+	WindowStartState  int            `yaml:"windowStartState"`
+	WebviewGpuPolicy  int            `yaml:"webviewGpuPolicy"`
+	ContentProtection bool           `yaml:"contentProtection"`
+	Width             int            `yaml:"width"`
+	Height            int            `yaml:"height"`
+	MultipleInstance  bool           `yaml:"multipleInstance"`
+	RollingRelease    bool           `yaml:"rollingRelease" default:"true"`
+	AutoStartKernel   bool           `yaml:"autoStartKernel"`
+	Kernel            KernelSettings `yaml:"kernel"`
 	StartHidden       bool
+}
+
+type KernelRuntimeConfig struct {
+	Env  map[string]string `yaml:"env"`
+	Args []string          `yaml:"args"`
+}
+
+type KernelSettings struct {
+	Branch string              `yaml:"branch"`
+	Main   KernelRuntimeConfig `yaml:"main"`
+	Alpha  KernelRuntimeConfig `yaml:"alpha"`
 }
 
 type TrayContent struct {

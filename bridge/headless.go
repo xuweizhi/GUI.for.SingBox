@@ -87,6 +87,9 @@ func RunHeadless(assets embed.FS, app *App, options HeadlessOptions) error {
 		shutdown: make(chan struct{}),
 		token:    token,
 	}
+	if err := app.startHeadlessCoreIfNeeded(); err != nil {
+		log.Printf("Headless core startup skipped: %v", err)
+	}
 
 	auth := &headlessAuth{token: token}
 	mux := http.NewServeMux()
