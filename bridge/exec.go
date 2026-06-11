@@ -73,6 +73,19 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 		pidPath = resolvePath(options.PidFile)
 	}
 
+	lockedCoreStart := false
+	if isCoreExecRequest(path, options) {
+		coreStartMu.Lock()
+		lockedCoreStart = true
+		if result, ok := a.reuseExistingCoreProcess(path, args, endEvent, pidPath); ok {
+			coreStartMu.Unlock()
+			return result
+		}
+	}
+	if lockedCoreStart {
+		defer coreStartMu.Unlock()
+	}
+
 	done := make(chan struct{})
 	outputDone := make(chan struct{})
 	cmd := exec.Command(exePath, args...)

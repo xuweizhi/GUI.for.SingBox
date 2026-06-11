@@ -89,3 +89,66 @@ func TestStartHeadlessCoreIfNeededStartsConfiguredCore(t *testing.T) {
 		t.Fatal("expected fake core process to still be running")
 	}
 }
+
+func TestExecBackgroundReusesExistingCoreProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-based fake core is only used on non-Windows platforms")
+	}
+
+	tempDir := t.TempDir()
+	prevBasePath := Env.BasePath
+	t.Cleanup(func() {
+		Env.BasePath = prevBasePath
+	})
+
+	Env.BasePath = tempDir
+
+	coreDir := filepath.Join(tempDir, "data", "sing-box")
+	if err := os.MkdirAll(coreDir, 0o755); err != nil {
+		t.Fatalf("create core dir: %v", err)
+	}
+
+	corePath := filepath.Join(coreDir, "sing-box")
+	if err := os.WriteFile(corePath, []byte("#!/bin/sh\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n"), 0o755); err != nil {
+		t.Fatalf("write fake core: %v", err)
+	}
+
+	app := NewApp()
+	first := app.ExecBackground("data/sing-box/sing-box", nil, "", "", ExecOptions{
+		PidFile: headlessCorePidFilePath,
+		LogFile: headlessCoreLogFilePath,
+	})
+	if !first.Flag {
+		t.Fatalf("first start failed: %s", first.Data)
+	}
+
+	second := app.ExecBackground("data/sing-box/sing-box", nil, "", "", ExecOptions{
+		PidFile: headlessCorePidFilePath,
+		LogFile: headlessCoreLogFilePath,
+	})
+	if !second.Flag {
+		t.Fatalf("second start failed: %s", second.Data)
+	}
+
+	firstPID, err := strconv.Atoi(strings.TrimSpace(first.Data))
+	if err != nil {
+		t.Fatalf("parse first pid: %v", err)
+	}
+	secondPID, err := strconv.Atoi(strings.TrimSpace(second.Data))
+	if err != nil {
+		t.Fatalf("parse second pid: %v", err)
+	}
+
+	if firstPID != secondPID {
+		t.Fatalf("expected second start to reuse pid %d, got %d", firstPID, secondPID)
+	}
+
+	process, err := os.FindProcess(firstPID)
+	if err != nil {
+		t.Fatalf("find process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = process.Kill()
+		_ = waitForProcessExitWithTimeout(process, 1)
+	})
+}
