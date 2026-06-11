@@ -60,20 +60,46 @@ describe('webui auth store', () => {
   })
 
   it('persists token after successful verification', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-      }),
-    )
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
 
     const store = useWebuiAuthStore()
     const passed = await store.verifyToken('next-token')
 
+    expect(fetchMock).toHaveBeenCalledWith('/__webui/api/rpc?token=next-token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: '{"method":"GetEnv","args":[""]}',
+    })
     expect(passed).toBe(true)
     expect(store.status).toBe('authenticated')
     expect(localStorage.getItem('gfs.webui.token')).toBe('next-token')
+  })
+
+  it('rejects an unauthorized token during verification', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+      }),
+    )
+
+    const store = useWebuiAuthStore()
+    store.setToken('stale-token')
+    const passed = await store.verifyToken('next-token')
+
+    expect(passed).toBe(false)
+    expect(store.status).toBe('idle')
+    expect(store.token).toBe('')
+    expect(store.lastError).toBe('auth.invalidToken')
+    expect(localStorage.getItem('gfs.webui.token')).toBe(null)
   })
 
   it('clears token and stores an invalid-token reason on unauthorized reset', async () => {

@@ -10,6 +10,11 @@ import {
 } from '@/utils/webuiAuth'
 
 type AuthStatus = 'idle' | 'checking' | 'authenticated'
+const WEBUI_AUTH_PROBE_ENDPOINT = '/__webui/api/rpc'
+const WEBUI_AUTH_PROBE_BODY = JSON.stringify({
+  method: 'GetEnv',
+  args: [''],
+})
 
 export const useWebuiAuthStore = defineStore('webui-auth', () => {
   const token = ref('')
@@ -50,9 +55,16 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
 
     status.value = 'checking'
 
-    const response = await fetch(`/?token=${encodeURIComponent(nextToken)}`, {
-      method: 'HEAD',
-    })
+    const response = await fetch(
+      `${WEBUI_AUTH_PROBE_ENDPOINT}?token=${encodeURIComponent(nextToken)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: WEBUI_AUTH_PROBE_BODY,
+      },
+    )
 
     if (!response.ok) {
       status.value = 'idle'
