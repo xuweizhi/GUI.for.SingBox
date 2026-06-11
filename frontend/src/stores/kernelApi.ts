@@ -259,6 +259,13 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   let isCoreStartedByThisInstance = false
   let { promise: coreStoppedPromise, resolve: coreStoppedResolver } = Promise.withResolvers()
 
+  onLogs((data) => logsStore.recordKernelApiLog(data))
+
+  const refreshKernelLogs = async () => {
+    const logs = await ReadFile(CoreLogFilePath, { Range: '-4096' }).catch(() => '')
+    logsStore.hydrateKernelLogs(logs)
+  }
+
   const getCoreControllerPort = () => {
     const controller = profilesStore.currentProfile?.experimental.clash_api.external_controller || '127.0.0.1:20123'
 
@@ -281,6 +288,8 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       return false
     }
 
+    await refreshKernelLogs()
+
     corePid.value = await FindListeningProcess(getCoreControllerPort()).catch(() => -1)
     if (corePid.value > 0) {
       await WriteFile(CorePidFilePath, String(corePid.value)).catch(() => 0)
@@ -298,6 +307,8 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   }
 
   const initCoreState = async () => {
+    await refreshKernelLogs()
+
     corePid.value = Number(await ReadFile(CorePidFilePath).catch(() => -1))
     const processName = corePid.value === -1 ? '' : await ProcessInfo(corePid.value).catch(() => '')
     running.value = processName.startsWith('sing-box')
@@ -324,7 +335,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       async (end) => {
         stopped = true
         const logs = await ReadFile(CoreLogFilePath, { Range: '-4096' }).catch((err) => String(err))
-        logs.split('\n').forEach((line) => line && logsStore.recordKernelLog(line))
+        logsStore.hydrateKernelLogs(logs)
         end && logsStore.recordKernelLog(end)
         onCoreStopped()
       },
@@ -598,6 +609,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     refreshConfig,
     updateConfig,
     refreshProviderProxies,
+    refreshKernelLogs,
     getProxyEndpoint,
 
     onLogs,

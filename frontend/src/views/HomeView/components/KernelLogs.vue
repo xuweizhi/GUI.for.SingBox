@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { h, withDirectives } from 'vue'
+import { h, onMounted, withDirectives } from 'vue'
 
 import { ClipboardSetText } from '@/bridge'
 import vTips from '@/directives/tips'
-import { useLogsStore } from '@/stores'
+import { useKernelApiStore, useLogsStore } from '@/stores'
 import { message } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
 
 const logsStore = useLogsStore()
+const kernelApiStore = useKernelApiStore()
 
 const modalSlots = {
   toolbar: () =>
@@ -27,6 +28,12 @@ const modalSlots = {
 }
 
 defineExpose({ modalSlots })
+
+onMounted(() => {
+  if (logsStore.isEmpty) {
+    void kernelApiStore.refreshKernelLogs()
+  }
+})
 </script>
 
 <template>

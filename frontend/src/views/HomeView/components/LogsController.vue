@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { LogLevelOptions } from '@/constant/kernel'
 import { useBool } from '@/hooks'
-import { useKernelApiStore } from '@/stores'
+import { useKernelApiStore, useLogsStore } from '@/stores'
 import {
   addToRuleSet,
   buildSmartRegExp,
@@ -17,10 +17,11 @@ import {
 
 import type { PickerItem } from '@/components/Picker/index.vue'
 import type { Menu } from '@/types/app'
+import type { CoreApiLogsData } from '@/types/kernel'
 
 const logType = ref<'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'panic'>('info')
 const keywords = ref('')
-const logs = ref<{ type: string; payload: string }[]>([])
+const pausedLogs = ref<CoreApiLogsData[]>([])
 
 const LogLevelMap = {
   trace: ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'panic'],
@@ -33,7 +34,9 @@ const LogLevelMap = {
 }
 
 const filteredLogs = computed(() => {
-  return logs.value.filter((v) => {
+  const logs = pause.value ? pausedLogs.value : logsStore.kernelApiLogs
+
+  return logs.filter((v) => {
     const hitType = LogLevelMap[logType.value].includes(v.type)
     const hitName = buildSmartRegExp(keywords.value, 'i').test(v.payload)
     return hitName && hitType
@@ -105,15 +108,23 @@ const menus: Menu[] = (
 const { t } = useI18n()
 const [pause, togglePause] = useBool(false)
 const kernelApiStore = useKernelApiStore()
+const logsStore = useLogsStore()
 
-const handleClear = () => logs.value.splice(0)
+const handleClear = () => {
+  pausedLogs.value.splice(0)
+  logsStore.clearKernelLog()
+}
 
-const unregisterLogsHandler = kernelApiStore.onLogs((data) => {
-  pause.value || logs.value.unshift(data)
+watch(pause, (value) => {
+  if (value) {
+    pausedLogs.value = logsStore.kernelApiLogs.slice()
+  }
 })
 
-onUnmounted(() => {
-  unregisterLogsHandler()
+onMounted(() => {
+  if (logsStore.isEmpty) {
+    void kernelApiStore.refreshKernelLogs()
+  }
 })
 </script>
 
@@ -146,8 +157,8 @@ onUnmounted(() => {
 
     <div v-else class="mt-8 overflow-y-auto">
       <div
-        v-for="log in filteredLogs"
-        :key="log.payload"
+        v-for="(log, i) in filteredLogs"
+        :key="`${i}-${log.type}-${log.payload}`"
         v-menu="menus.map((v) => ({ ...v, handler: () => v.handler?.(log) }))"
         class="log select-text text-12 py-2 px-4 my-4"
       >
