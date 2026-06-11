@@ -29,7 +29,7 @@ export const omitArray = <T, K extends keyof T>(arr: T[], fields: K[]): Omit<T, 
   })
 }
 export const debounce = (fn: (...args: any) => any, wait: number) => {
-  let timer: null | number = null
+  let timer: ReturnType<typeof setTimeout> | null = null
   const _debuonce = function (...args: any) {
     return new Promise((resolve, reject) => {
       timer && clearTimeout(timer)

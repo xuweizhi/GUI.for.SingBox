@@ -1,3 +1,5 @@
+import { useWebuiAuthStore } from '@/stores'
+
 const API_BASE = '/__webui/api'
 
 type EventCallback = (...data: any[]) => void
@@ -23,6 +25,13 @@ const ensureEventStream = () => {
     dispatchEvent(payload.name, payload.data || [])
   }
   eventSource.onerror = () => 0
+}
+
+const handleUnauthorized = async (response: Response) => {
+  if (response.status !== 401) return
+
+  await useWebuiAuthStore().handleUnauthorized()
+  throw 'auth.invalidToken'
 }
 
 export const onRuntimeEvent = (name: string, callback: EventCallback) => {
@@ -60,9 +69,11 @@ export const emitRuntimeEvent = (name: string, ...data: any[]) => {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ name, data }),
-  }).catch((error) => {
-    console.warn('Failed to emit runtime event:', error)
   })
+    .then(handleUnauthorized)
+    .catch((error) => {
+      console.warn('Failed to emit runtime event:', error)
+    })
 }
 
 export const invokeBridge = async <T>(method: string, args: unknown[] = []) => {
@@ -75,6 +86,8 @@ export const invokeBridge = async <T>(method: string, args: unknown[] = []) => {
     },
     body: JSON.stringify({ method, args }),
   })
+
+  await handleUnauthorized(response)
 
   if (!response.ok) {
     const message = await response.text()

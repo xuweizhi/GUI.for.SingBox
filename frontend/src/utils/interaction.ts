@@ -29,7 +29,7 @@ const ContainerCssText = `
 interface MessageInstance {
   dom: HTMLDivElement
   vnode: VNode
-  timer: number
+  timer: ReturnType<typeof setTimeout>
 }
 
 class Message {

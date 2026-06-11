@@ -2,8 +2,9 @@ import { type IconType } from '@/components/Icon/index.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
-    name: string
+    name?: string
     icon?: IconType
     hidden?: boolean
+    public?: boolean
   }
 }

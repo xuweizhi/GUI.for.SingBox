@@ -320,6 +320,14 @@ export default {
     kernel: '核心',
     scheduledtasks: '计划任务',
   },
+  auth: {
+    title: '连接 WebUI',
+    description: '请输入服务端配置的访问 Token。',
+    tokenPlaceholder: '输入 Token',
+    submit: '登录',
+    invalidToken: 'token 无效，请重新输入',
+    logout: '退出登录 / 更换 token',
+  },
   home: {
     mode: '代理模式',
     global: '全局',

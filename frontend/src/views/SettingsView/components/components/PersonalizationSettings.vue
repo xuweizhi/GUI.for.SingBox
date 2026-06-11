@@ -7,9 +7,9 @@ import { useAppSettingsStore, useAppStore } from '@/stores'
 import { APP_LOCALES_URL } from '@/utils'
 
 const pages = routes.flatMap((route) => {
-  if (route.meta?.hidden !== undefined) return []
+  if (route.meta?.hidden !== undefined || !route.meta?.name) return []
   return {
-    label: route.meta!.name,
+    label: route.meta.name,
     value: route.name as string,
   }
 })

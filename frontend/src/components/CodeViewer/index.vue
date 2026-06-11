@@ -122,7 +122,7 @@ watch(
   },
 )
 
-let timer: number
+let timer: ReturnType<typeof setTimeout>
 onMounted(() => (timer = setTimeout(() => initEditor(), inject(IS_IN_MODAL, false) ? 100 : 0)))
 onUnmounted(() => {
   clearTimeout(timer)

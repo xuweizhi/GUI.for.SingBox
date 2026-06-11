@@ -320,6 +320,14 @@ export default {
     kernel: 'Core',
     scheduledtasks: 'Tasks',
   },
+  auth: {
+    title: 'Connect to WebUI',
+    description: 'Enter the access token configured on the server.',
+    tokenPlaceholder: 'Enter token',
+    submit: 'Sign in',
+    invalidToken: 'Token is invalid. Please enter it again.',
+    logout: 'Sign out / Change token',
+  },
   home: {
     mode: 'Proxy Mode',
     global: 'Global',

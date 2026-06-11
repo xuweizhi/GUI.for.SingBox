@@ -9,6 +9,7 @@
     "build": "run-s type-check build-only build:webui",
     "build-only": "vite build",
     "build:webui": "vite build --mode webui",
+    "test": "vitest run",
     "type-check": "vue-tsc --build",
     "lint": "run-s lint:*",
     "lint:oxlint": "oxlint . --fix",
@@ -48,11 +49,13 @@
     "eslint-plugin-oxlint": "^1.68.0",
     "eslint-plugin-vue": "^10.9.2",
     "less": "^4.6.4",
+    "jsdom": "^27.1.0",
     "npm-run-all2": "^9.0.1",
     "oxfmt": "^0.53.0",
     "oxlint": "^1.68.0",
     "typescript": "~6.0.3",
     "vite": "8.0.16",
+    "vitest": "^3.2.4",
     "vue-tsc": "^3.3.3"
   }
 }

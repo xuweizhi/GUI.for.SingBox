@@ -1,6 +1,6 @@
 import { Request } from '@/api/request'
 import { WebSockets } from '@/api/websocket'
-import { useProfilesStore } from '@/stores'
+import { useProfilesStore, useWebuiAuthStore } from '@/stores'
 import { isWebui, formatProxyHost, normalizeProxyHost } from '@/utils'
 
 import type {
@@ -92,7 +92,15 @@ const setupCoreApi = (protocol: 'http' | 'ws') => {
   }
 }
 
-const request = new Request({ beforeRequest: () => setupCoreApi('http'), timeout: 60 * 1000 })
+const request = new Request({
+  beforeRequest: () => setupCoreApi('http'),
+  timeout: 60 * 1000,
+  onUnauthorized: () => {
+    if (isWebui) {
+      return useWebuiAuthStore().handleUnauthorized()
+    }
+  },
+})
 const websocket = new WebSockets({ beforeConnect: () => setupCoreApi('ws') })
 
 const wsChannels: {

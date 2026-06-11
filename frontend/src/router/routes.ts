@@ -1,6 +1,7 @@
 import { type RouteRecordRaw } from 'vue-router'
 
 import HomeView from '@/views/HomeView/index.vue'
+import LoginView from '@/views/LoginView/index.vue'
 import PluginsView from '@/views/PluginsView/index.vue'
 import ProfilesView from '@/views/ProfilesView/index.vue'
 import RulesetsView from '@/views/RulesetsView/index.vue'
@@ -9,6 +10,16 @@ import SettingsView from '@/views/SettingsView/index.vue'
 import SubscribesView from '@/views/SubscribesView/index.vue'
 
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: LoginView,
+    meta: {
+      name: 'auth.title',
+      public: true,
+      hidden: true,
+    },
+  },
   {
     path: '/',
     name: 'Overview',

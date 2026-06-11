@@ -7,9 +7,10 @@ import { message, sleep } from '@/utils'
 const MIN_SPLASH_DURATION = 1000
 
 export const useAppBootstrap = () => {
-  const loading = ref(true)
+  const loading = ref(false)
   const percent = ref(0)
   const hasError = ref(false)
+  const initialized = ref(false)
 
   const envStore = Stores.useEnvStore()
   const appSettings = Stores.useAppSettingsStore()
@@ -26,6 +27,12 @@ export const useAppBootstrap = () => {
   }
 
   const initialize = async () => {
+    if (loading.value || initialized.value) return
+
+    loading.value = true
+    hasError.value = false
+    percent.value = 0
+
     await envStore.setupEnv()
 
     await Promise.all([
@@ -53,14 +60,15 @@ export const useAppBootstrap = () => {
     await sleep(Math.max(0, MIN_SPLASH_DURATION - duration))
 
     loading.value = false
+    initialized.value = true
     kernelApiStore.initCoreState()
   }
-
-  initialize().catch(showError)
 
   return {
     loading,
     percent,
     hasError,
+    initialized,
+    initialize: () => initialize().catch(showError),
   }
 }

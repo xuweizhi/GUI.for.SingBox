@@ -14,6 +14,7 @@ type RequestOptions = {
   timeout?: number
   responseType?: ResponseType
   beforeRequest?: () => void
+  onUnauthorized?: () => void | Promise<void>
 }
 
 export class Request {
@@ -22,6 +23,7 @@ export class Request {
   public timeout: number
   public responseType: string
   public beforeRequest: () => void
+  public onUnauthorized: () => void | Promise<void>
 
   constructor(options: RequestOptions = {}) {
     this.base = options.base || ''
@@ -29,6 +31,7 @@ export class Request {
     this.timeout = options.timeout || 10000
     this.responseType = options.responseType || ResponseType.JSON
     this.beforeRequest = options.beforeRequest || (() => 0)
+    this.onUnauthorized = options.onUnauthorized || (() => undefined)
   }
 
   private request = async <T>(
@@ -66,7 +69,12 @@ export class Request {
       return null as T
     }
 
-    if ([504, 401, 503].includes(res.status)) {
+    if (res.status === 401) {
+      await this.onUnauthorized()
+      throw 'auth.invalidToken'
+    }
+
+    if ([504, 503].includes(res.status)) {
       const { message } = await res.json()
       throw message
     }
