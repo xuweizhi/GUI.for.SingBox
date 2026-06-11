@@ -10,82 +10,92 @@ Take a look at the live version here: 👉 <a href="https://gui-for-cores.github
 
 [Community](https://gui-for-cores.github.io/guide/gfs/community)
 
-## Build
+## Build and deployment guide
 
-1、Build Environment
+### Requirements
 
-- Node.js [link](https://nodejs.org/en)
+- Node.js
+- pnpm: `npm i -g pnpm`
+- Go
+- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 
-- pnpm ：`npm i -g pnpm`
+The frontend is configured around **pnpm** (`frontend/pnpm-lock.yaml`, `wails.json`), and the desktop/headless binary is built through **Wails**.
 
-- Go [link](https://go.dev/)
-
-- Wails [link](https://wails.io/) ：`go install github.com/wailsapp/wails/v2/cmd/wails@latest`
-
-2、Pull and Build
+### Local build
 
 ```bash
 git clone https://github.com/GUI-for-Cores/GUI.for.SingBox.git
+cd GUI.for.SingBox
 
-cd GUI.for.SingBox/frontend
-
-pnpm install --frozen-lockfile && pnpm build
+cd frontend
+pnpm install --frozen-lockfile
+pnpm test
+pnpm build
 
 cd ..
-
 wails build
 ```
 
-## Headless WebUI
+Build outputs:
 
-Build artifacts now include a browser-targeted WebUI bundle, so the app can be started without opening the desktop window:
+- Desktop/headless binary: `build/bin/GUI.for.SingBox`
+- Runtime data directory: `build/bin/data/`
+- Browser-targeted WebUI bundle: `frontend/dist/webui/` (embedded into the binary during build)
+
+### Run the headless WebUI locally
+
+After building, the same binary can run without opening the desktop window:
 
 ```bash
-./GUI.for.SingBox --headless
+./build/bin/GUI.for.SingBox --headless
 ```
 
-Default listen address: `127.0.0.1:18080`
+Defaults:
 
-Optional flags:
-
-- `--webui-listen 127.0.0.1:18080`
-- `--webui-token your-token`
+- Listen address: `127.0.0.1:18080`
+- CLI options:
+  - `--webui-listen 127.0.0.1:18080`
+  - `--webui-token your-token`
 
 Examples:
 
 ```bash
 # local only
-./GUI.for.SingBox --headless --webui-listen 127.0.0.1:18080
+./build/bin/GUI.for.SingBox --headless --webui-listen 127.0.0.1:18080
 
 # remote access
-./GUI.for.SingBox --headless --webui-listen 0.0.0.0:18080 --webui-token change-me
+./build/bin/GUI.for.SingBox --headless --webui-listen 0.0.0.0:18080 --webui-token change-me
 ```
 
-When listening on a non-loopback address and no token is provided, the app will generate one automatically and print the access URL in stdout.
+When listening on a non-loopback address and no token is provided, the app will auto-generate one and print the access URL in stdout.
 
-### Systemd service
+### Deploy with systemd (recommended for Linux)
 
-A ready-to-edit systemd unit is included for Linux deployments:
+Reusable deployment files are included:
 
 - `build/linux/gui.for.singbox-headless.service`
 - `build/linux/gui.for.singbox-headless.env.example`
 
-The sample unit assumes the app is installed at `/opt/GUI.for.SingBox/GUI.for.SingBox` and will keep its `data/` directory under `/opt/GUI.for.SingBox`.
+The sample service expects:
 
-Example install:
+- Binary path: `/opt/GUI.for.SingBox/GUI.for.SingBox`
+- Working directory: `/opt/GUI.for.SingBox`
+- Runtime data directory: `/opt/GUI.for.SingBox/data`
+
+Example installation:
 
 ```bash
 sudo useradd --system --home /opt/GUI.for.SingBox --shell /usr/sbin/nologin gui-for-singbox
 
 sudo mkdir -p /opt/GUI.for.SingBox
-sudo cp GUI.for.SingBox /opt/GUI.for.SingBox/
-sudo cp -r data /opt/GUI.for.SingBox/  # optional: only if you already have existing data
+sudo cp build/bin/GUI.for.SingBox /opt/GUI.for.SingBox/
+sudo cp -r build/bin/data /opt/GUI.for.SingBox/
 sudo chown -R gui-for-singbox:gui-for-singbox /opt/GUI.for.SingBox
 
 sudo cp build/linux/gui.for.singbox-headless.service /etc/systemd/system/
 sudo cp build/linux/gui.for.singbox-headless.env.example /etc/default/gui.for.singbox-headless
 
-# edit listen/token or installation path if needed
+# adjust install path, listen address, and token if needed
 sudo editor /etc/systemd/system/gui.for.singbox-headless.service
 sudo editor /etc/default/gui.for.singbox-headless
 
@@ -94,13 +104,56 @@ sudo systemctl enable --now gui.for.singbox-headless
 sudo systemctl status gui.for.singbox-headless
 ```
 
-Common operations:
+### Upgrade an existing deployment
+
+If the service is already installed, a typical in-place upgrade flow is:
+
+```bash
+git pull
+
+cd frontend
+pnpm install --frozen-lockfile
+pnpm test
+pnpm build
+
+cd ..
+wails build
+
+sudo install -m 755 build/bin/GUI.for.SingBox /opt/GUI.for.SingBox/GUI.for.SingBox
+sudo systemctl restart gui.for.singbox-headless
+sudo systemctl status gui.for.singbox-headless
+```
+
+Keep the existing `data/` directory unless you intentionally want to replace runtime data.
+
+### Service configuration notes
+
+- `WEBUI_LISTEN` defaults to `127.0.0.1:18080`
+- `WEBUI_TOKEN` can be left empty only for loopback-only access
+- For any remote bind (`0.0.0.0` / non-loopback), set an explicit token
+- The sample service keeps `CAP_NET_ADMIN`, `CAP_NET_BIND_SERVICE`, and `CAP_NET_DAC_OVERRIDE` so the app can still work with TUN and privileged ports when needed
+
+### Common operations
 
 ```bash
 sudo systemctl restart gui.for.singbox-headless
 sudo systemctl stop gui.for.singbox-headless
+sudo systemctl status gui.for.singbox-headless
 sudo journalctl -u gui.for.singbox-headless -f
 ```
+
+## Local adaptation log
+
+This working tree is currently **6 commits ahead of `origin/main`**. The local adaptation history is:
+
+| Date | Commit | Change |
+| --- | --- | --- |
+| 2026-06-11 | `b7eb9e8` | Added headless WebUI management mode for browser-based operation. |
+| 2026-06-12 | `4987363` | Added the WebUI token-login design record. |
+| 2026-06-12 | `3277bb4` | Added the WebUI token login flow. |
+| 2026-06-12 | `18493bc` | Fixed missing assets on the headless login page. |
+| 2026-06-12 | `7866833` | Changed WebUI token verification to use the RPC probe path. |
+| 2026-06-12 | `4ae7a3d` | Fixed overview statistics streaming and added a memory fallback in the overview page. |
 
 ## Stargazers over time
 
