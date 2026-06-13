@@ -410,6 +410,7 @@ export default {
     url: 'Remote Url',
     localPath: 'Local Path',
     website: 'Website',
+    decryptPassword: 'Decrypt Password',
     path: 'Save Path',
     include: 'Include Keywords',
     exclude: 'Exclude Keywords',

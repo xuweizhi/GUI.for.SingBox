@@ -199,6 +199,7 @@ export interface Subscription {
   type: 'Http' | 'File' | 'Manual'
   url: string
   website: string
+  decryptPassword: string
   path: string
   include: string
   exclude: string

@@ -20,6 +20,10 @@ import {
   buildSmartRegExp,
   GetRequestProxy,
   migrateSubscribes,
+  decryptEncryptedSubscription,
+  getHeaderValue,
+  isEncryptedSubscription,
+  SubscriptionEncryptionHeader,
 } from '@/utils'
 
 import type { Subscription } from '@/types/app'
@@ -123,6 +127,19 @@ export const useSubscribesStore = defineStore('subscribes', () => {
         })
       }
       body = b
+      const encryptionHeader = getHeaderValue(h, SubscriptionEncryptionHeader)
+      if (isEncryptedSubscription(encryptionHeader)) {
+        const decryptPassword = options.decryptPassword ?? s.decryptPassword
+        if (!decryptPassword) {
+          throw 'Subscription is encrypted. Set a decrypt password first'
+        }
+
+        const decryptedBody = await decryptEncryptedSubscription(decryptPassword, body)
+        if (!decryptedBody) {
+          throw 'Failed to decrypt subscription. Check the decrypt password'
+        }
+        body = decryptedBody
+      }
     }
 
     if (isValidSubJson(body)) {
@@ -267,6 +284,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       type: 'Http',
       url: options.url || '',
       website: '',
+      decryptPassword: '',
       path: `data/subscribes/${id}.json`,
       include: '',
       exclude: '',

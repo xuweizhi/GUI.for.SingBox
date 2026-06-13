@@ -1,0 +1,84 @@
+import { md5 } from 'js-md5'
+
+export const SubscriptionEncryptionHeader = 'Subscription-Encryption'
+export const SubscriptionEncryptionValue = 'true'
+
+const normalizeEncryptedSubscriptionBase64 = (value: string) => {
+  const normalized = value.trim().replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/')
+  const padding = (4 - (normalized.length % 4)) % 4
+
+  return normalized + '='.repeat(padding)
+}
+
+const decodeHex = (value: string) => {
+  if (value.length % 2 !== 0) {
+    throw new Error('Invalid hex string')
+  }
+
+  const bytes = new Uint8Array(value.length / 2)
+  for (let i = 0; i < value.length; i += 2) {
+    bytes[i / 2] = Number.parseInt(value.slice(i, i + 2), 16)
+  }
+  return bytes
+}
+
+const decodeBase64 = (value: string) => {
+  const binary = atob(normalizeEncryptedSubscriptionBase64(value))
+  const bytes = new Uint8Array(binary.length)
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+
+  return bytes
+}
+
+export const getHeaderValue = (headers: Record<string, unknown>, name: string) => {
+  const normalizedName = name.toLowerCase()
+
+  return Object.entries(headers).find(([key]) => key.toLowerCase() === normalizedName)?.[1]
+}
+
+export const isEncryptedSubscription = (headerValue: unknown) => {
+  const values = Array.isArray(headerValue) ? headerValue : [headerValue]
+
+  return values.some(
+    (value) => typeof value === 'string' && value.trim().toLowerCase() === SubscriptionEncryptionValue,
+  )
+}
+
+export const decryptEncryptedSubscription = async (password: string, base64Data: string) => {
+  if (!password || !base64Data.trim()) {
+    return null
+  }
+
+  const subtle = globalThis.crypto?.subtle
+  if (!subtle) {
+    throw new Error('Web Crypto API is unavailable')
+  }
+
+  let raw: Uint8Array
+  try {
+    raw = decodeBase64(base64Data)
+  } catch {
+    return null
+  }
+
+  if (raw.length <= 16) {
+    return null
+  }
+
+  try {
+    const key = await subtle.importKey('raw', decodeHex(md5(password)), { name: 'AES-CBC' }, false, [
+      'decrypt',
+    ])
+    const iv = raw.slice(0, 16)
+    const ciphertext = raw.slice(16)
+    const decrypted = await subtle.decrypt({ name: 'AES-CBC', iv }, key, ciphertext)
+    const text = new TextDecoder().decode(decrypted)
+
+    return text || null
+  } catch {
+    return null
+  }
+}

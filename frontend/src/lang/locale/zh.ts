@@ -409,6 +409,7 @@ export default {
     url: '远程链接',
     localPath: '本地路径',
     website: '官网',
+    decryptPassword: '解密密码',
     path: '保存路径',
     include: '包括名称',
     exclude: '排除名称',

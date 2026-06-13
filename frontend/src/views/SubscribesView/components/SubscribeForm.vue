@@ -151,6 +151,12 @@ defineExpose({ modalSlots })
         />
       </div>
     </div>
+    <div v-if="isRemote" class="form-item">
+      {{ t('subscribe.decryptPassword') }}
+      <div class="min-w-[75%]">
+        <Input v-model="sub.decryptPassword" type="password" allow-paste class="w-full" />
+      </div>
+    </div>
     <div class="form-item">
       {{ t('subscribe.path') }} *
       <div class="min-w-[75%]">

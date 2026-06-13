@@ -36,6 +36,10 @@ export const migrateSubscribes = async (subscribes: Subscription[], save: () => 
       subscribe.customProxy = ''
       needSync = true
     }
+    if (typeof subscribe.decryptPassword === 'undefined') {
+      subscribe.decryptPassword = ''
+      needSync = true
+    }
   })
 
   if (needSync) await save()

@@ -14,6 +14,7 @@ const appSettingsStore = useAppSettingsStore()
 
 const url = ref('')
 const name = ref('')
+const decryptPassword = ref('')
 const loading = ref(false)
 
 const handleCancel = inject('cancel') as any
@@ -25,6 +26,7 @@ const handleSave = async () => {
   }
 
   const sub = subscribeStore.getSubscribeTemplate(name.value, { url: url.value })
+  sub.decryptPassword = decryptPassword.value
 
   loading.value = true
 
@@ -84,8 +86,25 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div class="flex gap-4">
-    <Input v-model="name" :placeholder="$t('profile.name')" auto-size clearable class="w-[25%]" />
-    <Input v-model="url" placeholder="http(s)://" autofocus clearable allow-paste class="w-[75%]" />
+  <div class="flex flex-col gap-4">
+    <div class="flex gap-4">
+      <Input v-model="name" :placeholder="$t('profile.name')" auto-size clearable class="w-[25%]" />
+      <Input
+        v-model="url"
+        placeholder="http(s)://"
+        autofocus
+        clearable
+        allow-paste
+        class="w-[75%]"
+      />
+    </div>
+    <Input
+      v-model="decryptPassword"
+      :placeholder="$t('subscribe.decryptPassword')"
+      type="password"
+      clearable
+      allow-paste
+      class="w-full"
+    />
   </div>
 </template>
