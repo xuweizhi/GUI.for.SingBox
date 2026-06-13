@@ -2,6 +2,8 @@ import { md5 } from 'js-md5'
 
 export const SubscriptionEncryptionHeader = 'Subscription-Encryption'
 export const SubscriptionEncryptionValue = 'true'
+export const SubscriptionShareLinkPattern =
+  /^(?:ss|ssr|vmess|vless|trojan|hysteria2?|hy2|tuic|wireguard|anytls):\/\//i
 
 const normalizeEncryptedSubscriptionBase64 = (value: string) => {
   const normalized = value.trim().replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/')
@@ -45,6 +47,17 @@ export const isEncryptedSubscription = (headerValue: unknown) => {
   return values.some(
     (value) => typeof value === 'string' && value.trim().toLowerCase() === SubscriptionEncryptionValue,
   )
+}
+
+export const isSubscriptionShareLinkList = (content: string) => {
+  if (typeof content !== 'string') return false
+
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  return lines.length > 0 && lines.every((line) => SubscriptionShareLinkPattern.test(line))
 }
 
 export const decryptEncryptedSubscription = async (password: string, base64Data: string) => {

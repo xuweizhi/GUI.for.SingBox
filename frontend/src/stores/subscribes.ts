@@ -23,6 +23,7 @@ import {
   decryptEncryptedSubscription,
   getHeaderValue,
   isEncryptedSubscription,
+  isSubscriptionShareLinkList,
   SubscriptionEncryptionHeader,
 } from '@/utils'
 
@@ -147,6 +148,9 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     } else if (isValidSubYAML(body)) {
       proxies = parse(body).proxies
     } else if (isValidBase64(body)) {
+      proxies = [{ base64: body }]
+    } else if (isSubscriptionShareLinkList(body)) {
+      // Reuse the existing node-convert plugin path for line-based share-link subscriptions.
       proxies = [{ base64: body }]
     } else if (s.type === 'Manual') {
       proxies = JSON.parse(body)

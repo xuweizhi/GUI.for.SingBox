@@ -5,6 +5,7 @@ import {
   decryptEncryptedSubscription,
   getHeaderValue,
   isEncryptedSubscription,
+  isSubscriptionShareLinkList,
   SubscriptionEncryptionHeader,
 } from '@/utils/subscriptionEncryption'
 
@@ -46,5 +47,20 @@ describe('subscription encryption', () => {
 
     await expect(decryptEncryptedSubscription('wrong-password', encrypted)).resolves.toBeNull()
     await expect(decryptEncryptedSubscription('correct-password', 'not-base64')).resolves.toBeNull()
+  })
+
+  it('detects decrypted line-based share-link subscriptions', async () => {
+    const plaintext = [
+      'vless://uuid@example.com:443?security=tls&type=ws#node-a',
+      '',
+      'trojan://password@example.com:443?security=tls#node-b',
+      'anytls://password@example.com:443?security=tls#node-c',
+    ].join('\n')
+    const encrypted = encryptSubscription('share-link-password', plaintext)
+    const decrypted = await decryptEncryptedSubscription('share-link-password', encrypted)
+
+    expect(decrypted).toBe(plaintext)
+    expect(isSubscriptionShareLinkList(decrypted!)).toBe(true)
+    expect(isSubscriptionShareLinkList('proxies:\n  - name: node')).toBe(false)
   })
 })
