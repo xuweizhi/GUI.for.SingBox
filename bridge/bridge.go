@@ -91,6 +91,7 @@ func (a *App) IsStartup() bool {
 
 func (a *App) ExitApp() {
 	log.Printf("ExitApp")
+	a.StopScheduledTaskWorker()
 	Env.PreventExit = false
 	if a.IsHeadless() {
 		go func() {
@@ -263,6 +264,7 @@ func extractEmbeddedFiles(fs embed.FS) {
 	iconDst := "data/.cache/icons"
 	imgSrc := "frontend/dist/imgs"
 	imgDst := "data/.cache/imgs"
+	workerDst := resolvePath(scheduledTaskWorkerScriptDst)
 
 	if err := os.MkdirAll(resolvePath(iconDst), os.ModePerm); err != nil {
 		log.Printf("Failed to create icon cache directory: %v", err)
@@ -273,6 +275,7 @@ func extractEmbeddedFiles(fs embed.FS) {
 
 	extractFiles(fs, iconSrc, iconDst)
 	extractFiles(fs, imgSrc, imgDst)
+	extractEmbeddedFile(fs, scheduledTaskWorkerScriptSrc, workerDst)
 }
 
 func extractFiles(fs embed.FS, srcDir, dstDir string) {
@@ -296,6 +299,23 @@ func extractFiles(fs embed.FS, srcDir, dstDir string) {
 				log.Printf("Error writing file %s: %v", dstPath, err)
 			}
 		}
+	}
+}
+
+func extractEmbeddedFile(fs embed.FS, srcPath, dstPath string) {
+	data, err := fs.ReadFile(srcPath)
+	if err != nil {
+		log.Printf("Failed to read embedded file [%s]: %v", srcPath, err)
+		return
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
+		log.Printf("Failed to create directory for embedded file [%s]: %v", dstPath, err)
+		return
+	}
+
+	if err := os.WriteFile(dstPath, data, os.ModePerm); err != nil {
+		log.Printf("Failed to write embedded file [%s]: %v", dstPath, err)
 	}
 }
 

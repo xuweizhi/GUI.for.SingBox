@@ -90,6 +90,9 @@ func RunHeadless(assets embed.FS, app *App, options HeadlessOptions) error {
 	if err := app.startHeadlessCoreIfNeeded(); err != nil {
 		log.Printf("Headless core startup skipped: %v", err)
 	}
+	if err := app.StartScheduledTaskWorker(); err != nil {
+		log.Printf("Scheduled task worker unavailable: %v", err)
+	}
 
 	auth := &headlessAuth{token: token}
 	mux := http.NewServeMux()
@@ -264,6 +267,10 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		result = a.GetEnv(arg)
 	case "GetInterfaces":
 		result = a.GetInterfaces()
+	case "GetScheduledTaskWorkerLogs":
+		result = a.GetScheduledTaskWorkerLogs()
+	case "GetScheduledTaskWorkerStatus":
+		result = a.GetScheduledTaskWorkerStatus()
 	case "IsStartup":
 		result = a.IsStartup()
 	case "KillProcess":
@@ -342,6 +349,8 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		optionsArg, decodeErr := decodeRPCArg[IOOptions](req.Args, 1)
 		err = decodeErr
 		result = a.ReadFile(pathArg, optionsArg)
+	case "ReloadScheduledTaskWorker":
+		result = a.ReloadScheduledTaskWorker()
 	case "RemoveFile":
 		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
 		err = decodeErr
@@ -393,6 +402,10 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
 		err = decodeErr
 		result = a.StopServer(arg)
+	case "RunScheduledTaskWorker":
+		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
+		err = decodeErr
+		result = a.RunScheduledTaskWorker(arg)
 	case "TcpPing":
 		address, decodeErr := decodeRPCArg[string](req.Args, 0)
 		if decodeErr != nil {
@@ -477,6 +490,8 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		err = decodeErr
 		a.UpdateTrayMenus(menuArg)
 		result = nil
+	case "ClearScheduledTaskWorkerLogs":
+		result = a.ClearScheduledTaskWorkerLogs()
 	case "Upload":
 		method, decodeErr := decodeRPCArg[string](req.Args, 0)
 		if decodeErr != nil {

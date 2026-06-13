@@ -9,9 +9,10 @@ import (
 
 // App struct
 type App struct {
-	Ctx      context.Context
-	AppMenu  *menu.Menu
-	Headless *HeadlessRuntime
+	Ctx        context.Context
+	AppMenu    *menu.Menu
+	Headless   *HeadlessRuntime
+	TaskWorker *scheduledTaskWorkerSupervisor
 }
 
 const (

@@ -19,7 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-//go:embed all:frontend/dist
+//go:embed all:frontend/dist taskworker/worker.mjs
 var assets embed.FS
 
 //go:embed frontend/dist/favicon.ico
@@ -103,6 +103,9 @@ func main() {
 			app.Ctx = ctx
 			runtime.InitializeNotifications(ctx)
 			trayStart()
+			if err := app.StartScheduledTaskWorker(); err != nil {
+				println("Scheduled task worker:", err.Error())
+			}
 		},
 		OnBeforeClose: func(ctx context.Context) (prevent bool) {
 			if !bridge.Env.PreventExit {
