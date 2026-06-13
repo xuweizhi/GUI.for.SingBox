@@ -24,7 +24,7 @@ The frontend is configured around **pnpm** (`frontend/pnpm-lock.yaml`, `wails.js
 ### Local build
 
 ```bash
-git clone https://github.com/GUI-for-Cores/GUI.for.SingBox.git
+git clone https://github.com/xuweizhi/GUI.for.SingBox.git
 cd GUI.for.SingBox
 
 cd frontend
@@ -157,4 +157,4 @@ This working tree is currently **6 commits ahead of `origin/main`**. The local a
 
 ## Stargazers over time
 
-[![Stargazers over time](https://starchart.cc/GUI-for-Cores/GUI.for.SingBox.svg)](https://starchart.cc/GUI-for-Cores/GUI.for.SingBox)
+[![Stargazers over time](https://starchart.cc/xuweizhi/GUI.for.SingBox.svg)](https://starchart.cc/xuweizhi/GUI.for.SingBox)

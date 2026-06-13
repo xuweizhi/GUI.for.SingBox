@@ -1,6 +1,6 @@
 [Unit]
 Description=GUI.for.SingBox Headless WebUI
-Documentation=https://github.com/GUI-for-Cores/GUI.for.SingBox
+Documentation=https://github.com/xuweizhi/GUI.for.SingBox
 Wants=network-online.target
 After=network-online.target
 
