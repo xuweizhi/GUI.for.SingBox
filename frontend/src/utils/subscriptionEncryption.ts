@@ -1,3 +1,4 @@
+import CryptoJS from 'crypto-js'
 import { md5 } from 'js-md5'
 
 export const SubscriptionEncryptionHeader = 'Subscription-Encryption'
@@ -35,6 +36,41 @@ const decodeBase64 = (value: string) => {
   return bytes
 }
 
+const encodeUtf8 = (value: Uint8Array) => {
+  return new TextDecoder().decode(value)
+}
+
+const bytesToWordArray = (value: Uint8Array) => {
+  const words: number[] = []
+
+  for (let i = 0; i < value.length; i++) {
+    words[i >>> 2] = (words[i >>> 2] ?? 0) | (value[i]! << (24 - (i % 4) * 8))
+  }
+
+  return CryptoJS.lib.WordArray.create(words, value.length)
+}
+
+const decryptSubscriptionWithCryptoJS = (keyBytes: Uint8Array, iv: Uint8Array, ciphertext: Uint8Array) => {
+  const decrypted = CryptoJS.AES.decrypt(
+    CryptoJS.lib.CipherParams.create({
+      ciphertext: bytesToWordArray(ciphertext),
+    }),
+    bytesToWordArray(keyBytes),
+    {
+      iv: bytesToWordArray(iv),
+      mode: CryptoJS.mode.CBC,
+      padding: CryptoJS.pad.Pkcs7,
+    },
+  )
+
+  const hex = decrypted.toString(CryptoJS.enc.Hex)
+  if (!hex) {
+    return null
+  }
+
+  return encodeUtf8(decodeHex(hex))
+}
+
 export const getHeaderValue = (headers: Record<string, unknown>, name: string) => {
   const normalizedName = name.toLowerCase()
 
@@ -65,11 +101,6 @@ export const decryptEncryptedSubscription = async (password: string, base64Data:
     return null
   }
 
-  const subtle = globalThis.crypto?.subtle
-  if (!subtle) {
-    throw new Error('Web Crypto API is unavailable')
-  }
-
   let raw: Uint8Array
   try {
     raw = decodeBase64(base64Data)
@@ -81,17 +112,26 @@ export const decryptEncryptedSubscription = async (password: string, base64Data:
     return null
   }
 
-  try {
-    const key = await subtle.importKey('raw', decodeHex(md5(password)), { name: 'AES-CBC' }, false, [
-      'decrypt',
-    ])
-    const iv = raw.slice(0, 16)
-    const ciphertext = raw.slice(16)
-    const decrypted = await subtle.decrypt({ name: 'AES-CBC', iv }, key, ciphertext)
-    const text = new TextDecoder().decode(decrypted)
+  const keyBytes = decodeHex(md5(password))
+  const iv = raw.slice(0, 16)
+  const ciphertext = raw.slice(16)
+  const subtle = globalThis.crypto?.subtle
 
-    return text || null
+  try {
+    if (subtle) {
+      const key = await subtle.importKey('raw', keyBytes, { name: 'AES-CBC' }, false, ['decrypt'])
+      const decrypted = await subtle.decrypt({ name: 'AES-CBC', iv }, key, ciphertext)
+      const text = encodeUtf8(new Uint8Array(decrypted))
+
+      return text || null
+    }
+
+    return decryptSubscriptionWithCryptoJS(keyBytes, iv, ciphertext)
   } catch {
-    return null
+    try {
+      return decryptSubscriptionWithCryptoJS(keyBytes, iv, ciphertext)
+    } catch {
+      return null
+    }
   }
 }

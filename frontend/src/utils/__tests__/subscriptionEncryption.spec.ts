@@ -49,6 +49,18 @@ describe('subscription encryption', () => {
     await expect(decryptEncryptedSubscription('correct-password', 'not-base64')).resolves.toBeNull()
   })
 
+  it('falls back to pure-js decryption when Web Crypto is unavailable', async () => {
+    vi.stubGlobal('crypto', undefined)
+
+    const password = 'fallback-password'
+    const plaintext = 'vmess://example'
+    const encrypted = encryptSubscription(password, plaintext)
+
+    await expect(decryptEncryptedSubscription(password, encrypted)).resolves.toBe(plaintext)
+
+    vi.stubGlobal('crypto', webcrypto)
+  })
+
   it('detects decrypted line-based share-link subscriptions', async () => {
     const plaintext = [
       'vless://uuid@example.com:443?security=tls&type=ws#node-a',
