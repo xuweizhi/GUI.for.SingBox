@@ -275,45 +275,57 @@ func (a *App) UnzipZIPFile(path string, output string) FlagResult {
 	}
 	defer archive.Close()
 
+	failures := []string{}
 	for _, f := range archive.File {
 		filePath, ok := archiveEntryPath(outputPath, f.Name)
 		if !ok {
+			failures = append(failures, archiveExtractError(f.Name, fmt.Errorf("invalid archive path")))
 			continue
 		}
 
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(filePath, os.ModePerm)
+			if err := os.MkdirAll(filePath, os.ModePerm); err != nil {
+				failures = append(failures, archiveExtractError(f.Name, err))
+			}
 			continue
 		}
 
 		if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
+			failures = append(failures, archiveExtractError(f.Name, err))
 			continue
 		}
 
 		fileInArchive, err := f.Open()
 		if err != nil {
+			failures = append(failures, archiveExtractError(f.Name, err))
 			continue
 		}
 
 		dstFile, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 		if err != nil {
 			fileInArchive.Close()
+			failures = append(failures, archiveExtractError(f.Name, err))
 			continue
 		}
 
 		if _, err := io.Copy(dstFile, fileInArchive); err != nil {
 			fileInArchive.Close()
 			dstFile.Close()
+			failures = append(failures, archiveExtractError(f.Name, err))
 			continue
 		}
 
-		fileInArchive.Close()
-		if err := dstFile.Close(); err != nil {
+		closeErr := fileInArchive.Close()
+		if err := dstFile.Close(); closeErr == nil {
+			closeErr = err
+		}
+		if closeErr != nil {
+			failures = append(failures, archiveExtractError(f.Name, closeErr))
 			continue
 		}
 	}
 
-	return FlagResult{true, "Success"}
+	return archiveExtractResult("ZIP archive", failures)
 }
 
 func (a *App) UnzipTarGZFile(path string, output string) FlagResult {
@@ -335,6 +347,7 @@ func (a *App) UnzipTarGZFile(path string, output string) FlagResult {
 	defer gzipReader.Close()
 
 	tarReader := tar.NewReader(gzipReader)
+	failures := []string{}
 
 	for {
 		header, err := tarReader.Next()
@@ -347,34 +360,41 @@ func (a *App) UnzipTarGZFile(path string, output string) FlagResult {
 
 		filePath, ok := archiveEntryPath(outputPath, header.Name)
 		if !ok {
+			failures = append(failures, archiveExtractError(header.Name, fmt.Errorf("invalid archive path")))
 			continue
 		}
 
 		if header.Typeflag == tar.TypeDir {
-			os.MkdirAll(filePath, os.ModePerm)
+			if err := os.MkdirAll(filePath, os.ModePerm); err != nil {
+				failures = append(failures, archiveExtractError(header.Name, err))
+			}
 			continue
 		}
 
 		if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
+			failures = append(failures, archiveExtractError(header.Name, err))
 			continue
 		}
 
 		dstFile, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, header.FileInfo().Mode())
 		if err != nil {
+			failures = append(failures, archiveExtractError(header.Name, err))
 			continue
 		}
 
 		if _, err := io.Copy(dstFile, tarReader); err != nil {
 			dstFile.Close()
+			failures = append(failures, archiveExtractError(header.Name, err))
 			continue
 		}
 
 		if err := dstFile.Close(); err != nil {
+			failures = append(failures, archiveExtractError(header.Name, err))
 			continue
 		}
 	}
 
-	return FlagResult{true, "Success"}
+	return archiveExtractResult("tar.gz archive", failures)
 }
 
 func (a *App) UnzipGZFile(path string, output string) FlagResult {
@@ -389,17 +409,20 @@ func (a *App) UnzipGZFile(path string, output string) FlagResult {
 	}
 	defer gzipFile.Close()
 
+	gzipReader, err := gzip.NewReader(gzipFile)
+	if err != nil {
+		return FlagResult{false, err.Error()}
+	}
+	defer gzipReader.Close()
+
+	if err := os.MkdirAll(filepath.Dir(outputPath), os.ModePerm); err != nil {
+		return FlagResult{false, err.Error()}
+	}
+
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
 		return FlagResult{false, err.Error()}
 	}
-
-	gzipReader, err := gzip.NewReader(gzipFile)
-	if err != nil {
-		outputFile.Close()
-		return FlagResult{false, err.Error()}
-	}
-	defer gzipReader.Close()
 
 	if _, err := io.Copy(outputFile, gzipReader); err != nil {
 		outputFile.Close()
@@ -425,6 +448,38 @@ func archiveEntryPath(outputPath, entryName string) (string, bool) {
 	}
 
 	return filepath.ToSlash(targetPath), true
+}
+
+func archiveExtractError(entryName string, err error) string {
+	return fmt.Sprintf("%s: %v", entryName, err)
+}
+
+func archiveExtractResult(kind string, failures []string) FlagResult {
+	if len(failures) == 0 {
+		return FlagResult{true, "Success"}
+	}
+
+	if len(failures) > 5 {
+		return FlagResult{
+			false,
+			fmt.Sprintf(
+				"%s extracted with %d failure(s): %s; ...",
+				kind,
+				len(failures),
+				strings.Join(failures[:5], "; "),
+			),
+		}
+	}
+
+	return FlagResult{
+		false,
+		fmt.Sprintf(
+			"%s extracted with %d failure(s): %s",
+			kind,
+			len(failures),
+			strings.Join(failures, "; "),
+		),
+	}
 }
 
 func (a *App) FileExists(path string) FlagResult {

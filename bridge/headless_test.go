@@ -52,3 +52,18 @@ func TestHeadlessAuthAuthorizeRejectsMismatchedToken(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
 	}
 }
+
+func TestWriteHeadlessJSONBuffersEncodeFailures(t *testing.T) {
+	recorder := httptest.NewRecorder()
+
+	writeHeadlessJSON(recorder, map[string]any{
+		"bad": make(chan int),
+	})
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, recorder.Code)
+	}
+	if recorder.Body.Len() == 0 {
+		t.Fatal("expected encode failure body to be written")
+	}
+}

@@ -42,7 +42,9 @@ func (a *App) startHeadlessCoreIfNeeded() error {
 
 	if pid, ok := a.findExistingHeadlessCore(spec.controllerPort); ok {
 		log.Printf("Headless core already running with PID %d", pid)
-		_ = os.WriteFile(resolvePath(headlessCorePidFilePath), []byte(strconv.Itoa(pid)), 0644)
+		if err := os.WriteFile(resolvePath(headlessCorePidFilePath), []byte(strconv.Itoa(pid)), 0644); err != nil {
+			log.Printf("Failed to write headless core PID file: %v", err)
+		}
 		return nil
 	}
 

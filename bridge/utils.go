@@ -21,7 +21,17 @@ type requestTransportKey struct {
 	Insecure bool
 }
 
-var requestTransportCache sync.Map
+type requestTransportCacheStore struct {
+	mu      sync.Mutex
+	order   []requestTransportKey
+	entries map[requestTransportKey]*http.Transport
+}
+
+const maxRequestTransportCacheEntries = 32
+
+var requestTransportCache = requestTransportCacheStore{
+	entries: map[requestTransportKey]*http.Transport{},
+}
 
 func resolvePath(path string) string {
 	if !filepath.IsAbs(path) {
@@ -78,11 +88,11 @@ func requestTransport(options RequestOptions) *http.Transport {
 		Insecure: options.Insecure,
 	}
 
-	if value, ok := requestTransportCache.Load(key); ok {
-		return value.(*http.Transport)
+	if transport := requestTransportCache.load(key); transport != nil {
+		return transport
 	}
 
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport := cloneDefaultTransport()
 	transport.Proxy = requestProxy(options.Proxy)
 	if options.Insecure {
 		transport.TLSClientConfig = &tls.Config{
@@ -90,12 +100,54 @@ func requestTransport(options RequestOptions) *http.Transport {
 		}
 	}
 
-	value, loaded := requestTransportCache.LoadOrStore(key, transport)
-	if loaded {
-		transport.CloseIdleConnections()
+	return requestTransportCache.store(key, transport)
+}
+
+func cloneDefaultTransport() *http.Transport {
+	if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+		return transport.Clone()
 	}
 
-	return value.(*http.Transport)
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	}
+}
+
+func (c *requestTransportCacheStore) load(key requestTransportKey) *http.Transport {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.entries[key]
+}
+
+func (c *requestTransportCacheStore) store(
+	key requestTransportKey,
+	transport *http.Transport,
+) *http.Transport {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if existing := c.entries[key]; existing != nil {
+		transport.CloseIdleConnections()
+		return existing
+	}
+
+	if len(c.entries) >= maxRequestTransportCacheEntries && len(c.order) > 0 {
+		evictedKey := c.order[0]
+		c.order = c.order[1:]
+		if evicted := c.entries[evictedKey]; evicted != nil {
+			evicted.CloseIdleConnections()
+			delete(c.entries, evictedKey)
+		}
+	}
+
+	c.entries[key] = transport
+	c.order = append(c.order, key)
+	return transport
 }
 
 func decodeGB18030(data []byte) string {

@@ -177,6 +177,7 @@ type scheduledTaskWorkerPluginUpdate struct {
 type scheduledTaskWorkerSupervisor struct {
 	app *App
 
+	startMu        sync.Mutex
 	mu             sync.Mutex
 	cmd            *exec.Cmd
 	stdin          io.WriteCloser
@@ -368,6 +369,16 @@ func (w *scheduledTaskWorkerSupervisor) ensureStarted() error {
 	}
 	w.mu.Unlock()
 
+	w.startMu.Lock()
+	defer w.startMu.Unlock()
+
+	w.mu.Lock()
+	if w.cmd != nil && w.available {
+		w.mu.Unlock()
+		return nil
+	}
+	w.mu.Unlock()
+
 	nodePath, err := findNodeBinary()
 	if err != nil {
 		return err
@@ -421,19 +432,19 @@ func (w *scheduledTaskWorkerSupervisor) ensureStarted() error {
 	}
 
 	if _, err := w.callProcess("worker.init", initPayload, 10*time.Second); err != nil {
-		w.stop()
+		w.stopWithStartMuHeld()
 		return err
 	}
 
 	rawInfo, err := w.callProcess("worker.info", map[string]any{}, 10*time.Second)
 	if err != nil {
-		w.stop()
+		w.stopWithStartMuHeld()
 		return err
 	}
 
 	var info scheduledTaskWorkerInfo
 	if err := json.Unmarshal(rawInfo, &info); err != nil {
-		w.stop()
+		w.stopWithStartMuHeld()
 		return err
 	}
 
@@ -451,6 +462,12 @@ func (w *scheduledTaskWorkerSupervisor) ensureStarted() error {
 }
 
 func (w *scheduledTaskWorkerSupervisor) stop() {
+	w.startMu.Lock()
+	defer w.startMu.Unlock()
+	w.stopWithStartMuHeld()
+}
+
+func (w *scheduledTaskWorkerSupervisor) stopWithStartMuHeld() {
 	w.stopScheduler()
 
 	w.mu.Lock()

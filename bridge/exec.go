@@ -292,9 +292,36 @@ func waitForProcessExitWithTimeout(process *os.Process, timeoutSeconds int) erro
 		select {
 		case <-ctx.Done():
 			if killErr := process.Kill(); killErr != nil {
-				return fmt.Errorf("timed out after %d seconds waiting for process %d, and failed to kill it: %w", timeoutSeconds, process.Pid, killErr)
+				return fmt.Errorf(
+					"timed out after %d seconds waiting for process %d, and failed to kill it: %w",
+					timeoutSeconds,
+					process.Pid,
+					killErr,
+				)
 			}
-			return nil
+			killDeadline := time.Now().Add(2 * time.Second)
+			for {
+				alive, err := IsProcessAlive(process)
+				if err != nil {
+					return fmt.Errorf(
+						"timed out after %d seconds waiting for process %d, killed it, but failed to verify exit: %w",
+						timeoutSeconds,
+						process.Pid,
+						err,
+					)
+				}
+				if !alive {
+					return nil
+				}
+				if time.Now().After(killDeadline) {
+					return fmt.Errorf(
+						"timed out after %d seconds waiting for process %d, killed it, but it did not exit within 2s",
+						timeoutSeconds,
+						process.Pid,
+					)
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
 
 		default:
 			alive, err := IsProcessAlive(process)

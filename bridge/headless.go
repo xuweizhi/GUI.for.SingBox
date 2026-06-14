@@ -782,14 +782,20 @@ func decodeRPCArg[T any](args []json.RawMessage, index int) (T, error) {
 }
 
 func writeHeadlessJSON(w http.ResponseWriter, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if value == nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = io.WriteString(w, "null")
 		return
 	}
-	if err := json.NewEncoder(w).Encode(value); err != nil {
+
+	var payload bytes.Buffer
+	if err := json.NewEncoder(&payload).Encode(value); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(payload.Bytes())
 }
 
 func isLoopbackListen(address string) bool {
