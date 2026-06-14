@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 )
 
@@ -89,6 +90,103 @@ func TestUpdateScheduledTaskLastTime(t *testing.T) {
 	}
 }
 
+func TestRecordScheduledTaskLogPersistsLastTimeAndAppendsLog(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+	})
+
+	if err := saveScheduledTasks([]scheduledTaskConfig{{
+		ID:   "task-1",
+		Name: "Example",
+		Type: "run::script",
+		Cron: "*/5 * * * *",
+	}}); err != nil {
+		t.Fatalf("saveScheduledTasks: %v", err)
+	}
+
+	app := &App{}
+	result := app.RecordScheduledTaskLog(`{"id":"task-1","name":"Example","startTime":111,"endTime":222,"result":[{"ok":true,"result":"ok"}]}`)
+	if !result.Flag {
+		t.Fatalf("RecordScheduledTaskLog failed: %s", result.Data)
+	}
+
+	loaded, err := loadScheduledTasks()
+	if err != nil {
+		t.Fatalf("loadScheduledTasks: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("expected 1 scheduled task, got %d", len(loaded))
+	}
+	if loaded[0].LastTime != 111 {
+		t.Fatalf("LastTime = %d, want 111", loaded[0].LastTime)
+	}
+
+	logs := app.taskWorker().snapshotLogs()
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log record, got %d", len(logs))
+	}
+	if logs[0].ID != "task-1" {
+		t.Fatalf("log ID = %q, want %q", logs[0].ID, "task-1")
+	}
+	if logs[0].StartTime != 111 || logs[0].EndTime != 222 {
+		t.Fatalf("unexpected log times: start=%d end=%d", logs[0].StartTime, logs[0].EndTime)
+	}
+	if len(logs[0].Result) != 1 || !logs[0].Result[0].OK || logs[0].Result[0].Result != "ok" {
+		t.Fatalf("unexpected log result payload: %+v", logs[0].Result)
+	}
+}
+
+func TestUpdateScheduledTaskLastTimeConcurrent(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+	})
+
+	tasks := []scheduledTaskConfig{
+		{ID: "task-1", Name: "One", Type: "run::script", Cron: "*/5 * * * *"},
+		{ID: "task-2", Name: "Two", Type: "run::script", Cron: "*/5 * * * *"},
+		{ID: "task-3", Name: "Three", Type: "run::script", Cron: "*/5 * * * *"},
+	}
+	if err := saveScheduledTasks(tasks); err != nil {
+		t.Fatalf("saveScheduledTasks: %v", err)
+	}
+
+	expected := map[string]int64{
+		"task-1": 101,
+		"task-2": 202,
+		"task-3": 303,
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for id, ts := range expected {
+		wg.Add(1)
+		go func(id string, ts int64) {
+			defer wg.Done()
+			<-start
+			if err := updateScheduledTaskLastTime(id, ts); err != nil {
+				t.Errorf("updateScheduledTaskLastTime(%s): %v", id, err)
+			}
+		}(id, ts)
+	}
+
+	close(start)
+	wg.Wait()
+
+	loaded, err := loadScheduledTasks()
+	if err != nil {
+		t.Fatalf("loadScheduledTasks: %v", err)
+	}
+	for _, task := range loaded {
+		if got := task.LastTime; got != expected[task.ID] {
+			t.Fatalf("LastTime for %s = %d, want %d", task.ID, got, expected[task.ID])
+		}
+	}
+}
+
 func TestNormalizeSourceRulesetBody(t *testing.T) {
 	count, pretty, err := normalizeSourceRulesetBody(
 		`{"version":1,"rules":[{"domain":["a.example","b.example"],"outbound":"direct"},{"ip_cidr":"1.1.1.1/32"}]}`,
@@ -139,7 +237,7 @@ func TestDoUpdateRulesetCreatesMissingManualSourceFile(t *testing.T) {
 	}
 }
 
-func TestValidateSubscriptionTaskSupportRejectsCustomScript(t *testing.T) {
+func TestValidateSubscriptionTaskSupportAllowsCustomScript(t *testing.T) {
 	previousBasePath := Env.BasePath
 	Env.BasePath = t.TempDir()
 	t.Cleanup(func() {
@@ -167,12 +265,12 @@ func TestValidateSubscriptionTaskSupportRejectsCustomScript(t *testing.T) {
 		Type:          "update::subscription",
 		Subscriptions: []string{"sub-1"},
 	})
-	if err == nil {
-		t.Fatal("expected custom subscription script to be rejected")
+	if err != nil {
+		t.Fatalf("expected custom subscription script to be allowed, got %v", err)
 	}
 }
 
-func TestValidateSubscriptionTaskSupportRejectsActiveSubscribePlugin(t *testing.T) {
+func TestValidateSubscriptionTaskSupportAllowsActiveSubscribePlugin(t *testing.T) {
 	previousBasePath := Env.BasePath
 	Env.BasePath = t.TempDir()
 	t.Cleanup(func() {
@@ -205,8 +303,21 @@ func TestValidateSubscriptionTaskSupportRejectsActiveSubscribePlugin(t *testing.
 		Type:          "update::subscription",
 		Subscriptions: []string{"sub-1"},
 	})
-	if err == nil {
-		t.Fatal("expected active onSubscribe plugin to be rejected")
+	if err != nil {
+		t.Fatalf("expected active onSubscribe plugin to be allowed, got %v", err)
+	}
+}
+
+func TestParseSubscriptionProxiesTreatsShareLinksAsPluginInput(t *testing.T) {
+	proxies, err := parseSubscriptionProxies("vmess://example\nvless://example-2", "Http")
+	if err != nil {
+		t.Fatalf("parseSubscriptionProxies: %v", err)
+	}
+	if len(proxies) != 1 {
+		t.Fatalf("expected 1 proxy placeholder, got %d", len(proxies))
+	}
+	if proxies[0]["base64"] == nil {
+		t.Fatalf("expected base64 placeholder, got %+v", proxies[0])
 	}
 }
 
@@ -249,6 +360,59 @@ func TestDoUpdateSubscriptionManualPurePath(t *testing.T) {
 	}
 	if subscribe.Proxies[0].Tag != "PRE-us-a" {
 		t.Fatalf("unexpected first proxy tag: %s", subscribe.Proxies[0].Tag)
+	}
+}
+
+func TestDoUpdateSubscriptionHTTPFollowsRedirect(t *testing.T) {
+	previousBasePath := Env.BasePath
+	previousOS := Env.OS
+	Env.BasePath = t.TempDir()
+	Env.OS = "linux"
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+		Env.OS = previousOS
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/redirect":
+			http.Redirect(w, r, "/final", http.StatusFound)
+		case "/final":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"outbounds":[{"tag":"node-a","type":"vmess"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	worker := (&App{}).taskWorker()
+	subscribe := &subscriptionConfig{
+		ID:               "sub-redirect",
+		Name:             "Redirect Subscription",
+		Type:             "Http",
+		URL:              server.URL + "/redirect",
+		Path:             "data/subscribes/sub-redirect.json",
+		RequestMethod:    "GET",
+		RequestTimeout:   15,
+		RequestProxyMode: "none",
+		Header: struct {
+			Request  map[string]string `json:"request" yaml:"request"`
+			Response map[string]string `json:"response" yaml:"response"`
+		}{
+			Request:  map[string]string{},
+			Response: map[string]string{},
+		},
+	}
+
+	if err := worker.doUpdateSubscription(subscribe, backendNetworkSettings{RequestProxyMode: "none"}); err != nil {
+		t.Fatalf("doUpdateSubscription: %v", err)
+	}
+	if len(subscribe.Proxies) != 1 {
+		t.Fatalf("expected 1 proxy after redirect follow, got %d", len(subscribe.Proxies))
+	}
+	if subscribe.Proxies[0].Tag != "node-a" {
+		t.Fatalf("unexpected proxy tag: %s", subscribe.Proxies[0].Tag)
 	}
 }
 

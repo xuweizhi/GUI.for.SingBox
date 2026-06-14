@@ -75,6 +75,14 @@ export const ClearScheduledTaskWorkerLogs = async () => {
   return data;
 };
 
+export const RecordScheduledTaskLog = async (record: ScheduledTaskWorkerLogRecord) => {
+  const { flag, data } = await App.RecordScheduledTaskLog(JSON.stringify(record));
+  if (!flag) {
+    throw data;
+  }
+  return data;
+};
+
 export const ReloadScheduledTaskWorker = async () => {
   const { flag, data } = await App.ReloadScheduledTaskWorker();
   if (!flag) {

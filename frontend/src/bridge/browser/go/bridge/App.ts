@@ -44,6 +44,7 @@ export const QueryMMDB = (arg1: string, arg2: string, arg3: string) =>
 export const ReadDir = (arg1: string) => invokeBridge("ReadDir", [arg1]);
 export const ReadFile = (arg1: string, arg2: Record<string, any>) =>
   invokeBridge("ReadFile", [arg1, arg2]);
+export const RecordScheduledTaskLog = (arg1: string) => invokeBridge("RecordScheduledTaskLog", [arg1]);
 export const ReloadScheduledTaskWorker = () => invokeBridge("ReloadScheduledTaskWorker");
 export const RemoveFile = (arg1: string) => invokeBridge("RemoveFile", [arg1]);
 export const Requests = (

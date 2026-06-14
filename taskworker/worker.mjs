@@ -10,6 +10,74 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 globalThis.window = globalThis
 globalThis.AsyncFunction = AsyncFunction
 
+const toBuffer = (value) => {
+  if (Buffer.isBuffer(value)) return value
+  if (value instanceof ArrayBuffer) return Buffer.from(value)
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+  }
+  return Buffer.from(String(value ?? ''))
+}
+
+class WorkerBlob {
+  constructor(parts = [], options = {}) {
+    this.buffer = Buffer.concat(parts.map(toBuffer))
+    this.type = options.type || 'application/octet-stream'
+  }
+
+  async text() {
+    return this.buffer.toString('utf8')
+  }
+
+  async arrayBuffer() {
+    return this.buffer.buffer.slice(
+      this.buffer.byteOffset,
+      this.buffer.byteOffset + this.buffer.byteLength,
+    )
+  }
+}
+
+const nativeCreateObjectURL = globalThis.URL?.createObjectURL?.bind(globalThis.URL)
+const nativeRevokeObjectURL = globalThis.URL?.revokeObjectURL?.bind(globalThis.URL)
+globalThis.Blob = WorkerBlob
+if (globalThis.URL) {
+  globalThis.URL.createObjectURL = (value) => {
+    if (value instanceof WorkerBlob) {
+      return `data:${value.type};base64,${value.buffer.toString('base64')}`
+    }
+    if (!nativeCreateObjectURL) {
+      throw new Error('URL.createObjectURL is not available')
+    }
+    return nativeCreateObjectURL(value)
+  }
+  globalThis.URL.revokeObjectURL = (value) => {
+    if (typeof value === 'string' && value.startsWith('data:')) {
+      return
+    }
+    nativeRevokeObjectURL?.(value)
+  }
+}
+
+const cloneValue = (value) => {
+  if (value === undefined) return undefined
+  return JSON.parse(JSON.stringify(value))
+}
+
+const withBrowserLikeGlobals = async (fn) => {
+  const hasProcess = Object.prototype.hasOwnProperty.call(globalThis, 'process')
+  const previousProcess = globalThis.process
+  try {
+    globalThis.process = undefined
+    return await fn()
+  } finally {
+    if (hasProcess) {
+      globalThis.process = previousProcess
+    } else {
+      delete globalThis.process
+    }
+  }
+}
+
 const state = {
   basePath: process.cwd(),
   env: {},
@@ -126,8 +194,15 @@ const notSupported = (name) => {
 const plugins = new Proxy(
   {
     YAML: {
-      parse: () => notSupported('Plugins.YAML.parse'),
-      stringify: () => notSupported('Plugins.YAML.stringify'),
+      parse: (value) => JSON.parse(String(value || 'null')),
+      stringify: (value) => JSON.stringify(value, null, 2),
+    },
+    APP_TITLE: state.env.appName || 'GUI.for.SingBox',
+    message: {
+      success: (...args) => console.info(...args),
+      info: (...args) => console.info(...args),
+      warn: (...args) => console.warn(...args),
+      error: (...args) => console.error(...args),
     },
     AbsolutePath: async (target) => resolvePath(target),
     FileExists: async (target) => {
@@ -264,6 +339,24 @@ const runScriptTask = async (task) => {
   }
 }
 
+const resolvePluginHandler = async (plugin, handlerName, pluginSettings = {}) => {
+  const { module, pluginContext } = await withBrowserLikeGlobals(() =>
+    loadPluginModule(plugin, pluginSettings[plugin.id] || {}),
+  )
+  const moduleDefault =
+    typeof module.default === 'function'
+      ? await withBrowserLikeGlobals(() => module.default(pluginContext))
+      : module.default
+  const handler = moduleDefault?.[handlerName] || module[handlerName]
+  if (typeof handler !== 'function') {
+    throw new Error(`${handlerName} is not defined`)
+  }
+  return {
+    handler: (...args) => withBrowserLikeGlobals(() => handler(...args)),
+    pluginContext,
+  }
+}
+
 const buildPluginContext = (plugin, pluginSettings = {}) => {
   const configuration = {}
   for (const item of plugin.configuration || []) {
@@ -278,9 +371,9 @@ const buildPluginContext = (plugin, pluginSettings = {}) => {
 
 const transformPluginSource = (code) =>
   code
-    .replace(/^const\s+(onTask)\b/gm, 'export const $1')
-    .replace(/^function\s+(onTask)\b/gm, 'export function $1')
-    .replace(/^async\s+function\s+(onTask)\b/gm, 'export async function $1')
+    .replace(/^const\s+(on[A-Z]\w*)\b/gm, 'export const $1')
+    .replace(/^function\s+(on[A-Z]\w*)\b/gm, 'export function $1')
+    .replace(/^async\s+function\s+(on[A-Z]\w*)\b/gm, 'export async function $1')
 
 const loadPluginModule = async (plugin, pluginSettings = {}) => {
   const code = await readFile(resolvePath(plugin.path), 'utf8').catch(() => '')
@@ -325,16 +418,7 @@ const runPluginTask = async (task, pluginList = [], pluginSettings = {}) => {
     }
 
     try {
-      const { module, pluginContext } = await loadPluginModule(plugin, pluginSettings[plugin.id] || {})
-      const moduleDefault =
-        typeof module.default === 'function'
-          ? await module.default(pluginContext)
-          : module.default
-      const handler = moduleDefault?.onTask || module.onTask
-      if (typeof handler !== 'function') {
-        throw new Error('onTask is not defined')
-      }
-
+      const { handler, pluginContext } = await resolvePluginHandler(plugin, 'onTask', pluginSettings)
       const exitCode = await handler()
       if (typeof exitCode === 'number' && exitCode !== plugin.status) {
         pluginUpdates.push({ id: plugin.id, status: exitCode })
@@ -349,6 +433,49 @@ const runPluginTask = async (task, pluginList = [], pluginSettings = {}) => {
   }
 
   return { result, pluginUpdates }
+}
+
+const applySubscriptionPlugins = async (payload = {}, pluginList = [], pluginSettings = {}) => {
+  let proxies = Array.isArray(payload.proxies) ? payload.proxies : []
+  const subscription = cloneValue(payload.subscription || {})
+
+  for (const plugin of pluginList) {
+    if (!plugin || plugin.disabled) continue
+
+    const { handler } = await resolvePluginHandler(plugin, 'onSubscribe', pluginSettings)
+    const nextProxies = await handler(cloneValue(proxies), cloneValue(subscription))
+    if (!Array.isArray(nextProxies)) {
+      throw new Error(`${plugin.name} : Wrong result`)
+    }
+    proxies = nextProxies
+  }
+
+  return proxies
+}
+
+const runSubscriptionScript = async (payload = {}) => {
+  const proxies = Array.isArray(payload.proxies) ? cloneValue(payload.proxies) : []
+  const subscription = cloneValue(payload.subscription || {})
+  const script = String(payload.script || '').trim()
+
+  if (!script) {
+    return { proxies, subscription }
+  }
+
+  const fn = new AsyncFunction(
+    'proxies',
+    'subscription',
+    `${script}; return await onSubscribe(proxies, subscription)`,
+  )
+  const result = await fn(proxies, subscription)
+  if (!result || typeof result !== 'object' || !Array.isArray(result.proxies)) {
+    throw new Error('subscription script returned invalid result')
+  }
+
+  return {
+    proxies: result.proxies,
+    subscription: result.subscription || subscription,
+  }
 }
 
 const runTask = async (task, pluginList = [], pluginSettings = {}) => {
@@ -377,6 +504,14 @@ const handleRequest = async (message) => {
         message.params?.plugins || [],
         message.params?.pluginSettings || {},
       )
+    case 'subscription.applyPlugins':
+      return applySubscriptionPlugins(
+        message.params || {},
+        message.params?.plugins || [],
+        message.params?.pluginSettings || {},
+      )
+    case 'subscription.runScript':
+      return runSubscriptionScript(message.params || {})
     case 'worker.shutdown':
       setTimeout(() => process.exit(0), 0)
       return { success: true }

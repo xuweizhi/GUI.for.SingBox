@@ -269,6 +269,13 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		result = a.GetInterfaces()
 	case "GetScheduledTaskWorkerLogs":
 		result = a.GetScheduledTaskWorkerLogs()
+	case "RecordScheduledTaskLog":
+		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
+		if decodeErr != nil {
+			err = decodeErr
+			break
+		}
+		result = a.RecordScheduledTaskLog(arg)
 	case "GetScheduledTaskWorkerStatus":
 		result = a.GetScheduledTaskWorkerStatus()
 	case "IsStartup":

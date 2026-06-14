@@ -13,11 +13,11 @@ import {
   ReloadScheduledTaskWorker,
   RunScheduledTaskWorker,
   ClearScheduledTaskWorkerLogs,
+  RecordScheduledTaskLog,
 } from "@/bridge";
-import { DefaultSubscribeScript, ScheduledTasksFilePath } from "@/constant/app";
+import { ScheduledTasksFilePath } from "@/constant/app";
 import {
   ScheduledTasksType,
-  PluginTrigger,
   PluginTriggerEvent,
   RequestProxyMode,
 } from "@/enums/app";
@@ -45,22 +45,10 @@ export const useScheduledTasksStore = defineStore("scheduledtasks", () => {
 
   let offScheduledTaskLog: null | (() => void) = null;
 
-  const hasActiveSubscribePlugins = () => {
-    const pluginsStore = usePluginsStore();
-    return pluginsStore.plugins.some(
-      (plugin) => !plugin.disabled && plugin.triggers.includes(PluginTrigger.OnSubscribe),
-    );
-  };
-
   const isPureSubscription = (id: string) => {
     const subscribesStore = useSubscribesStore();
     const subscribe = subscribesStore.getSubscribeById(id);
     if (!subscribe) return true;
-
-    const script = subscribe.script.trim();
-    if (script && script !== DefaultSubscribeScript.trim()) {
-      return false;
-    }
 
     const proxyMode =
       subscribe.requestProxyMode === RequestProxyMode.Global
@@ -73,11 +61,10 @@ export const useScheduledTasksStore = defineStore("scheduledtasks", () => {
   const canTaskRunInBackend = (task: ScheduledTask) => {
     switch (task.type) {
       case ScheduledTasksType.UpdateSubscription:
-        return !hasActiveSubscribePlugins() && task.subscriptions.every(isPureSubscription);
+        return task.subscriptions.every(isPureSubscription);
       case ScheduledTasksType.UpdateAllSubscription: {
         const subscribesStore = useSubscribesStore();
         return (
-          !hasActiveSubscribePlugins() &&
           subscribesStore.subscribes
             .filter((item) => !item.disabled)
             .every((item) => isPureSubscription(item.id))
@@ -149,9 +136,7 @@ export const useScheduledTasksStore = defineStore("scheduledtasks", () => {
 
   const hydrateWorkerLogs = async () => {
     const logsStore = useLogsStore();
-    const workerLogs = workerStatus.value.available
-      ? ((await ignoredError(GetScheduledTaskWorkerLogs)) ?? [])
-      : [];
+    const workerLogs = (await ignoredError(GetScheduledTaskWorkerLogs)) ?? [];
     logsStore.hydrateScheduledTasksLogs(workerLogs);
   };
 
@@ -169,30 +154,38 @@ export const useScheduledTasksStore = defineStore("scheduledtasks", () => {
     const task = getScheduledTaskById(id);
     if (!task) return;
 
-    const logsStore = useLogsStore();
-
-    task.lastTime = Date.now();
-
+    const previousLastTime = task.lastTime;
     const startTime = Date.now();
-    const result = await getTaskFn(task)();
+    task.lastTime = startTime;
+    let recorded = false;
 
-    if (task.notification) {
-      const successes = result.filter((v) => v.ok).length;
-      const failures = result.length - successes;
-      const details = result.flatMap((v) => v.result).join("\n");
-      const content = `Successes: ${successes}; Failures: ${failures}. \n\n${details}`;
-      Notify(task.name, content);
+    try {
+      const result = await getTaskFn(task)();
+
+      await RecordScheduledTaskLog({
+        id: task.id,
+        name: task.name,
+        startTime,
+        endTime: Date.now(),
+        result,
+      });
+      recorded = true;
+
+      if (task.notification) {
+        const successes = result.filter((v) => v.ok).length;
+        const failures = result.length - successes;
+        const details = result.flatMap((v) => v.result).join("\n");
+        const content = `Successes: ${successes}; Failures: ${failures}. \n\n${details}`;
+        await Notify(task.name, content);
+      }
+
+      return;
+    } catch (error) {
+      if (!recorded) {
+        task.lastTime = previousLastTime;
+      }
+      throw error;
     }
-
-    logsStore.recordScheduledTasksLog({
-      id: task.id,
-      name: task.name,
-      startTime,
-      endTime: Date.now(),
-      result: result,
-    });
-
-    await editScheduledTask(id, task, { reloadWorker: false });
   };
 
   const runScheduledTask = async (id: string) => {
@@ -320,9 +313,7 @@ export const useScheduledTasksStore = defineStore("scheduledtasks", () => {
   const clearScheduledTaskLogs = async () => {
     const logsStore = useLogsStore();
     logsStore.scheduledtasksLogs.splice(0);
-    if (workerStatus.value.available) {
-      await ignoredError(ClearScheduledTaskWorkerLogs);
-    }
+    await ignoredError(ClearScheduledTaskWorkerLogs);
   };
 
   const getScheduledTaskById = (id: string) => scheduledtasks.value.find((v) => v.id === id);

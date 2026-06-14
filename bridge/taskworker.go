@@ -43,6 +43,9 @@ var goScheduledTaskTypes = map[string]struct{}{
 	"update::all::ruleset":      {},
 }
 
+var subscriptionShareLinkPattern = regexp.MustCompile(`(?i)^(?:ss|ssr|vmess|vless|trojan|hysteria2?|hy2|tuic|wireguard|anytls)://`)
+var scheduledTasksFileMu sync.Mutex
+
 type scheduledTaskConfig struct {
 	ID            string   `json:"id" yaml:"id"`
 	Name          string   `json:"name" yaml:"name"`
@@ -234,6 +237,23 @@ func (a *App) ClearScheduledTaskWorkerLogs() FlagResult {
 	return FlagResult{true, "Success"}
 }
 
+func (a *App) RecordScheduledTaskLog(payload string) FlagResult {
+	var record scheduledTaskWorkerLogRecord
+	if err := json.Unmarshal([]byte(payload), &record); err != nil {
+		return FlagResult{false, err.Error()}
+	}
+	if err := validateScheduledTaskLogRecord(record); err != nil {
+		return FlagResult{false, err.Error()}
+	}
+	if record.ID != "" {
+		if err := updateScheduledTaskLastTime(record.ID, record.StartTime); err != nil {
+			return FlagResult{false, err.Error()}
+		}
+	}
+	a.taskWorker().recordLog(record)
+	return FlagResult{true, "Success"}
+}
+
 func (a *App) ReloadScheduledTaskWorker() FlagResult {
 	if err := a.taskWorker().reloadFromDisk(); err != nil {
 		return FlagResult{false, err.Error()}
@@ -304,6 +324,19 @@ func (w *scheduledTaskWorkerSupervisor) clearLogs() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.logs = nil
+}
+
+func validateScheduledTaskLogRecord(record scheduledTaskWorkerLogRecord) error {
+	if strings.TrimSpace(record.Name) == "" {
+		return errors.New("scheduled task log name is required")
+	}
+	if record.StartTime <= 0 {
+		return errors.New("scheduled task log startTime is required")
+	}
+	if record.EndTime < record.StartTime {
+		return errors.New("scheduled task log endTime must be greater than or equal to startTime")
+	}
+	return nil
 }
 
 func (w *scheduledTaskWorkerSupervisor) supportsType(taskType string) bool {
@@ -556,8 +589,7 @@ finalize:
 		Result:    result,
 	}
 
-	w.appendLog(record)
-	w.app.ClientEventsEmit(scheduledTaskLogEventName, record)
+	w.recordLog(record)
 
 	return result, nil
 }
@@ -570,6 +602,17 @@ func (w *scheduledTaskWorkerSupervisor) appendLog(record scheduledTaskWorkerLogR
 	if len(w.logs) > scheduledTaskWorkerLogsMaxLen {
 		w.logs = w.logs[:scheduledTaskWorkerLogsMaxLen]
 	}
+}
+
+func (w *scheduledTaskWorkerSupervisor) recordLog(record scheduledTaskWorkerLogRecord) {
+	if record.Result == nil {
+		record.Result = []scheduledTaskWorkerResultItem{}
+	}
+	w.appendLog(record)
+	if w.app == nil || (!w.app.IsHeadless() && w.app.Ctx == nil) {
+		return
+	}
+	w.app.EventsEmit(scheduledTaskLogEventName, record)
 }
 
 func (w *scheduledTaskWorkerSupervisor) call(method string, params any, timeout time.Duration) (json.RawMessage, error) {
@@ -739,7 +782,7 @@ func normalizeScheduledTaskSpec(spec string) (string, error) {
 	}
 }
 
-func loadScheduledTasks() ([]scheduledTaskConfig, error) {
+func loadScheduledTasksUnlocked() ([]scheduledTaskConfig, error) {
 	content, err := os.ReadFile(resolvePath(scheduledTasksFilePath))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -759,7 +802,13 @@ func loadScheduledTasks() ([]scheduledTaskConfig, error) {
 	return tasks, nil
 }
 
-func saveScheduledTasks(tasks []scheduledTaskConfig) error {
+func loadScheduledTasks() ([]scheduledTaskConfig, error) {
+	scheduledTasksFileMu.Lock()
+	defer scheduledTasksFileMu.Unlock()
+	return loadScheduledTasksUnlocked()
+}
+
+func saveScheduledTasksUnlocked(tasks []scheduledTaskConfig) error {
 	content, err := yaml.Marshal(tasks)
 	if err != nil {
 		return err
@@ -770,8 +819,17 @@ func saveScheduledTasks(tasks []scheduledTaskConfig) error {
 	return os.WriteFile(resolvePath(scheduledTasksFilePath), content, 0644)
 }
 
+func saveScheduledTasks(tasks []scheduledTaskConfig) error {
+	scheduledTasksFileMu.Lock()
+	defer scheduledTasksFileMu.Unlock()
+	return saveScheduledTasksUnlocked(tasks)
+}
+
 func updateScheduledTaskLastTime(id string, lastTime int64) error {
-	tasks, err := loadScheduledTasks()
+	scheduledTasksFileMu.Lock()
+	defer scheduledTasksFileMu.Unlock()
+
+	tasks, err := loadScheduledTasksUnlocked()
 	if err != nil {
 		return err
 	}
@@ -789,7 +847,7 @@ func updateScheduledTaskLastTime(id string, lastTime int64) error {
 		return nil
 	}
 
-	return saveScheduledTasks(tasks)
+	return saveScheduledTasksUnlocked(tasks)
 }
 
 func loadRulesets() ([]rulesetConfig, error) {
@@ -935,6 +993,19 @@ func saveUserSettingsMap(settings map[string]any) error {
 	return os.WriteFile(resolvePath("data/user.yaml"), content, 0644)
 }
 
+func loadPluginSettingsMap() (map[string]any, error) {
+	settings, err := loadUserSettingsMap()
+	if err != nil {
+		return nil, err
+	}
+
+	pluginSettings, _ := settings["pluginSettings"].(map[string]any)
+	if pluginSettings == nil {
+		pluginSettings = map[string]any{}
+	}
+	return pluginSettings, nil
+}
+
 func (w *scheduledTaskWorkerSupervisor) buildWorkerTaskPayload(task scheduledTaskConfig) (map[string]any, error) {
 	payload := map[string]any{"task": task}
 	if task.Type != "run::plugin" {
@@ -942,10 +1013,6 @@ func (w *scheduledTaskWorkerSupervisor) buildWorkerTaskPayload(task scheduledTas
 	}
 
 	plugins, err := loadPlugins()
-	if err != nil {
-		return nil, err
-	}
-	settings, err := loadUserSettingsMap()
 	if err != nil {
 		return nil, err
 	}
@@ -960,9 +1027,9 @@ func (w *scheduledTaskWorkerSupervisor) buildWorkerTaskPayload(task scheduledTas
 		}
 	}
 
-	pluginSettings, _ := settings["pluginSettings"].(map[string]any)
-	if pluginSettings == nil {
-		pluginSettings = map[string]any{}
+	pluginSettings, err := loadPluginSettingsMap()
+	if err != nil {
+		return nil, err
 	}
 
 	payload["plugins"] = targets
@@ -1058,17 +1125,6 @@ func (w *scheduledTaskWorkerSupervisor) validateBackendTaskSupport(task schedule
 }
 
 func (w *scheduledTaskWorkerSupervisor) validateSubscriptionTaskSupport(task scheduledTaskConfig) error {
-	activeObservers, err := loadActiveSubscribePluginNames()
-	if err != nil {
-		return err
-	}
-	if len(activeObservers) > 0 {
-		return fmt.Errorf(
-			"backend subscription executor does not support active onSubscribe plugins: %s",
-			strings.Join(activeObservers, ", "),
-		)
-	}
-
 	subscribes, err := loadSubscriptions()
 	if err != nil {
 		return err
@@ -1080,13 +1136,6 @@ func (w *scheduledTaskWorkerSupervisor) validateSubscriptionTaskSupport(task sch
 
 	targets := collectTargetSubscriptions(task, subscribes)
 	for _, subscribe := range targets {
-		if !isDefaultSubscribeScript(subscribe.Script) {
-			return fmt.Errorf(
-				"subscription [%s] uses a custom script and is not supported by the backend executor",
-				subscribe.Name,
-			)
-		}
-
 		mode := resolveSubscriptionProxyMode(subscribe, settings)
 		if mode == "kernel" {
 			return fmt.Errorf(
@@ -1099,23 +1148,37 @@ func (w *scheduledTaskWorkerSupervisor) validateSubscriptionTaskSupport(task sch
 	return nil
 }
 
-func loadActiveSubscribePluginNames() ([]string, error) {
+func loadActiveSubscribePlugins() ([]pluginConfig, error) {
 	plugins, err := loadPlugins()
 	if err != nil {
 		return nil, err
 	}
 
-	names := []string{}
+	active := make([]pluginConfig, 0, len(plugins))
 	for _, plugin := range plugins {
 		if plugin.Disabled {
 			continue
 		}
 		for _, trigger := range plugin.Triggers {
 			if trigger == "on::subscribe" {
-				names = append(names, plugin.Name)
+				active = append(active, plugin)
 				break
 			}
 		}
+	}
+
+	return active, nil
+}
+
+func loadActiveSubscribePluginNames() ([]string, error) {
+	plugins, err := loadActiveSubscribePlugins()
+	if err != nil {
+		return nil, err
+	}
+
+	names := []string{}
+	for _, plugin := range plugins {
+		names = append(names, plugin.Name)
 	}
 
 	return names, nil
@@ -1459,6 +1522,11 @@ func (w *scheduledTaskWorkerSupervisor) doUpdateSubscription(
 		return err
 	}
 
+	proxies, err = w.applySubscriptionPluginsWithWorker(*subscribe, proxies)
+	if err != nil {
+		return err
+	}
+
 	proxies, err = applySubscriptionFilters(proxies, subscribe)
 	if err != nil {
 		return err
@@ -1470,6 +1538,16 @@ func (w *scheduledTaskWorkerSupervisor) doUpdateSubscription(
 	subscribe.Expire = userInfo["expire"] * 1000
 	subscribe.UpdateTime = time.Now().UnixMilli()
 	subscribe.Proxies = mapSubscriptionProxies(proxies, subscribe.Proxies)
+
+	if !isDefaultSubscribeScript(subscribe.Script) {
+		nextProxies, nextSubscription, err := w.runSubscriptionScriptWithWorker(*subscribe, proxies)
+		if err != nil {
+			return err
+		}
+		proxies = nextProxies
+		*subscribe = nextSubscription
+		subscribe.Proxies = mapSubscriptionProxies(proxies, subscribe.Proxies)
+	}
 
 	if subscribe.Type == "Http" || (subscribe.Type == "File" && subscribe.URL != subscribe.Path) {
 		payload, err := json.MarshalIndent(proxies, "", "  ")
@@ -1485,6 +1563,69 @@ func (w *scheduledTaskWorkerSupervisor) doUpdateSubscription(
 	}
 
 	return nil
+}
+
+func (w *scheduledTaskWorkerSupervisor) applySubscriptionPluginsWithWorker(
+	subscribe subscriptionConfig,
+	proxies []map[string]any,
+) ([]map[string]any, error) {
+	activePlugins, err := loadActiveSubscribePlugins()
+	if err != nil {
+		return nil, err
+	}
+	if len(activePlugins) == 0 {
+		return proxies, nil
+	}
+
+	pluginSettings, err := loadPluginSettingsMap()
+	if err != nil {
+		return nil, err
+	}
+
+	rawResult, err := w.call("subscription.applyPlugins", map[string]any{
+		"proxies":        proxies,
+		"subscription":   subscribe,
+		"plugins":        activePlugins,
+		"pluginSettings": pluginSettings,
+	}, 2*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+
+	var nextProxies []map[string]any
+	if err := json.Unmarshal(rawResult, &nextProxies); err != nil {
+		return nil, err
+	}
+	if nextProxies == nil {
+		return []map[string]any{}, nil
+	}
+	return nextProxies, nil
+}
+
+func (w *scheduledTaskWorkerSupervisor) runSubscriptionScriptWithWorker(
+	subscribe subscriptionConfig,
+	proxies []map[string]any,
+) ([]map[string]any, subscriptionConfig, error) {
+	rawResult, err := w.call("subscription.runScript", map[string]any{
+		"proxies":      proxies,
+		"subscription": subscribe,
+		"script":       subscribe.Script,
+	}, 2*time.Minute)
+	if err != nil {
+		return nil, subscriptionConfig{}, err
+	}
+
+	var response struct {
+		Proxies      []map[string]any   `json:"proxies"`
+		Subscription subscriptionConfig `json:"subscription"`
+	}
+	if err := json.Unmarshal(rawResult, &response); err != nil {
+		return nil, subscriptionConfig{}, err
+	}
+	if response.Proxies == nil {
+		response.Proxies = []map[string]any{}
+	}
+	return response.Proxies, response.Subscription, nil
 }
 
 func (w *scheduledTaskWorkerSupervisor) loadSubscriptionBody(
@@ -1520,6 +1661,7 @@ func (w *scheduledTaskWorkerSupervisor) loadSubscriptionBody(
 			headers,
 			"",
 			RequestOptions{
+				Redirect: true,
 				Proxy:    proxy,
 				Insecure: subscribe.InSecure,
 				Timeout:  subscribe.RequestTimeout,
@@ -1593,8 +1735,8 @@ func parseSubscriptionProxies(body string, subscriptionType string) ([]map[strin
 	if proxies, ok := parseSubscriptionYAMLProxies(body); ok {
 		return proxies, nil
 	}
-	if looksLikeBase64(body) {
-		return nil, errors.New("You need to install the [节点转换] plugin first")
+	if looksLikeBase64(body) || looksLikeSubscriptionShareLinkList(body) {
+		return []map[string]any{{"base64": body}}, nil
 	}
 	if subscriptionType == "Manual" {
 		var proxies []map[string]any
@@ -1758,6 +1900,22 @@ func looksLikeBase64(content string) bool {
 	}
 	_, err := base64.StdEncoding.DecodeString(normalized)
 	return err == nil
+}
+
+func looksLikeSubscriptionShareLinkList(content string) bool {
+	lines := strings.Split(content, "\n")
+	seen := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if trimmed == "" {
+			continue
+		}
+		seen = true
+		if !subscriptionShareLinkPattern.MatchString(trimmed) {
+			return false
+		}
+	}
+	return seen
 }
 
 func stringValue(value any) string {
