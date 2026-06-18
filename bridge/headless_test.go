@@ -1,8 +1,10 @@
 package bridge
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -65,5 +67,53 @@ func TestWriteHeadlessJSONBuffersEncodeFailures(t *testing.T) {
 	}
 	if recorder.Body.Len() == 0 {
 		t.Fatal("expected encode failure body to be written")
+	}
+}
+
+func TestHandleRPCCallSupportsSystemProxyMethods(t *testing.T) {
+	originalOS := Env.OS
+	Env.OS = "test"
+	t.Cleanup(func() {
+		Env.OS = originalOS
+	})
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "get system proxy",
+			body: `{"method":"GetSystemProxy","args":[]}`,
+		},
+		{
+			name: "get system proxy bypass",
+			body: `{"method":"GetSystemProxyBypass","args":[]}`,
+		},
+		{
+			name: "set system proxy",
+			body: `{"method":"SetSystemProxy","args":[true,"127.0.0.1:1080","mixed","localhost",["Wi-Fi"]]}`,
+		},
+	}
+
+	app := &App{}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, webUIRPCEndpoint, strings.NewReader(test.body))
+			recorder := httptest.NewRecorder()
+
+			app.handleRPCCall(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d: %s", http.StatusOK, recorder.Code, recorder.Body.String())
+			}
+
+			var result FlagResult
+			if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+				t.Fatalf("decode RPC response: %v", err)
+			}
+			if !result.Flag {
+				t.Fatalf("expected successful RPC response, got %+v", result)
+			}
+		})
 	}
 }

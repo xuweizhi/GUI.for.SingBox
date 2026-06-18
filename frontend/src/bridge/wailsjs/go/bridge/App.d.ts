@@ -38,6 +38,10 @@ export function GetScheduledTaskWorkerLogs():Promise<bridge.FlagResult>;
 
 export function GetScheduledTaskWorkerStatus():Promise<bridge.FlagResult>;
 
+export function GetSystemProxy():Promise<bridge.FlagResult>;
+
+export function GetSystemProxyBypass():Promise<bridge.FlagResult>;
+
 export function IsHeadless():Promise<boolean>;
 
 export function IsStartup():Promise<boolean>;
@@ -79,6 +83,8 @@ export function Requests(arg1:string,arg2:string,arg3:Record<string, string>,arg
 export function RestartApp():Promise<bridge.FlagResult>;
 
 export function RunScheduledTaskWorker(arg1:string):Promise<bridge.FlagResult>;
+
+export function SetSystemProxy(arg1:boolean,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<bridge.FlagResult>;
 
 export function ShowMainWindow():Promise<void>;
 

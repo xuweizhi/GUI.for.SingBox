@@ -28,6 +28,8 @@ export const GetEnv = (arg1: string) => invokeBridge("GetEnv", [arg1]);
 export const GetInterfaces = () => invokeBridge("GetInterfaces");
 export const GetScheduledTaskWorkerLogs = () => invokeBridge("GetScheduledTaskWorkerLogs");
 export const GetScheduledTaskWorkerStatus = () => invokeBridge("GetScheduledTaskWorkerStatus");
+export const GetSystemProxy = () => invokeBridge("GetSystemProxy");
+export const GetSystemProxyBypass = () => invokeBridge("GetSystemProxyBypass");
 export const IsStartup = () => invokeBridge<boolean>("IsStartup");
 export const KillProcess = (arg1: number, arg2: number) =>
   invokeBridge("KillProcess", [arg1, arg2]);
@@ -57,6 +59,13 @@ export const Requests = (
 export const RestartApp = () => invokeBridge("RestartApp");
 export const RunScheduledTaskWorker = (arg1: string) =>
   invokeBridge("RunScheduledTaskWorker", [arg1]);
+export const SetSystemProxy = (
+  arg1: boolean,
+  arg2: string,
+  arg3: string,
+  arg4: string,
+  arg5: string[],
+) => invokeBridge("SetSystemProxy", [arg1, arg2, arg3, arg4, arg5]);
 export const ShowMainWindow = () => invokeBridge<void>("ShowMainWindow");
 export const StartServer = (arg1: string, arg2: string, arg3: Record<string, any>) =>
   invokeBridge("StartServer", [arg1, arg2, arg3]);

@@ -1,10 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
-import { GetEnv } from '@/bridge'
+import { GetEnv, GetSystemProxy, SetSystemProxy } from '@/bridge'
 import { OS } from '@/enums/app'
 import { useAppSettingsStore, useKernelApiStore } from '@/stores'
-import { formatProxyHost, updateTrayAndMenus, SetSystemProxy, GetSystemProxy } from '@/utils'
+import { formatProxyHost, ignoredError, updateTrayAndMenus } from '@/utils'
 
 import type { AppEnv } from '@/types/app'
 
@@ -38,7 +38,7 @@ export const useEnvStore = defineStore('env', () => {
 
   const updateSystemProxyStatus = async () => {
     const kernelApiStore = useKernelApiStore()
-    const proxyServer = await GetSystemProxy()
+    const proxyServer = (await ignoredError(GetSystemProxy)) || ''
 
     if (!proxyServer) {
       systemProxy.value = false
@@ -51,10 +51,11 @@ export const useEnvStore = defineStore('env', () => {
 
       const { host, port, proxyType } = kernelProxy
       const server = `${formatProxyHost(host)}:${port}`
-      const proxyServerList = [`http://${server}`, `socks5://${server}`, `socks=${server}`]
+      const proxyServerList = [`http://${server}`, `https://${server}`, `socks5://${server}`, `socks=${server}`]
       if (proxyType === 'mixed') {
         proxyServerList.push(
           `http://127.0.0.1:${port}`,
+          `https://127.0.0.1:${port}`,
           `socks5://127.0.0.1:${port}`,
           `socks=127.0.0.1:${port}`,
         )
@@ -67,6 +68,7 @@ export const useEnvStore = defineStore('env', () => {
 
   const setSystemProxy = async () => {
     const proxyBypassList = appSettings.app.proxyBypassList
+    const darwinServices = appSettings.app.darwinSystemProxyServices
     let proxyEndpoint = kernelApiStore.getProxyEndpoint()
     if (!proxyEndpoint) {
       await kernelApiStore.updateConfig('inbound', undefined)
@@ -74,13 +76,14 @@ export const useEnvStore = defineStore('env', () => {
     proxyEndpoint = kernelApiStore.getProxyEndpoint()
     if (!proxyEndpoint) throw 'home.overview.needPort'
     const server = `${formatProxyHost(proxyEndpoint.host)}:${proxyEndpoint.port}`
-    await SetSystemProxy(true, server, proxyEndpoint.proxyType, proxyBypassList)
+    await SetSystemProxy(true, server, proxyEndpoint.proxyType, proxyBypassList, darwinServices)
     systemProxy.value = true
   }
 
   const clearSystemProxy = async () => {
     const proxyBypassList = appSettings.app.proxyBypassList
-    await SetSystemProxy(false, '', undefined, proxyBypassList)
+    const darwinServices = appSettings.app.darwinSystemProxyServices
+    await SetSystemProxy(false, '', undefined, proxyBypassList, darwinServices)
     systemProxy.value = false
   }
 

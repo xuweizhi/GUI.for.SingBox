@@ -74,6 +74,14 @@ export function GetScheduledTaskWorkerStatus() {
   return window['go']['bridge']['App']['GetScheduledTaskWorkerStatus']();
 }
 
+export function GetSystemProxy() {
+  return window['go']['bridge']['App']['GetSystemProxy']();
+}
+
+export function GetSystemProxyBypass() {
+  return window['go']['bridge']['App']['GetSystemProxyBypass']();
+}
+
 export function IsHeadless() {
   return window['go']['bridge']['App']['IsHeadless']();
 }
@@ -156,6 +164,10 @@ export function RestartApp() {
 
 export function RunScheduledTaskWorker(arg1) {
   return window['go']['bridge']['App']['RunScheduledTaskWorker'](arg1);
+}
+
+export function SetSystemProxy(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['bridge']['App']['SetSystemProxy'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ShowMainWindow() {

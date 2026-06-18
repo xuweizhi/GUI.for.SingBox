@@ -278,6 +278,10 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		result = a.RecordScheduledTaskLog(arg)
 	case "GetScheduledTaskWorkerStatus":
 		result = a.GetScheduledTaskWorkerStatus()
+	case "GetSystemProxy":
+		result = a.GetSystemProxy()
+	case "GetSystemProxyBypass":
+		result = a.GetSystemProxyBypass()
 	case "IsStartup":
 		result = a.IsStartup()
 	case "KillProcess":
@@ -413,6 +417,33 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
 		err = decodeErr
 		result = a.RunScheduledTaskWorker(arg)
+	case "SetSystemProxy":
+		enable, decodeErr := decodeRPCArg[bool](req.Args, 0)
+		if decodeErr != nil {
+			err = decodeErr
+			break
+		}
+		server, decodeErr := decodeRPCArg[string](req.Args, 1)
+		if decodeErr != nil {
+			err = decodeErr
+			break
+		}
+		proxyType, decodeErr := decodeRPCArg[string](req.Args, 2)
+		if decodeErr != nil {
+			err = decodeErr
+			break
+		}
+		bypass, decodeErr := decodeRPCArg[string](req.Args, 3)
+		if decodeErr != nil {
+			err = decodeErr
+			break
+		}
+		darwinServices, decodeErr := decodeRPCArg[[]string](req.Args, 4)
+		if decodeErr != nil {
+			err = decodeErr
+			break
+		}
+		result = a.SetSystemProxy(enable, server, proxyType, bypass, darwinServices)
 	case "TcpPing":
 		address, decodeErr := decodeRPCArg[string](req.Args, 0)
 		if decodeErr != nil {
