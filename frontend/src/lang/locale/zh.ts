@@ -463,6 +463,7 @@ export default {
     updateDirect: '直连更新',
     updateSystemProxy: '系统代理更新',
     updateKernelProxy: '核心代理更新',
+    syncOutboundRefs: '同步出站引用',
     editProxies: '编辑节点',
     editSourceFile: '编辑节点(源文件)',
     copySub: '复制订阅链接',

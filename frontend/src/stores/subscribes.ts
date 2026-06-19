@@ -6,7 +6,7 @@ import { ReadFile, WriteFile, Requests } from '@/bridge'
 import { DefaultSubscribeScript, SubscribesFilePath } from '@/constant/app'
 import { DefaultExcludeProtocols } from '@/constant/kernel'
 import { PluginTriggerEvent, RequestMethod, RequestProxyMode } from '@/enums/app'
-import { usePluginsStore } from '@/stores'
+import { usePluginsStore, useProfilesStore } from '@/stores'
 import {
   sampleID,
   isValidSubJson,
@@ -32,6 +32,8 @@ import type { Subscription } from '@/types/app'
 export const useSubscribesStore = defineStore('subscribes', () => {
   const subscribes = ref<Subscription[]>([])
 
+  const defaultOutboundIds = ['outbound-select', 'outbound-urltest']
+
   const setupSubscribes = async () => {
     const data = await ignoredError(ReadFile, SubscribesFilePath)
     data && (subscribes.value = parse(data))
@@ -44,10 +46,89 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     return WriteFile(SubscribesFilePath, stringifyNoFolding(s))
   }
 
+  const addSubscribeToDefaultOutbounds = async (s: Subscription) => {
+    const profilesStore = useProfilesStore()
+    const profile = profilesStore.currentProfile
+    if (!profile) return
+
+    let changed = false
+    const ref = { id: s.id, tag: s.id, type: 'Subscription' as const }
+
+    defaultOutboundIds.forEach((id) => {
+      const outbound = profile.outbounds.find((item) => item.id === id)
+      if (!outbound || !['selector', 'urltest'].includes(outbound.type)) return
+      if (outbound.outbounds.some((item) => item.type === 'Subscription' && item.id === s.id)) {
+        return
+      }
+      outbound.outbounds.push({ ...ref })
+      changed = true
+    })
+
+    if (changed) await profilesStore.saveProfiles()
+  }
+
+  const removeSubscribeFromOutbounds = async (id: string) => {
+    const profilesStore = useProfilesStore()
+    let changed = false
+
+    profilesStore.profiles.forEach((profile) => {
+      profile.outbounds.forEach((outbound) => {
+        const next = outbound.outbounds.filter(
+          (item) => !(item.type === 'Subscription' && item.id === id),
+        )
+        if (next.length === outbound.outbounds.length) return
+        outbound.outbounds = next
+        changed = true
+      })
+    })
+
+    if (changed) await profilesStore.saveProfiles()
+  }
+
+  const syncSubscribeOutboundRefs = async () => {
+    const profilesStore = useProfilesStore()
+    const currentProfile = profilesStore.currentProfile
+    const subscriptionIds = new Set(subscribes.value.map((item) => item.id))
+    let added = 0
+    let removed = 0
+
+    profilesStore.profiles.forEach((profile) => {
+      profile.outbounds.forEach((outbound) => {
+        const next = outbound.outbounds.filter((item) => {
+          const remove = item.type === 'Subscription' && !subscriptionIds.has(item.id)
+          if (remove) removed += 1
+          return !remove
+        })
+        if (next.length !== outbound.outbounds.length) {
+          outbound.outbounds = next
+        }
+      })
+    })
+
+    if (currentProfile) {
+      defaultOutboundIds.forEach((id) => {
+        const outbound = currentProfile.outbounds.find((item) => item.id === id)
+        if (!outbound || !['selector', 'urltest'].includes(outbound.type)) return
+        subscribes.value.forEach((s) => {
+          if (outbound.outbounds.some((item) => item.type === 'Subscription' && item.id === s.id)) {
+            return
+          }
+          outbound.outbounds.push({ id: s.id, tag: s.id, type: 'Subscription' })
+          added += 1
+        })
+      })
+    }
+
+    if (added || removed) await profilesStore.saveProfiles()
+
+    return { added, removed }
+  }
+
   const addSubscribe = async (s: Subscription) => {
     subscribes.value.push(s)
     try {
       await saveSubscribes()
+      await addSubscribeToDefaultOutbounds(s)
     } catch (error) {
       const idx = subscribes.value.indexOf(s)
       if (idx !== -1) {
@@ -67,6 +148,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     const backup = subscribes.value.splice(idx, 1)[0]!
     try {
       await saveSubscribes()
+      await removeSubscribeFromOutbounds(id)
     } catch (error) {
       subscribes.value.splice(idx, 0, backup)
       throw error
@@ -319,6 +401,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     addSubscribe,
     editSubscribe,
     deleteSubscribe,
+    syncSubscribeOutboundRefs,
     updateSubscribe,
     updateSubscribes,
     getSubscribeById,

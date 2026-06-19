@@ -152,6 +152,16 @@ const handleUpdateSubs = async () => {
   }
 }
 
+const handleSyncOutboundRefs = async () => {
+  try {
+    await subscribeStore.syncSubscribeOutboundRefs()
+    message.success('common.success')
+  } catch (error: any) {
+    console.error('syncSubscribeOutboundRefs: ', error)
+    message.error(error)
+  }
+}
+
 const handleEditProxies = (id: string, editor = false) => {
   const sub = subscribeStore.getSubscribeById(id)
   if (sub) {
@@ -223,6 +233,9 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
       @click="handleUpdateSubs"
     >
       {{ t('common.updateAll') }}
+    </Button>
+    <Button type="link" @click="handleSyncOutboundRefs">
+      {{ t('subscribes.syncOutboundRefs') }}
     </Button>
     <Button type="primary" icon="add" class="ml-16" @click="handleShowSubForm()">
       {{ t('common.add') }}

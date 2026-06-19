@@ -465,6 +465,7 @@ export default {
     updateDirect: 'Update directly',
     updateSystemProxy: 'Update via system proxy',
     updateKernelProxy: 'Update via core proxy',
+    syncOutboundRefs: 'Sync outbound refs',
     editProxies: 'Edit Proxies',
     editSourceFile: 'Edit Proxies(Source)',
     copySub: 'Copy Link',
