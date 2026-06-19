@@ -35,14 +35,16 @@ import {
 } from '@/enums/app'
 import i18n, { loadLocale } from '@/lang'
 import { useAppStore, useEnvStore } from '@/stores'
-import {
-  debounce,
-  updateTrayAndMenus,
-  ignoredError,
-  deepClone,
-} from '@/utils'
+import { debounce, updateTrayAndMenus, ignoredError, deepClone } from '@/utils'
 
 import type { AppSettings } from '@/types/app'
+
+export const normalizeLogSettings = (settings: AppSettings['log'] | undefined) => {
+  const retentionDays = Number(settings?.retentionDays)
+  return {
+    retentionDays: Number.isFinite(retentionDays) && retentionDays > 0 ? retentionDays : 14,
+  }
+}
 
 export const useAppSettingsStore = defineStore('app-settings', () => {
   const appStore = useAppStore()
@@ -79,6 +81,9 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     userAgent: '',
     startupDelay: 30,
     connections: DefaultConnections(),
+    log: {
+      retentionDays: 14,
+    },
     kernel: {
       realMemoryUsage: false,
       branch: Branch.Main,
@@ -134,6 +139,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
       settings.kernel.main = DefaultCoreConfig()
       settings.kernel.alpha = DefaultCoreConfig()
     }
+    settings.log = normalizeLogSettings(settings.log)
     if (!settings.proxyBypassList) {
       settings.proxyBypassList = (await ignoredError(GetSystemProxyBypass)) || ''
     }
@@ -285,7 +291,10 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
   const setSystemProxyBypass = debounce(() => {
     applyAppSettings.systemProxyBypass()
   }, 3000)
-  watch(() => [app.value.proxyBypassList, app.value.darwinSystemProxyServices], setSystemProxyBypass)
+  watch(
+    () => [app.value.proxyBypassList, app.value.darwinSystemProxyServices],
+    setSystemProxyBypass,
+  )
 
   return { setupAppSettings, app, themeMode }
 })

@@ -712,6 +712,10 @@ export default {
     darwinSystemProxyServices: '代理网络服务名称',
     autoStartKernel: '程序启动时开启核心',
     realMemoryUsage: '显示真实的核心内存占用',
+    logRetentionDays: {
+      name: '日志保留天数',
+      tips: '必须大于 0，默认 14 天',
+    },
     autoRestartKernel: {
       name: '相关配置变化时自动重启核心',
       tips: '会中断所有连接，且可能重启失败',

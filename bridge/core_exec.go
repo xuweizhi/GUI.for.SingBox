@@ -23,7 +23,8 @@ func isCoreExecRequest(path string, options ExecOptions) bool {
 	if filepath.ToSlash(filepath.Clean(options.PidFile)) != filepath.ToSlash(filepath.Clean(headlessCorePidFilePath)) {
 		return false
 	}
-	if filepath.ToSlash(filepath.Clean(options.LogFile)) != filepath.ToSlash(filepath.Clean(headlessCoreLogFilePath)) {
+	logName := filepath.Base(filepath.ToSlash(filepath.Clean(options.LogFile)))
+	if filepath.ToSlash(filepath.Clean(options.LogFile)) != filepath.ToSlash(filepath.Clean(headlessCoreLogFilePath)) && !regexpCoreLogName.MatchString(logName) {
 		return false
 	}
 	return strings.HasPrefix(filepath.Base(resolvePath(path)), "sing-box")

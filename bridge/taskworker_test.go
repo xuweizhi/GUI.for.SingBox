@@ -138,6 +138,29 @@ func TestRecordScheduledTaskLogPersistsLastTimeAndAppendsLog(t *testing.T) {
 	}
 }
 
+func TestRecordScheduledTaskLogPersistsToDiskAndHydratesNewWorker(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+	})
+
+	app := &App{}
+	result := app.RecordScheduledTaskLog(`{"id":"task-1","name":"Example","startTime":111,"endTime":222,"result":[{"ok":true,"result":"ok"}]}`)
+	if !result.Flag {
+		t.Fatalf("RecordScheduledTaskLog failed: %s", result.Data)
+	}
+
+	newApp := &App{}
+	logsResult := newApp.GetScheduledTaskWorkerLogs()
+	if !logsResult.Flag {
+		t.Fatalf("GetScheduledTaskWorkerLogs failed: %s", logsResult.Data)
+	}
+	if logsResult.Data != `[{"id":"task-1","name":"Example","startTime":111,"endTime":222,"result":[{"ok":true,"result":"ok"}]}]` {
+		t.Fatalf("unexpected persisted logs: %s", logsResult.Data)
+	}
+}
+
 func TestUpdateScheduledTaskLastTimeConcurrent(t *testing.T) {
 	previousBasePath := Env.BasePath
 	Env.BasePath = t.TempDir()

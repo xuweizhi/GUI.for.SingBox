@@ -77,6 +77,7 @@ func CreateApp(fs embed.FS) *App {
 	extractEmbeddedFiles(fs)
 
 	loadConfig()
+	configureAppLogging()
 
 	return app
 }

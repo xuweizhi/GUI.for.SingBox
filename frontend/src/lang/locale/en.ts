@@ -714,6 +714,10 @@ export default {
     darwinSystemProxyServices: 'Proxy Network Service Names',
     autoStartKernel: 'Start core on launch',
     realMemoryUsage: 'Show actual core memory usage',
+    logRetentionDays: {
+      name: 'Log retention days',
+      tips: 'Must be greater than 0; default is 14 days',
+    },
     autoRestartKernel: {
       name: 'Auto-restart core on config changes',
       tips: 'It will interrupt all connections and may fail to restart',

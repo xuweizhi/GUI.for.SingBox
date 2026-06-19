@@ -83,6 +83,9 @@ export interface AppSettings {
     visibility: Record<string, boolean>
     order: string[]
   }
+  log: {
+    retentionDays: number
+  }
   kernel: {
     realMemoryUsage: boolean
     branch: Branch

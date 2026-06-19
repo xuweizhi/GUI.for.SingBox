@@ -20,6 +20,13 @@ export const CoreLogFilePath = CoreWorkingDirectory + '/sing-box.log'
 export const CoreConfigFilePath = CoreWorkingDirectory + '/config.json'
 export const CoreCacheFilePath = CoreWorkingDirectory + '/cache.db'
 
+export const getCoreLogFilePath = (date = new Date()) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `logs/core-${year}-${month}-${day}.log`
+}
+
 export const ModeOptions = [
   {
     label: 'kernel.global',

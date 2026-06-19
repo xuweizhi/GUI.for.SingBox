@@ -101,8 +101,13 @@ type AppConfig struct {
 	MultipleInstance  bool           `yaml:"multipleInstance"`
 	RollingRelease    bool           `yaml:"rollingRelease" default:"true"`
 	AutoStartKernel   bool           `yaml:"autoStartKernel"`
+	Log               LogSettings    `yaml:"log"`
 	Kernel            KernelSettings `yaml:"kernel"`
 	StartHidden       bool
+}
+
+type LogSettings struct {
+	RetentionDays int `yaml:"retentionDays"`
 }
 
 type KernelRuntimeConfig struct {

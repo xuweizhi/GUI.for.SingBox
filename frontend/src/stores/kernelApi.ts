@@ -24,9 +24,9 @@ import {
 } from '@/bridge'
 import {
   CoreConfigFilePath,
-  CoreLogFilePath,
   CorePidFilePath,
   CoreWorkingDirectory,
+  getCoreLogFilePath,
 } from '@/constant/kernel'
 import { DefaultInboundMixed } from '@/constant/profile'
 import { Branch } from '@/enums/app'
@@ -40,6 +40,7 @@ import {
   useSubscribesStore,
   useRulesetsStore,
 } from '@/stores'
+import { resolveCoreStopPid } from '@/stores/kernelProcess'
 import {
   generateConfigFile,
   updateTrayAndMenus,
@@ -263,12 +264,13 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   onLogs((data) => logsStore.recordKernelApiLog(data))
 
   const refreshKernelLogs = async () => {
-    const logs = await ReadFile(CoreLogFilePath, { Range: '-4096' }).catch(() => '')
+    const logs = await ReadFile(getCoreLogFilePath(), { Range: '-4096' }).catch(() => '')
     logsStore.hydrateKernelLogs(logs)
   }
 
   const getCoreControllerPort = () => {
-    const controller = profilesStore.currentProfile?.experimental.clash_api.external_controller || '127.0.0.1:20123'
+    const controller =
+      profilesStore.currentProfile?.experimental.clash_api.external_controller || '127.0.0.1:20123'
 
     if (controller.startsWith('[')) {
       const match = controller.match(/^\[[^\]]+\](?::(\d+))?$/)
@@ -335,14 +337,16 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       undefined,
       async (end) => {
         stopped = true
-        const logs = await ReadFile(CoreLogFilePath, { Range: '-4096' }).catch((err) => String(err))
+        const logs = await ReadFile(getCoreLogFilePath(), { Range: '-4096' }).catch((err) =>
+          String(err),
+        )
         logsStore.hydrateKernelLogs(logs)
         end && logsStore.recordKernelLog(end)
         onCoreStopped()
       },
       {
         PidFile: CorePidFilePath,
-        LogFile: CoreLogFilePath,
+        LogFile: getCoreLogFilePath(),
         Env: getKernelRuntimeEnv(isAlpha),
       },
     )
@@ -429,7 +433,13 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     stopping.value = true
     try {
       await pluginsStore.onBeforeCoreStopTrigger()
-      await KillProcess(corePid.value)
+      const pid = await resolveCoreStopPid(
+        corePid.value,
+        getCoreControllerPort(),
+        FindListeningProcess,
+      )
+      corePid.value = pid
+      await KillProcess(pid)
       await (isCoreStartedByThisInstance ? coreStoppedPromise : onCoreStopped())
     } finally {
       stopping.value = false

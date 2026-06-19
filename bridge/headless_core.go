@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -50,7 +51,7 @@ func (a *App) startHeadlessCoreIfNeeded() error {
 
 	result := a.ExecBackground(spec.path, spec.args, "", "", ExecOptions{
 		PidFile: headlessCorePidFilePath,
-		LogFile: headlessCoreLogFilePath,
+		LogFile: logFilePath("core", time.Now()),
 		Env:     spec.env,
 	})
 	if !result.Flag {

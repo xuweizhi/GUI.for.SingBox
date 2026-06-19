@@ -108,8 +108,11 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 		if err := os.MkdirAll(filepath.Dir(logPath), os.ModePerm); err != nil {
 			return FlagResult{false, err.Error()}
 		}
+		if err := cleanupExpiredLogs(Config.Log.RetentionDays, time.Now()); err != nil {
+			return FlagResult{false, err.Error()}
+		}
 
-		logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return FlagResult{false, err.Error()}
 		}

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,7 @@ const (
 	scheduledTaskWorkerScriptSrc  = "taskworker/worker.mjs"
 	scheduledTaskWorkerScriptDst  = "data/.cache/taskworker/worker.mjs"
 	scheduledTaskLogEventName     = "scheduledTaskLog"
+	scheduledTaskLogFileCategory  = "scheduledtasks"
 	scheduledTaskWorkerLogsMaxLen = 200
 	defaultSubscribeScript        = "const onSubscribe = async (proxies, subscription) => {\n  return { proxies, subscription }\n}"
 )
@@ -226,7 +228,11 @@ func (a *App) GetScheduledTaskWorkerStatus() FlagResult {
 }
 
 func (a *App) GetScheduledTaskWorkerLogs() FlagResult {
-	data, err := json.Marshal(a.taskWorker().snapshotLogs())
+	logs, err := loadScheduledTaskWorkerLogs()
+	if err != nil {
+		return FlagResult{false, err.Error()}
+	}
+	data, err := json.Marshal(logs)
 	if err != nil {
 		return FlagResult{false, err.Error()}
 	}
@@ -235,6 +241,9 @@ func (a *App) GetScheduledTaskWorkerLogs() FlagResult {
 
 func (a *App) ClearScheduledTaskWorkerLogs() FlagResult {
 	a.taskWorker().clearLogs()
+	if err := clearScheduledTaskWorkerLogs(); err != nil {
+		return FlagResult{false, err.Error()}
+	}
 	return FlagResult{true, "Success"}
 }
 
@@ -325,6 +334,80 @@ func (w *scheduledTaskWorkerSupervisor) clearLogs() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.logs = nil
+}
+
+func appendScheduledTaskWorkerLog(record scheduledTaskWorkerLogRecord) error {
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	return appendManagedLog(scheduledTaskLogFileCategory, string(data))
+}
+
+func loadScheduledTaskWorkerLogs() ([]scheduledTaskWorkerLogRecord, error) {
+	dir := resolvePath(logsDirectory)
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return []scheduledTaskWorkerLogRecord{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() || !managedLogPattern.MatchString(entry.Name()) || !strings.HasPrefix(entry.Name(), scheduledTaskLogFileCategory+"-") {
+			continue
+		}
+		files = append(files, filepath.Join(dir, entry.Name()))
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(files)))
+
+	logs := make([]scheduledTaskWorkerLogRecord, 0)
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		lines := strings.Split(string(data), "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			line := strings.TrimSpace(lines[i])
+			if line == "" {
+				continue
+			}
+			var record scheduledTaskWorkerLogRecord
+			if err := json.Unmarshal([]byte(line), &record); err != nil {
+				log.Printf("Invalid scheduled task log record in %s: %v", file, err)
+				continue
+			}
+			logs = append(logs, record)
+			if len(logs) >= scheduledTaskWorkerLogsMaxLen {
+				return logs, nil
+			}
+		}
+	}
+
+	return logs, nil
+}
+
+func clearScheduledTaskWorkerLogs() error {
+	dir := resolvePath(logsDirectory)
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !managedLogPattern.MatchString(entry.Name()) || !strings.HasPrefix(entry.Name(), scheduledTaskLogFileCategory+"-") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateScheduledTaskLogRecord(record scheduledTaskWorkerLogRecord) error {
@@ -626,6 +709,9 @@ func (w *scheduledTaskWorkerSupervisor) recordLog(record scheduledTaskWorkerLogR
 		record.Result = []scheduledTaskWorkerResultItem{}
 	}
 	w.appendLog(record)
+	if err := appendScheduledTaskWorkerLog(record); err != nil {
+		log.Printf("Scheduled task log persist failed: %v", err)
+	}
 	if w.app == nil || (!w.app.IsHeadless() && w.app.Ctx == nil) {
 		return
 	}
@@ -742,6 +828,9 @@ func (w *scheduledTaskWorkerSupervisor) readStderr(stderr io.ReadCloser) {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
+			if err := appendManagedLog("taskworker", line); err != nil {
+				log.Printf("Scheduled task worker log persist failed: %v", err)
+			}
 			log.Printf("Scheduled task worker: %s", line)
 		}
 	}
