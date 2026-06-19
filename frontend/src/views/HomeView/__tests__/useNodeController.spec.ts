@@ -1,0 +1,286 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { effectScope, nextTick } from 'vue'
+
+const mocks = vi.hoisted(() => ({
+  getProxyDelay: vi.fn(),
+  handleUseProxy: vi.fn(),
+  refreshProviderProxies: vi.fn(),
+  kernelStore: undefined as any,
+}))
+
+vi.mock('@/api/kernel', () => ({
+  getProxyDelay: mocks.getProxyDelay,
+}))
+
+vi.mock('@/bridge', () => ({}))
+
+vi.mock('@/utils/helper', () => ({
+  handleUseProxy: mocks.handleUseProxy,
+}))
+
+vi.mock('@/stores', async () => {
+  const { reactive } = await import('vue')
+  mocks.kernelStore ||= reactive({
+    running: true,
+    config: { mode: 'rule' },
+    proxies: {
+      Proxy: {
+        alive: true,
+        name: 'Proxy',
+        type: 'Selector',
+        all: ['HK 01', 'JP 01'],
+        now: 'HK 01',
+        udp: false,
+        history: [],
+      },
+      'HK 01': {
+        alive: true,
+        name: 'HK 01',
+        type: 'VLESS',
+        all: [],
+        now: '',
+        udp: true,
+        history: [{ delay: 80 }],
+      },
+      'JP 01': {
+        alive: true,
+        name: 'JP 01',
+        type: 'Trojan',
+        all: [],
+        now: '',
+        udp: false,
+        history: [],
+      },
+    },
+    refreshProviderProxies: mocks.refreshProviderProxies,
+  })
+
+  return {
+    useKernelApiStore: () => mocks.kernelStore,
+    useProfilesStore: () => ({
+      currentProfile: {
+        route: { final: 'proxy-id' },
+        outbounds: [{ id: 'proxy-id', tag: 'Proxy', hidden: false }],
+      },
+    }),
+    useAppSettingsStore: () => ({
+      app: {
+        kernel: {
+          testUrl: 'https://www.gstatic.com/generate_204',
+          testTimeout: 5000,
+          concurrencyLimit: 1,
+        },
+      },
+    }),
+  }
+})
+
+import { useNodeController } from '@/views/HomeView/useNodeController'
+
+describe('useNodeController', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.resetAllMocks()
+    mocks.refreshProviderProxies.mockResolvedValue(undefined)
+    mocks.handleUseProxy.mockResolvedValue(undefined)
+    mocks.kernelStore.running = true
+    mocks.kernelStore.config.mode = 'rule'
+    mocks.kernelStore.proxies.Proxy.now = 'HK 01'
+    mocks.kernelStore.proxies['HK 01'].history = [{ delay: 80 }]
+    mocks.kernelStore.proxies['JP 01'].history = []
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('deduplicates concurrent refreshes', async () => {
+    let resolveRefresh!: () => void
+    mocks.refreshProviderProxies.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveRefresh = resolve
+      }),
+    )
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+
+    const first = controller.refresh()
+    const second = controller.refresh()
+    expect(mocks.refreshProviderProxies).toHaveBeenCalledTimes(1)
+
+    resolveRefresh()
+    await Promise.all([first, second])
+    scope.stop()
+  })
+
+  it('keeps the last proxy snapshot and marks it stale after refresh failure', async () => {
+    mocks.refreshProviderProxies.mockRejectedValue(new Error('controller offline'))
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+
+    await expect(controller.refresh()).rejects.toThrow('controller offline')
+
+    expect(mocks.kernelStore.proxies.Proxy.now).toBe('HK 01')
+    expect(controller.stale.value).toBe(true)
+    expect(controller.refreshError.value).toContain('controller offline')
+    scope.stop()
+  })
+
+  it('selects the primary group from the last snapshot when modal refresh fails', async () => {
+    mocks.refreshProviderProxies.mockRejectedValue(new Error('controller offline'))
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+
+    await expect(controller.prepareModal()).rejects.toThrow('controller offline')
+
+    expect(controller.selectedGroupName.value).toBe('Proxy')
+    expect(controller.nodes.value.map((node) => node.name)).toEqual(['HK 01', 'JP 01'])
+    scope.stop()
+  })
+
+  it('does not update stale state after its scope is disposed', async () => {
+    let rejectRefresh!: (error: Error) => void
+    mocks.refreshProviderProxies.mockReturnValue(
+      new Promise<void>((_, reject) => {
+        rejectRefresh = reject
+      }),
+    )
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+
+    const refreshing = controller.refresh()
+    scope.stop()
+    rejectRefresh(new Error('late failure'))
+    await expect(refreshing).rejects.toThrow('late failure')
+
+    expect(controller.stale.value).toBe(false)
+    expect(controller.refreshError.value).toBe('')
+  })
+
+  it('switches only Selector groups and refreshes after success', async () => {
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const result = await controller.switchNode('JP 01')
+
+    expect(result.ok).toBe(true)
+    expect(mocks.handleUseProxy).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Proxy', type: 'Selector' }),
+      expect.objectContaining({ name: 'JP 01' }),
+    )
+    expect(mocks.refreshProviderProxies).toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('does not submit the already-selected node again', async () => {
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const result = await controller.switchNode('HK 01')
+
+    expect(result.ok).toBe(true)
+    expect(mocks.handleUseProxy).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('blocks switching while direct mode is active', async () => {
+    mocks.kernelStore.config.mode = 'direct'
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const result = await controller.switchNode('JP 01')
+
+    expect(result).toEqual({ ok: false, error: 'home.nodes.readonly' })
+    expect(mocks.handleUseProxy).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('records a failed delay without exposing 0 ms', async () => {
+    mocks.getProxyDelay.mockRejectedValue(new Error('timeout'))
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const result = await controller.testNode('JP 01')
+
+    expect(result.ok).toBe(false)
+    expect(controller.nodeErrors.value.get('JP 01')).toContain('timeout')
+    expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
+      delay: null,
+      delayStatus: 'failed',
+    })
+    scope.stop()
+  })
+
+  it('refreshes proxy state after a single node test', async () => {
+    mocks.getProxyDelay.mockResolvedValue({ delay: 65 })
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+    mocks.refreshProviderProxies.mockClear()
+
+    const result = await controller.testNode('JP 01')
+
+    expect(result.ok).toBe(true)
+    expect(mocks.refreshProviderProxies).toHaveBeenCalledTimes(1)
+    scope.stop()
+  })
+
+  it('treats a zero delay response as unavailable', async () => {
+    mocks.getProxyDelay.mockResolvedValue({ delay: 0 })
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const result = await controller.testNode('JP 01')
+
+    expect(result).toEqual({ ok: false, error: 'home.nodes.unavailable' })
+    expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
+      delay: null,
+      delayStatus: 'failed',
+    })
+    scope.stop()
+  })
+
+  it('cancels queued group tests while allowing the active request to finish', async () => {
+    let release!: () => void
+    mocks.getProxyDelay.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ delay: 90 })
+        }),
+    )
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const testing = controller.testGroup()
+    await Promise.resolve()
+    await Promise.resolve()
+    controller.cancelGroupTest()
+    release()
+    await testing
+
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(1)
+    expect(controller.batch.value.cancelled).toBe(true)
+    scope.stop()
+  })
+
+  it('refreshes every five seconds only while running', async () => {
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    controller.startPolling()
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(mocks.refreshProviderProxies).toHaveBeenCalledTimes(3)
+
+    mocks.kernelStore.running = false
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(mocks.refreshProviderProxies).toHaveBeenCalledTimes(3)
+    scope.stop()
+  })
+})
