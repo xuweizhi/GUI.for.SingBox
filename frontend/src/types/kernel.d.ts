@@ -25,7 +25,7 @@ export interface CoreApiProxy {
 }
 
 export interface CoreApiProxies {
-  proxies: Record<string, Proxy>
+  proxies: Record<string, CoreApiProxy>
 }
 
 export interface CoreApiConnections {

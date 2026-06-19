@@ -243,7 +243,11 @@ export const DisableAutoStart = async () => {
 }
 
 // Others
-export const handleUseProxy = async (group: any, proxy: any) => {
+export const handleUseProxy = async (
+  group: any,
+  proxy: any,
+  options: { refresh?: boolean } = {},
+) => {
   if (group.type !== 'Selector' || group.now === proxy.name) return
   const promises: Promise<null>[] = []
   const appSettings = useAppSettingsStore()
@@ -258,7 +262,9 @@ export const handleUseProxy = async (group: any, proxy: any) => {
   }
   await useProxy(encodeURIComponent(group.name), proxy.name)
   await Promise.all(promises)
-  await kernelApiStore.refreshProviderProxies()
+  if (options.refresh !== false) {
+    await kernelApiStore.refreshProviderProxies()
+  }
 }
 
 export const handleChangeMode = async (mode: 'direct' | 'global' | 'rule') => {
