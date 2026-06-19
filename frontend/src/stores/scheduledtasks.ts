@@ -62,7 +62,8 @@ export const useScheduledTasksStore = defineStore("scheduledtasks", () => {
     switch (task.type) {
       case ScheduledTasksType.UpdateSubscription:
         return task.subscriptions.every(isPureSubscription);
-      case ScheduledTasksType.UpdateAllSubscription: {
+      case ScheduledTasksType.UpdateAllSubscription:
+      case ScheduledTasksType.UpdateAllSubscriptionAndSyncOutboundRefs: {
         const subscribesStore = useSubscribesStore();
         return (
           subscribesStore.subscribes
@@ -236,6 +237,20 @@ export const useScheduledTasksStore = defineStore("scheduledtasks", () => {
       case ScheduledTasksType.UpdateAllSubscription: {
         const subscribesStore = useSubscribesStore();
         return withOutput(["0"], () => subscribesStore.updateSubscribes());
+      }
+      case ScheduledTasksType.UpdateAllSubscriptionAndSyncOutboundRefs: {
+        const subscribesStore = useSubscribesStore();
+        return async () => {
+          const output = await subscribesStore.updateSubscribes();
+          const syncResult = await subscribesStore.syncSubscribeOutboundRefs();
+          return [
+            ...output.map((item) => ({ ok: item.ok, result: item.result })),
+            {
+              ok: true,
+              result: `Subscription outbound refs synced. Added: ${syncResult.added}; Removed: ${syncResult.removed}.`,
+            },
+          ];
+        };
       }
       case ScheduledTasksType.UpdateAllRuleset: {
         const rulesetsStore = useRulesetsStore();

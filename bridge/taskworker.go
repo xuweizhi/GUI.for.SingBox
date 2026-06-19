@@ -25,6 +25,7 @@ import (
 const (
 	scheduledTasksFilePath        = "data/scheduledtasks.yaml"
 	subscribesFilePath            = "data/subscribes.yaml"
+	profilesFilePath              = "data/profiles.yaml"
 	pluginsFilePath               = "data/plugins.yaml"
 	pluginHubFilePath             = "data/.cache/plugin-list.json"
 	rulesetsFilePath              = "data/rulesets.yaml"
@@ -37,12 +38,13 @@ const (
 )
 
 var goScheduledTaskTypes = map[string]struct{}{
-	"update::subscription":      {},
-	"update::all::subscription": {},
-	"update::plugin":            {},
-	"update::all::plugin":       {},
-	"update::ruleset":           {},
-	"update::all::ruleset":      {},
+	"update::subscription":                          {},
+	"update::all::subscription":                     {},
+	"update::all::subscription::sync-outbound-refs": {},
+	"update::plugin":                                {},
+	"update::all::plugin":                           {},
+	"update::ruleset":                               {},
+	"update::all::ruleset":                          {},
 }
 
 var subscriptionShareLinkPattern = regexp.MustCompile(`(?i)^(?:ss|ssr|vmess|vless|trojan|hysteria2?|hy2|tuic|wireguard|anytls)://`)
@@ -111,6 +113,24 @@ type subscriptionConfig struct {
 	Script string `json:"script" yaml:"script"`
 }
 
+type profileOutboundRefConfig struct {
+	ID   string `json:"id" yaml:"id"`
+	Tag  string `json:"tag" yaml:"tag"`
+	Type string `json:"type" yaml:"type"`
+}
+
+type profileOutboundConfig struct {
+	ID        string                     `json:"id" yaml:"id"`
+	Tag       string                     `json:"tag" yaml:"tag"`
+	Type      string                     `json:"type" yaml:"type"`
+	Outbounds []profileOutboundRefConfig `json:"outbounds" yaml:"outbounds"`
+}
+
+type profileConfig struct {
+	ID        string                  `json:"id" yaml:"id"`
+	Outbounds []profileOutboundConfig `json:"outbounds" yaml:"outbounds"`
+}
+
 type pluginConfig struct {
 	ID            string                       `json:"id" yaml:"id"`
 	Version       string                       `json:"version" yaml:"version"`
@@ -136,6 +156,9 @@ type pluginConfig struct {
 type backendNetworkSettings struct {
 	RequestProxyMode string `yaml:"requestProxyMode"`
 	CustomProxy      string `yaml:"customProxy"`
+	Kernel           struct {
+		Profile string `yaml:"profile"`
+	} `yaml:"kernel"`
 }
 
 type scheduledTaskWorkerResultItem struct {
@@ -1018,6 +1041,37 @@ func saveSubscriptions(subscribes []subscriptionConfig) error {
 	return os.WriteFile(resolvePath(subscribesFilePath), content, 0644)
 }
 
+func loadProfiles() ([]profileConfig, error) {
+	content, err := os.ReadFile(resolvePath(profilesFilePath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []profileConfig{}, nil
+		}
+		return nil, err
+	}
+
+	if len(strings.TrimSpace(string(content))) == 0 {
+		return []profileConfig{}, nil
+	}
+
+	var profiles []profileConfig
+	if err := yaml.Unmarshal(content, &profiles); err != nil {
+		return nil, err
+	}
+	return profiles, nil
+}
+
+func saveProfiles(profiles []profileConfig) error {
+	content, err := yaml.Marshal(profiles)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(resolvePath("data"), os.ModePerm); err != nil {
+		return err
+	}
+	return os.WriteFile(resolvePath(profilesFilePath), content, 0644)
+}
+
 func loadPlugins() ([]pluginConfig, error) {
 	content, err := os.ReadFile(resolvePath(pluginsFilePath))
 	if err != nil {
@@ -1201,7 +1255,7 @@ func loadBackendNetworkSettings() (backendNetworkSettings, error) {
 
 func (w *scheduledTaskWorkerSupervisor) validateBackendTaskSupport(task scheduledTaskConfig) error {
 	switch task.Type {
-	case "update::subscription", "update::all::subscription":
+	case "update::subscription", "update::all::subscription", "update::all::subscription::sync-outbound-refs":
 		return w.validateSubscriptionTaskSupport(task)
 	case "update::plugin", "update::all::plugin":
 		settings, err := loadBackendNetworkSettings()
@@ -1294,7 +1348,7 @@ func collectTargetSubscriptions(
 	task scheduledTaskConfig,
 	subscribes []subscriptionConfig,
 ) []subscriptionConfig {
-	if task.Type == "update::all::subscription" {
+	if task.Type == "update::all::subscription" || task.Type == "update::all::subscription::sync-outbound-refs" {
 		return subscribes
 	}
 
@@ -1337,6 +1391,8 @@ func (w *scheduledTaskWorkerSupervisor) runGoTask(
 		return w.runSubscriptionTask(task.Subscriptions), nil
 	case "update::all::subscription":
 		return w.runAllSubscriptionsTask()
+	case "update::all::subscription::sync-outbound-refs":
+		return w.runAllSubscriptionsAndSyncOutboundRefsTask()
 	case "update::plugin":
 		return w.runPluginTask(task.Plugins), nil
 	case "update::all::plugin":
@@ -1424,6 +1480,107 @@ func (w *scheduledTaskWorkerSupervisor) runAllSubscriptionsTask() ([]scheduledTa
 	}
 
 	return output, nil
+}
+
+func (w *scheduledTaskWorkerSupervisor) runAllSubscriptionsAndSyncOutboundRefsTask() ([]scheduledTaskWorkerResultItem, error) {
+	output, err := w.runAllSubscriptionsTask()
+	if err != nil {
+		return output, err
+	}
+
+	added, removed, err := syncSubscriptionOutboundRefs()
+	if err != nil {
+		output = append(output, scheduledTaskWorkerResultItem{OK: false, Result: err.Error()})
+		return output, nil
+	}
+
+	output = append(output, scheduledTaskWorkerResultItem{
+		OK:     true,
+		Result: fmt.Sprintf("Subscription outbound refs synced. Added: %d; Removed: %d.", added, removed),
+	})
+	return output, nil
+}
+
+func syncSubscriptionOutboundRefs() (int, int, error) {
+	subscribes, err := loadSubscriptions()
+	if err != nil {
+		return 0, 0, err
+	}
+	profiles, err := loadProfiles()
+	if err != nil {
+		return 0, 0, err
+	}
+	settings, err := loadBackendNetworkSettings()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	subscriptionIDs := make(map[string]struct{}, len(subscribes))
+	for _, subscribe := range subscribes {
+		subscriptionIDs[subscribe.ID] = struct{}{}
+	}
+
+	added := 0
+	removed := 0
+	changed := false
+	for profileIdx := range profiles {
+		for outboundIdx := range profiles[profileIdx].Outbounds {
+			outbound := &profiles[profileIdx].Outbounds[outboundIdx]
+			next := outbound.Outbounds[:0]
+			for _, ref := range outbound.Outbounds {
+				if ref.Type == "Subscription" {
+					if _, ok := subscriptionIDs[ref.ID]; !ok {
+						removed++
+						changed = true
+						continue
+					}
+				}
+				next = append(next, ref)
+			}
+			outbound.Outbounds = next
+		}
+	}
+
+	for profileIdx := range profiles {
+		if profiles[profileIdx].ID != settings.Kernel.Profile {
+			continue
+		}
+		for outboundIdx := range profiles[profileIdx].Outbounds {
+			outbound := &profiles[profileIdx].Outbounds[outboundIdx]
+			if outbound.ID != "outbound-select" && outbound.ID != "outbound-urltest" {
+				continue
+			}
+			if outbound.Type != "selector" && outbound.Type != "urltest" {
+				continue
+			}
+			for _, subscribe := range subscribes {
+				exists := false
+				for _, ref := range outbound.Outbounds {
+					if ref.Type == "Subscription" && ref.ID == subscribe.ID {
+						exists = true
+						break
+					}
+				}
+				if exists {
+					continue
+				}
+				outbound.Outbounds = append(outbound.Outbounds, profileOutboundRefConfig{
+					ID:   subscribe.ID,
+					Tag:  subscribe.ID,
+					Type: "Subscription",
+				})
+				added++
+				changed = true
+			}
+		}
+	}
+
+	if changed {
+		if err := saveProfiles(profiles); err != nil {
+			return 0, 0, err
+		}
+	}
+	return added, removed, nil
 }
 
 func (w *scheduledTaskWorkerSupervisor) runPluginTask(ids []string) []scheduledTaskWorkerResultItem {

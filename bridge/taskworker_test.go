@@ -460,6 +460,86 @@ func TestValidateBackendTaskSupportRejectsPluginKernelProxyMode(t *testing.T) {
 	}
 }
 
+func TestRunAllSubscriptionsAndSyncOutboundRefsTask(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+	})
+
+	if err := os.MkdirAll(resolvePath("data/subscribes"), 0755); err != nil {
+		t.Fatalf("mkdir subscribes: %v", err)
+	}
+	if err := os.WriteFile(resolvePath("data/user.yaml"), []byte("kernel:\n  profile: profile-1\nrequestProxyMode: none\n"), 0644); err != nil {
+		t.Fatalf("write user settings: %v", err)
+	}
+	if err := os.WriteFile(resolvePath("data/subscribes/sub-1.json"), []byte(`[{"tag":"node-a","type":"vmess"}]`), 0644); err != nil {
+		t.Fatalf("write subscription file: %v", err)
+	}
+	if err := saveSubscriptions([]subscriptionConfig{{
+		ID:     "sub-1",
+		Name:   "Sub 1",
+		Type:   "Manual",
+		Path:   "data/subscribes/sub-1.json",
+		Script: defaultSubscribeScript,
+	}}); err != nil {
+		t.Fatalf("saveSubscriptions: %v", err)
+	}
+
+	profilesYAML := `- id: profile-1
+  outbounds:
+    - id: outbound-select
+      tag: Select
+      type: selector
+      outbounds:
+        - id: stale-sub
+          tag: stale-sub
+          type: Subscription
+    - id: outbound-urltest
+      tag: Auto
+      type: urltest
+      outbounds: []
+- id: profile-2
+  outbounds:
+    - id: outbound-select
+      tag: Other Select
+      type: selector
+      outbounds:
+        - id: stale-sub
+          tag: stale-sub
+          type: Subscription
+`
+	if err := os.WriteFile(resolvePath("data/profiles.yaml"), []byte(profilesYAML), 0644); err != nil {
+		t.Fatalf("write profiles yaml: %v", err)
+	}
+
+	worker := (&App{}).taskWorker()
+	result, err := worker.runGoTask(scheduledTaskConfig{Type: "update::all::subscription::sync-outbound-refs"})
+	if err != nil {
+		t.Fatalf("runGoTask: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected update and sync results, got %d", len(result))
+	}
+
+	profiles, err := loadProfiles()
+	if err != nil {
+		t.Fatalf("loadProfiles: %v", err)
+	}
+	firstSelect := profiles[0].Outbounds[0].Outbounds
+	firstAuto := profiles[0].Outbounds[1].Outbounds
+	secondSelect := profiles[1].Outbounds[0].Outbounds
+	if len(firstSelect) != 1 || firstSelect[0].ID != "sub-1" || firstSelect[0].Type != "Subscription" {
+		t.Fatalf("unexpected current profile select refs: %+v", firstSelect)
+	}
+	if len(firstAuto) != 1 || firstAuto[0].ID != "sub-1" || firstAuto[0].Type != "Subscription" {
+		t.Fatalf("unexpected current profile auto refs: %+v", firstAuto)
+	}
+	if len(secondSelect) != 0 {
+		t.Fatalf("expected stale refs removed from second profile, got %+v", secondSelect)
+	}
+}
+
 func TestDoUpdatePluginHTTPWritesPluginFile(t *testing.T) {
 	previousBasePath := Env.BasePath
 	Env.BasePath = t.TempDir()

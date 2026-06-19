@@ -624,6 +624,7 @@ export default {
     'update::ruleset': 'update::ruleset',
     'update::plugin': 'update::plugin',
     'update::all::subscription': 'update::all::subscription',
+    'update::all::subscription::sync-outbound-refs': 'update::all::subscription::sync-outbound-refs',
     'update::all::ruleset': 'update::all::ruleset',
     'update::all::plugin': 'update::all::plugin',
     'run::plugin': 'run::plugin',

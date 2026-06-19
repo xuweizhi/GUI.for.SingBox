@@ -184,6 +184,10 @@ export const ScheduledTaskOptions = [
     label: 'scheduledtask.update::all::subscription',
     value: ScheduledTasksType.UpdateAllSubscription,
   },
+  {
+    label: 'scheduledtask.update::all::subscription::sync-outbound-refs',
+    value: ScheduledTasksType.UpdateAllSubscriptionAndSyncOutboundRefs,
+  },
   { label: 'scheduledtask.update::all::ruleset', value: ScheduledTasksType.UpdateAllRuleset },
   { label: 'scheduledtask.update::all::plugin', value: ScheduledTasksType.UpdateAllPlugin },
 ]

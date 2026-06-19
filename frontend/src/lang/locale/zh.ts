@@ -622,6 +622,7 @@ export default {
     'update::ruleset': '更新规则集',
     'update::plugin': '更新插件',
     'update::all::subscription': '更新所有订阅',
+    'update::all::subscription::sync-outbound-refs': '更新所有订阅并同步出站引用',
     'update::all::ruleset': '更新所有规则集',
     'update::all::plugin': '更新所有插件',
     'run::plugin': '运行插件',
