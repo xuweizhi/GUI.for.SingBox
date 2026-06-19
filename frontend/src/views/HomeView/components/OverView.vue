@@ -11,6 +11,7 @@ import { useModal } from '@/components/Modal'
 
 import CommonController from './CommonController.vue'
 import ConnectionsController from './ConnectionsController.vue'
+import CurrentNodeCard from './CurrentNodeCard.vue'
 import LogsController from './LogsController.vue'
 
 const trafficHistory = ref<[number[], number[]]>([[], []])
@@ -209,20 +210,21 @@ onUnmounted(() => {
         @click="handleStopKernel"
       />
     </div>
-    <div class="flex mt-20 gap-12">
-      <Card :title="t('home.overview.realtimeTraffic')" class="flex-1">
+    <div class="overview-cards grid mt-20 gap-12">
+      <CurrentNodeCard />
+      <Card :title="t('home.overview.realtimeTraffic')">
         <div class="py-8 text-12">
           ↑ {{ formatBytes(statistics.upload) }}/s ↓ {{ formatBytes(statistics.download) }}/s
         </div>
       </Card>
-      <Card :title="t('home.overview.totalTraffic')" class="flex-1">
+      <Card :title="t('home.overview.totalTraffic')">
         <div class="py-8 text-12">
           ↑ {{ formatBytes(statistics.uploadTotal) }} ↓ {{ formatBytes(statistics.downloadTotal) }}
         </div>
       </Card>
       <Card
         :title="t('home.overview.connections')"
-        class="flex-1 cursor-pointer"
+        class="cursor-pointer"
         @click="handleShowApiConnections"
       >
         <div class="py-8 text-12">
@@ -231,7 +233,7 @@ onUnmounted(() => {
       </Card>
       <Card
         :title="t('home.overview.memory')"
-        class="flex-1 cursor-pointer"
+        class="cursor-pointer"
         @click="handleToggleRealMemoryUsage"
       >
         <div class="py-8 text-12">
@@ -274,3 +276,21 @@ onUnmounted(() => {
 
   <Modal />
 </template>
+
+<style lang="less" scoped>
+.overview-cards {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .overview-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .overview-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>
