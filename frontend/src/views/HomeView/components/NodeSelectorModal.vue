@@ -145,8 +145,7 @@ const testNode = async (name: string) => {
         :aria-pressed="node.name === selectedGroup?.now"
         :aria-busy="switchingNode === node.name"
         :class="{
-          'cursor-pointer':
-            !switchingNode && !readonlyMode && selectedGroup?.type === 'Selector',
+          'cursor-pointer': !switchingNode && !readonlyMode && selectedGroup?.type === 'Selector',
           'cursor-not-allowed':
             !!switchingNode || readonlyMode || selectedGroup?.type !== 'Selector',
         }"
@@ -167,8 +166,10 @@ const testNode = async (name: string) => {
             class="ml-auto"
             @click.stop="testNode(node.name)"
           >
-            <span v-if="node.delayStatus === 'success'">{{ node.delay }} ms</span>
-            <span v-else-if="node.delayStatus === 'failed'">
+            <span v-if="node.delayStatus === 'success'" class="delay-success">
+              {{ node.delay }} ms
+            </span>
+            <span v-else-if="node.delayStatus === 'failed'" class="delay-failed">
               {{ t('home.nodes.unavailable') }}
             </span>
             <span v-else>{{ t('home.nodes.untested') }}</span>
@@ -192,6 +193,14 @@ const testNode = async (name: string) => {
 .stale-banner {
   color: var(--level-4-color);
   background: var(--card-bg);
+}
+
+.delay-success {
+  color: var(--level-1-color);
+}
+
+.delay-failed {
+  color: var(--level-4-color);
 }
 
 .node-grid {

@@ -181,11 +181,12 @@ export const filterAndSortNodes = (
   query: string,
   sortByDelay: boolean,
   errors: Map<string, string>,
+  localDelays = new Map<string, number>(),
 ): NodeListItem[] => {
   const keyword = query.trim().toLocaleLowerCase()
   const nodes = (group.all || []).map((name, originalIndex) => {
     const proxy = proxies[name]
-    const delay = latestDelay(proxy)
+    const delay = localDelays.get(name) ?? latestDelay(proxy)
     const failed = errors.has(name) || (delay !== null && delay <= 0)
     return {
       name,

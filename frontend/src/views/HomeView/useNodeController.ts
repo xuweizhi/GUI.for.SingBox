@@ -44,6 +44,7 @@ export const useNodeController = () => {
   const query = ref('')
   const sortByDelay = ref(false)
   const nodeErrors = ref(new Map<string, string>())
+  const localDelays = ref(new Map<string, number>())
   const testingNodes = ref(new Set<string>())
   const switchingNode = ref('')
   const batch = ref<BatchTestState>(emptyBatch())
@@ -73,6 +74,7 @@ export const useNodeController = () => {
       query.value,
       sortByDelay.value,
       nodeErrors.value,
+      localDelays.value,
     )
   })
 
@@ -93,6 +95,7 @@ export const useNodeController = () => {
             const latestDelay = history.at(-1)?.delay || 0
             if (latestDelay > 0) {
               nodeErrors.value.delete(name)
+              localDelays.value.delete(name)
             }
           })
           stale.value = false
@@ -191,6 +194,7 @@ export const useNodeController = () => {
 
       proxy.history ||= []
       proxy.history.push({ delay })
+      localDelays.value.set(name, delay)
       nodeErrors.value.delete(name)
       return { ok: true }
     } catch (error) {
@@ -198,6 +202,7 @@ export const useNodeController = () => {
       if (!disposed) {
         proxy.history ||= []
         proxy.history.push({ delay: 0 })
+        localDelays.value.delete(name)
         nodeErrors.value.set(name, normalized)
       }
       return { ok: false, error: normalized }

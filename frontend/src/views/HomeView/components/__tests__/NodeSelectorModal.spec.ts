@@ -27,7 +27,7 @@ const createController = () => {
     alive: true,
     name: 'Proxy',
     type: 'Selector',
-    all: ['HK 01', 'JP 01'],
+    all: ['HK 01', 'JP 01', 'US Timeout'],
     now: 'HK 01',
     udp: false,
     history: [],
@@ -91,6 +91,21 @@ const createController = () => {
         delay: null,
         delayStatus: 'untested' as const,
         originalIndex: 1,
+      },
+      {
+        name: 'US Timeout',
+        proxy: {
+          alive: true,
+          name: 'US Timeout',
+          type: 'Trojan',
+          all: [],
+          now: '',
+          udp: false,
+          history: [{ delay: 0 }],
+        },
+        delay: null,
+        delayStatus: 'failed' as const,
+        originalIndex: 2,
       },
     ]),
     readonlyMode: computed(() => false),
@@ -169,6 +184,17 @@ describe('NodeSelectorModal', () => {
 
     expect(controller.switchNode).toHaveBeenCalledWith('JP 01')
     expect(controller.testNode).toHaveBeenCalledWith('JP 01')
+  })
+
+  it('colors successful and failed delay results', () => {
+    const wrapper = mountModal()
+
+    expect(wrapper.get('[data-delay="HK 01"] .delay-success').text()).toBe('80 ms')
+    expect(wrapper.get('[data-delay="US Timeout"] .delay-failed').text()).toBe(
+      'home.nodes.unavailable',
+    )
+    expect(wrapper.find('[data-delay="JP 01"] .delay-success').exists()).toBe(false)
+    expect(wrapper.find('[data-delay="JP 01"] .delay-failed').exists()).toBe(false)
   })
 
   it('disables node switching while another switch is in progress', async () => {

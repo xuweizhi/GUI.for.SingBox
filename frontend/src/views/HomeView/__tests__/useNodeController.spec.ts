@@ -340,6 +340,27 @@ describe('useNodeController', () => {
     scope.stop()
   })
 
+  it('keeps group test delay results when the trailing refresh has stale history', async () => {
+    mocks.getProxyDelay.mockImplementation((name: string) =>
+      Promise.resolve({ delay: name === 'HK%2001' ? 91 : 92 }),
+    )
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+    mocks.refreshProviderProxies.mockImplementation(async () => {
+      mocks.kernelStore.proxies['HK 01'].history = []
+      mocks.kernelStore.proxies['JP 01'].history = []
+    })
+
+    await controller.testGroup()
+
+    expect(controller.nodes.value).toEqual([
+      expect.objectContaining({ name: 'HK 01', delay: 91, delayStatus: 'success' }),
+      expect.objectContaining({ name: 'JP 01', delay: 92, delayStatus: 'success' }),
+    ])
+    scope.stop()
+  })
+
   it('refreshes every five seconds only while running', async () => {
     const scope = effectScope()
     const controller = scope.run(() => useNodeController())!
