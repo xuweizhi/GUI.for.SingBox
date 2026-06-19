@@ -1,4 +1,5 @@
 build/bin
 frontend/dist
+.worktrees/
 
 .DS_Store
