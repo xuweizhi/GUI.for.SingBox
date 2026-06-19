@@ -39,6 +39,7 @@ const createController = () => {
     sortByDelay,
     nodeErrors: ref(new Map()),
     testingNodes: ref(new Set<string>()),
+    switchingNode: ref(''),
     batch: ref({
       running: false,
       cancelled: false,
@@ -168,6 +169,17 @@ describe('NodeSelectorModal', () => {
 
     expect(controller.switchNode).toHaveBeenCalledWith('JP 01')
     expect(controller.testNode).toHaveBeenCalledWith('JP 01')
+  })
+
+  it('disables node switching while another switch is in progress', async () => {
+    const controller = createController()
+    controller.switchingNode.value = 'JP 01'
+    const wrapper = mountModal(controller)
+
+    expect(wrapper.get('[data-node="JP 01"]').attributes('aria-disabled')).toBe('true')
+    await wrapper.get('[data-node="JP 01"]').trigger('click')
+
+    expect(controller.switchNode).not.toHaveBeenCalled()
   })
 
   it('supports keyboard switching and reports switch failures', async () => {

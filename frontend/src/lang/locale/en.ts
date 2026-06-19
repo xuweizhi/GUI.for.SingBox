@@ -380,9 +380,11 @@ export default {
       startCoreFirst: 'Start the core first',
       coreUnavailable: 'Core is not running',
       noSelectableNode: 'No selectable node detected',
+      invalidChain: 'The current node chain is invalid',
       readonly: 'Node switching is unavailable in the current mode',
       nodeMissing: 'The node no longer exists. Refresh and try again.',
       alreadyTesting: 'This node is already being tested',
+      switching: 'Another node switch is already in progress',
     },
     controller: {
       name: 'Controller',

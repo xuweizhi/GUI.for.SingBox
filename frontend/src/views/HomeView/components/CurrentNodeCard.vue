@@ -83,6 +83,9 @@ watch(
       <div v-else-if="primary.kind === 'unavailable'" class="py-8 text-12">
         {{ t('home.nodes.noSelectableNode') }}
       </div>
+      <div v-else-if="primary.error" class="py-8 text-12">
+        {{ t('home.nodes.invalidChain') }}
+      </div>
       <div v-else class="py-8 min-w-0">
         <div class="font-bold line-clamp-1">
           {{ primary.groupName }}

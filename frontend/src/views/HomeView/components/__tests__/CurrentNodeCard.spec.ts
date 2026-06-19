@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   kernelStore: { running: true },
   startPolling: vi.fn(),
   stopPolling: vi.fn(),
+  chainError: undefined as 'missing' | 'cycle' | undefined,
 }))
 
 vi.mock('@/views/HomeView/useNodeController', async () => {
@@ -34,6 +35,7 @@ vi.mock('@/views/HomeView/useNodeController', async () => {
         chain: ['Proxy', 'Auto', 'HK 01'],
         leafName: 'HK 01',
         delay: 86,
+        error: mocks.chainError,
         readonly: false,
       })),
       selectedGroup: computed(() => undefined),
@@ -96,6 +98,7 @@ describe('CurrentNodeCard', () => {
     mocks.warn.mockReset()
     mocks.startPolling.mockReset()
     mocks.stopPolling.mockReset()
+    mocks.chainError = undefined
   })
 
   it('shows the group, full chain and final delay', () => {
@@ -105,6 +108,14 @@ describe('CurrentNodeCard', () => {
     expect(wrapper.text()).toContain('Auto')
     expect(wrapper.text()).toContain('HK 01')
     expect(wrapper.text()).toContain('86 ms')
+  })
+
+  it('shows an explicit state when the current node chain is invalid', () => {
+    mocks.chainError = 'cycle'
+    const wrapper = mountCard()
+
+    expect(wrapper.text()).toContain('home.nodes.invalidChain')
+    expect(wrapper.text()).not.toContain('HK 01')
   })
 
   it('opens from click and keyboard', async () => {

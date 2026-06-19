@@ -11,7 +11,7 @@ interface Props {
   disabled?: boolean
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   type: 'normal',
   size: 'default',
   iconSize: undefined,
@@ -20,12 +20,23 @@ withDefaults(defineProps<Props>(), {
   loading: false,
   disabled: false,
 })
+
+const handleKeydown = (event: KeyboardEvent) => {
+  if (props.disabled || props.loading) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  ;(event.currentTarget as HTMLElement).click()
+}
 </script>
 
 <template>
   <div
+    role="button"
+    :tabindex="disabled || loading ? -1 : 0"
+    :aria-disabled="disabled || loading"
     :class="[type, size, { 'pointer-events-none': disabled || loading }]"
     class="gui-button inline-flex items-center justify-center text-center align-middle rounded-6 text-14 text-nowrap cursor-pointer px-12 py-6 duration-200"
+    @keydown="handleKeydown"
   >
     <Icon
       v-if="loading"

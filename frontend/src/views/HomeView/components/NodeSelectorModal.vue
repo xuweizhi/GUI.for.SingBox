@@ -15,6 +15,7 @@ const {
   query,
   sortByDelay,
   testingNodes,
+  switchingNode,
   batch,
   stale,
   refreshError,
@@ -48,6 +49,7 @@ watch(open, (value) => value && void prepareModal(), { immediate: true })
 
 const switchNode = async (name: string) => {
   if (
+    switchingNode.value ||
     readonlyMode.value ||
     selectedGroup.value?.type !== 'Selector' ||
     selectedGroup.value.now === name
@@ -139,10 +141,14 @@ const testNode = async (name: string) => {
         :title="node.name"
         :selected="node.name === selectedGroup?.now"
         :data-node="node.name"
-        :aria-disabled="readonlyMode || selectedGroup?.type !== 'Selector'"
+        :aria-disabled="!!switchingNode || readonlyMode || selectedGroup?.type !== 'Selector'"
+        :aria-pressed="node.name === selectedGroup?.now"
+        :aria-busy="switchingNode === node.name"
         :class="{
-          'cursor-pointer': !readonlyMode && selectedGroup?.type === 'Selector',
-          'cursor-not-allowed': readonlyMode || selectedGroup?.type !== 'Selector',
+          'cursor-pointer':
+            !switchingNode && !readonlyMode && selectedGroup?.type === 'Selector',
+          'cursor-not-allowed':
+            !!switchingNode || readonlyMode || selectedGroup?.type !== 'Selector',
         }"
         role="button"
         tabindex="0"

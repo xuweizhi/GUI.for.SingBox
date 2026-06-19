@@ -378,9 +378,11 @@ export default {
       startCoreFirst: '请先启动核心',
       coreUnavailable: '核心未运行',
       noSelectableNode: '未检测到可切换节点',
+      invalidChain: '当前节点链解析异常',
       readonly: '当前模式不允许切换节点',
       nodeMissing: '节点已不存在，请刷新后重试',
       alreadyTesting: '该节点正在测速',
+      switching: '正在切换节点，请稍候',
     },
     controller: {
       name: '控制器',

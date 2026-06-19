@@ -45,6 +45,7 @@ export const useNodeController = () => {
   const sortByDelay = ref(false)
   const nodeErrors = ref(new Map<string, string>())
   const testingNodes = ref(new Set<string>())
+  const switchingNode = ref('')
   const batch = ref<BatchTestState>(emptyBatch())
   const stale = ref(false)
   const refreshError = ref('')
@@ -87,6 +88,13 @@ export const useNodeController = () => {
         .refreshProviderProxies()
         .then(() => {
           if (disposed) return
+          nodeErrors.value.forEach((_, name) => {
+            const history = kernelApiStore.proxies[name]?.history || []
+            const latestDelay = history.at(-1)?.delay || 0
+            if (latestDelay > 0) {
+              nodeErrors.value.delete(name)
+            }
+          })
           stale.value = false
           refreshError.value = ''
         })
@@ -102,6 +110,14 @@ export const useNodeController = () => {
         })
     }
     return refreshPromise
+  }
+
+  const refreshAfterMutation = async () => {
+    const pendingRefresh = refreshPromise
+    if (pendingRefresh) {
+      await pendingRefresh.catch(() => undefined)
+    }
+    return refresh()
   }
 
   const prepareModal = async () => {
@@ -123,6 +139,10 @@ export const useNodeController = () => {
   }
 
   const switchNode = async (name: string): Promise<NodeOperationResult> => {
+    if (switchingNode.value) {
+      return { ok: false, error: 'home.nodes.switching' }
+    }
+
     if (selectedGroup.value?.now === name) {
       return { ok: true }
     }
@@ -136,12 +156,16 @@ export const useNodeController = () => {
       return { ok: false, error: 'home.nodes.nodeMissing' }
     }
 
+    const group = selectedGroup.value
+    switchingNode.value = name
     try {
-      await handleUseProxy(selectedGroup.value, proxy)
-      await refresh()
+      await handleUseProxy(group, proxy, { refresh: false })
+      await refreshAfterMutation()
       return { ok: true }
     } catch (error) {
       return { ok: false, error: normalizeErrorMessage(error) }
+    } finally {
+      if (!disposed) switchingNode.value = ''
     }
   }
 
@@ -263,6 +287,7 @@ export const useNodeController = () => {
     sortByDelay,
     nodeErrors,
     testingNodes,
+    switchingNode,
     batch,
     stale,
     refreshError,

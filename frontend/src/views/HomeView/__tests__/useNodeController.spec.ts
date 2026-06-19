@@ -168,6 +168,7 @@ describe('useNodeController', () => {
     expect(mocks.handleUseProxy).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'Proxy', type: 'Selector' }),
       expect.objectContaining({ name: 'JP 01' }),
+      { refresh: false },
     )
     expect(mocks.refreshProviderProxies).toHaveBeenCalled()
     scope.stop()
@@ -182,6 +183,56 @@ describe('useNodeController', () => {
 
     expect(result.ok).toBe(true)
     expect(mocks.handleUseProxy).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('blocks concurrent node switches until the active switch settles', async () => {
+    let releaseSwitch!: () => void
+    mocks.handleUseProxy.mockReturnValue(
+      new Promise<void>((resolve) => {
+        releaseSwitch = resolve
+      }),
+    )
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const first = controller.switchNode('JP 01')
+    await Promise.resolve()
+    const second = await controller.switchNode('JP 01')
+
+    expect(second).toEqual({ ok: false, error: 'home.nodes.switching' })
+    expect(mocks.handleUseProxy).toHaveBeenCalledTimes(1)
+    expect(controller.switchingNode.value).toBe('JP 01')
+
+    releaseSwitch()
+    await first
+    expect(controller.switchingNode.value).toBe('')
+    scope.stop()
+  })
+
+  it('runs a fresh proxy refresh after a switch waits for an older refresh', async () => {
+    let releaseOldRefresh!: () => void
+    mocks.refreshProviderProxies
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          releaseOldRefresh = resolve
+        }),
+      )
+      .mockResolvedValue(undefined)
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    controller.selectGroup('Proxy')
+
+    const oldRefresh = controller.refresh()
+    const switching = controller.switchNode('JP 01')
+    await Promise.resolve()
+
+    expect(mocks.refreshProviderProxies).toHaveBeenCalledTimes(1)
+
+    releaseOldRefresh()
+    await Promise.all([oldRefresh, switching])
+    expect(mocks.refreshProviderProxies).toHaveBeenCalledTimes(2)
     scope.stop()
   })
 
@@ -226,6 +277,26 @@ describe('useNodeController', () => {
 
     expect(result.ok).toBe(true)
     expect(mocks.refreshProviderProxies).toHaveBeenCalledTimes(1)
+    scope.stop()
+  })
+
+  it('clears a local delay error after refresh provides a valid history entry', async () => {
+    mocks.getProxyDelay.mockRejectedValue(new Error('timeout'))
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    await controller.testNode('JP 01')
+    expect(controller.nodeErrors.value.has('JP 01')).toBe(true)
+
+    mocks.kernelStore.proxies['JP 01'].history = [{ delay: 72 }]
+    await controller.refresh()
+
+    expect(controller.nodeErrors.value.has('JP 01')).toBe(false)
+    expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
+      delay: 72,
+      delayStatus: 'success',
+    })
     scope.stop()
   })
 

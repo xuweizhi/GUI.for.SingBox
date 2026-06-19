@@ -65,18 +65,29 @@ export class Request {
 
     const res = await fetch(url, init)
 
-    if (res.status === 204) {
-      return null as T
-    }
-
     if (res.status === 401) {
       await this.onUnauthorized()
       throw 'auth.invalidToken'
     }
 
-    if ([504, 503].includes(res.status)) {
-      const { message } = await res.json()
-      throw message
+    if (!res.ok) {
+      const fallback = `Request failed with status ${res.status}`
+      let detail = ''
+      try {
+        if (res.headers.get('Content-Type')?.includes('application/json')) {
+          const body = await res.json()
+          detail = body?.message || JSON.stringify(body)
+        } else {
+          detail = await res.text()
+        }
+      } catch {
+        detail = ''
+      }
+      throw detail || fallback
+    }
+
+    if (res.status === 204) {
+      return null as T
     }
 
     if (this.responseType === ResponseType.TEXT) {

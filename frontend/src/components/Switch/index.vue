@@ -35,6 +35,10 @@ const toggle = () => {
 <template>
   <div
     v-tips.slow="label"
+    role="switch"
+    :tabindex="disabled ? -1 : 0"
+    :aria-checked="model"
+    :aria-disabled="disabled"
     :class="[
       size,
       border,
@@ -44,6 +48,8 @@ const toggle = () => {
     ]"
     class="gui-switch relative cursor-pointer h-24 inline-flex items-center text-12 duration-200"
     @click="toggle"
+    @keydown.enter.prevent="toggle"
+    @keydown.space.prevent="toggle"
   >
     <div
       :class="[border === 'square' ? 'rounded-4' : 'rounded-full']"

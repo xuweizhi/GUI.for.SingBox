@@ -115,8 +115,13 @@ const handleClear = () => {
 
 <template>
   <Dropdown :trigger="['click']">
-    <template #default="{ toggle, close }">
+    <template #default="{ toggle, close, show }">
       <div
+        role="combobox"
+        tabindex="0"
+        aria-haspopup="listbox"
+        :aria-expanded="show"
+        :aria-label="t(displayLabel)"
         :class="{
           border,
           [size]: true,
@@ -125,6 +130,8 @@ const handleClear = () => {
           'min-h-30': size === 'default',
         }"
         class="gui-select cursor-pointer inline-flex items-center min-w-128 rounded-4 px-8"
+        @keydown.enter.prevent.stop="toggle"
+        @keydown.space.prevent.stop="toggle"
       >
         <span class="line-clamp-1 break-all">
           {{ t(displayLabel) }}
@@ -150,7 +157,7 @@ const handleClear = () => {
     </template>
 
     <template #overlay="{ close }">
-      <div class="flex flex-col gap-4 min-w-64 p-4">
+      <div role="listbox" class="flex flex-col gap-4 min-w-64 p-4">
         <slot v-if="options.length === 0" name="empty">
           <Empty :icon-size="42" />
         </slot>
