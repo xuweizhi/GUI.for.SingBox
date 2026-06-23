@@ -20,6 +20,7 @@ import {
   APP_VERSION,
   APP_VERSION_API,
   getGitHubApiAuthorization,
+  confirm,
   message,
   sampleID,
   sleep,
@@ -107,6 +108,7 @@ export const useAppStore = defineStore('app', () => {
   const restartable = ref(false)
   const downloading = ref(false)
   const downloadUrl = ref('')
+  const downloadDigest = ref('')
   const remoteVersion = ref(APP_VERSION)
   const updatable = computed(() => downloadUrl.value && APP_VERSION !== remoteVersion.value)
 
@@ -129,6 +131,7 @@ export const useAppStore = defineStore('app', () => {
         },
         {
           CancelId: downloadCacheFile,
+          Sha256: downloadDigest.value.slice(7),
         },
       ).finally(destroy)
 
@@ -164,6 +167,7 @@ export const useAppStore = defineStore('app', () => {
     if (checkForUpdatesLoading.value || downloading.value) return
     checkForUpdatesLoading.value = true
     remoteVersion.value = APP_VERSION
+    downloadDigest.value = ''
     try {
       const { body } = await HttpGet<Record<string, any>>(APP_VERSION_API, {
         Authorization: getGitHubApiAuthorization(),
@@ -177,9 +181,16 @@ export const useAppStore = defineStore('app', () => {
 
       const asset = assets.find((v: any) => v.name === assetName)
       if (!asset) throw 'Asset Not Found:' + assetName
+      if (asset.uploader.login !== 'github-actions[bot]') {
+        await confirm('common.warning', 'settings.kernel.risk', {
+          type: 'text',
+          okText: 'settings.kernel.stillDownload',
+        })
+      }
 
       remoteVersion.value = tag_name
       downloadUrl.value = asset.browser_download_url
+      downloadDigest.value = asset.digest
 
       if (showTips) {
         message.info(updatable.value ? 'about.newVersion' : 'about.latestVersion')

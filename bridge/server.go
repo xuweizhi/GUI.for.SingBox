@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var requestCounter uint64
+var requestCounter atomic.Uint64
 var serverMap sync.Map
 
 type serverEntry struct {
@@ -160,7 +160,7 @@ func handleHttpRequest(a *App, serverID string) http.HandlerFunc {
 			return
 		}
 
-		count := atomic.AddUint64(&requestCounter, 1)
+		count := requestCounter.Add(1)
 		requestID := serverID + strconv.FormatUint(count, 10)
 		respChan := make(chan ResponseData, 1)
 

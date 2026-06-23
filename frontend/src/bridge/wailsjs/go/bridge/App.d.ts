@@ -30,6 +30,8 @@ export function FileExists(arg1:string):Promise<bridge.FlagResult>;
 
 export function FindListeningProcess(arg1:number):Promise<bridge.FlagResult>;
 
+export function FileSHA256(arg1:string):Promise<bridge.FlagResult>;
+
 export function GetEnv(arg1:string):Promise<any>;
 
 export function GetInterfaces():Promise<bridge.FlagResult>;
@@ -83,6 +85,8 @@ export function Requests(arg1:string,arg2:string,arg3:Record<string, string>,arg
 export function RestartApp():Promise<bridge.FlagResult>;
 
 export function RunScheduledTaskWorker(arg1:string):Promise<bridge.FlagResult>;
+
+export function SetSystemDNS(arg1:string,arg2:Array<string>):Promise<bridge.FlagResult>;
 
 export function SetSystemProxy(arg1:boolean,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<bridge.FlagResult>;
 

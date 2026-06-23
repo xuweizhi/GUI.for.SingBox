@@ -71,10 +71,13 @@ export interface AppSettings {
   exitOnClose: boolean
   closeKernelOnExit: boolean
   autoSetSystemProxy: boolean
+  autoSetSystemDNS: boolean
   requestProxyMode: RequestProxyMode
   customProxy: string
   proxyBypassList: string
-  darwinSystemProxyServices: string[]
+  systemProxyServices: string[]
+  systemProxyDNS: string
+  systemDefaultDNS: string
   autoStartKernel: boolean
   autoRestartKernel: boolean
   userAgent: string

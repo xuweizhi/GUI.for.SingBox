@@ -257,6 +257,10 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
 		err = decodeErr
 		result = a.FileExists(arg)
+	case "FileSHA256":
+		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
+		err = decodeErr
+		result = a.FileSHA256(arg)
 	case "FindListeningProcess":
 		arg, decodeErr := decodeRPCArg[uint32](req.Args, 0)
 		err = decodeErr
@@ -417,6 +421,15 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
 		err = decodeErr
 		result = a.RunScheduledTaskWorker(arg)
+	case "SetSystemDNS":
+		servers, decodeErr := decodeRPCArg[string](req.Args, 0)
+		if decodeErr != nil {
+			err = decodeErr
+			break
+		}
+		services, decodeErr := decodeRPCArg[[]string](req.Args, 1)
+		err = decodeErr
+		result = a.SetSystemDNS(servers, services)
 	case "SetSystemProxy":
 		enable, decodeErr := decodeRPCArg[bool](req.Args, 0)
 		if decodeErr != nil {

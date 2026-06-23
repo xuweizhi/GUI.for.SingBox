@@ -58,6 +58,10 @@ export function FindListeningProcess(arg1) {
   return window['go']['bridge']['App']['FindListeningProcess'](arg1);
 }
 
+export function FileSHA256(arg1) {
+  return window['go']['bridge']['App']['FileSHA256'](arg1);
+}
+
 export function GetEnv(arg1) {
   return window['go']['bridge']['App']['GetEnv'](arg1);
 }
@@ -164,6 +168,10 @@ export function RestartApp() {
 
 export function RunScheduledTaskWorker(arg1) {
   return window['go']['bridge']['App']['RunScheduledTaskWorker'](arg1);
+}
+
+export function SetSystemDNS(arg1, arg2) {
+  return window['go']['bridge']['App']['SetSystemDNS'](arg1, arg2);
 }
 
 export function SetSystemProxy(arg1, arg2, arg3, arg4, arg5) {

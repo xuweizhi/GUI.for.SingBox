@@ -308,6 +308,7 @@ export default {
     notFound: 'Core Not Found',
     insertionPoint: 'The new rule will be inserted here',
     addInsertionPoint: 'Add insertion point',
+    missingInsertionPoint: 'Please add an insertion point first',
   },
   router: {
     overview: 'Overview',
@@ -545,6 +546,7 @@ export default {
     empty: 'The ruleset list is empty. Please{action}or import from the{import}first.',
     rulesetCount: 'Ruleset Count',
     editRuleset: 'Edit Rules',
+    addToProfile: 'Add to Profile',
     selectRuleType: 'Select Rule Type',
   },
   plugin: {
@@ -712,7 +714,11 @@ export default {
     },
     proxyBypassList: 'Proxy Bypass List',
     proxyBypassListTips: 'Separate with semicolons',
-    darwinSystemProxyServices: 'Proxy Network Service Names',
+    systemProxyServices: 'Network Service Names',
+    autoSetSystemDNS: 'Auto-configure System DNS',
+    autoSetSystemDNSTips: 'Used for DNS hijacking in TUN mode',
+    systemProxyDNS: 'DNS While Core Is Running',
+    systemDefaultDNS: 'DNS While Core Is Stopped',
     autoStartKernel: 'Start core on launch',
     realMemoryUsage: 'Show actual core memory usage',
     logRetentionDays: {

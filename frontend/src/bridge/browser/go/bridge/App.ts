@@ -23,6 +23,7 @@ export const ExecBackground = (
 ) => invokeBridge("ExecBackground", [arg1, arg2, arg3, arg4, arg5]);
 export const ExitApp = () => invokeBridge<void>("ExitApp");
 export const FileExists = (arg1: string) => invokeBridge("FileExists", [arg1]);
+export const FileSHA256 = (arg1: string) => invokeBridge("FileSHA256", [arg1]);
 export const FindListeningProcess = (arg1: number) => invokeBridge("FindListeningProcess", [arg1]);
 export const GetEnv = (arg1: string) => invokeBridge("GetEnv", [arg1]);
 export const GetInterfaces = () => invokeBridge("GetInterfaces");
@@ -59,6 +60,8 @@ export const Requests = (
 export const RestartApp = () => invokeBridge("RestartApp");
 export const RunScheduledTaskWorker = (arg1: string) =>
   invokeBridge("RunScheduledTaskWorker", [arg1]);
+export const SetSystemDNS = (arg1: string, arg2: string[]) =>
+  invokeBridge("SetSystemDNS", [arg1, arg2]);
 export const SetSystemProxy = (
   arg1: boolean,
   arg2: string,

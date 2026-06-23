@@ -35,7 +35,7 @@ import {
 } from '@/enums/app'
 import i18n, { loadLocale } from '@/lang'
 import { useAppStore, useEnvStore } from '@/stores'
-import { debounce, updateTrayAndMenus, ignoredError, deepClone } from '@/utils'
+import { debounce, updateTrayAndMenus, ignoredError, deepClone, message } from '@/utils'
 
 import type { AppSettings } from '@/types/app'
 
@@ -72,10 +72,13 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     exitOnClose: true,
     closeKernelOnExit: true,
     autoSetSystemProxy: true,
+    autoSetSystemDNS: false,
     requestProxyMode: RequestProxyMode.System,
     customProxy: '',
     proxyBypassList: '',
-    darwinSystemProxyServices: ['Ethernet', 'Wi-Fi'],
+    systemProxyServices: [],
+    systemProxyDNS: '',
+    systemDefaultDNS: '',
     autoStartKernel: false,
     autoRestartKernel: false,
     userAgent: '',
@@ -143,8 +146,29 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     if (!settings.proxyBypassList) {
       settings.proxyBypassList = (await ignoredError(GetSystemProxyBypass)) || ''
     }
-    if (!settings.darwinSystemProxyServices) {
-      settings.darwinSystemProxyServices = ['Ethernet', 'Wi-Fi']
+    if ('darwinSystemProxyServices' in settings) {
+      settings.systemProxyServices = settings.darwinSystemProxyServices as string[]
+      delete settings.darwinSystemProxyServices
+    }
+    const defaultSystemProxyServices = envStore.env.os === 'darwin' ? ['Ethernet', 'Wi-Fi'] : []
+    if (!data) {
+      settings.systemProxyServices = defaultSystemProxyServices
+    } else if (!settings.systemProxyServices) {
+      settings.systemProxyServices = defaultSystemProxyServices
+    } else if (
+      envStore.env.os === 'linux' &&
+      settings.systemProxyServices.join(',') === 'Ethernet,Wi-Fi'
+    ) {
+      settings.systemProxyServices = defaultSystemProxyServices
+    }
+    if (settings.autoSetSystemDNS === undefined) {
+      settings.autoSetSystemDNS = false
+    }
+    if (settings.systemProxyDNS === undefined) {
+      settings.systemProxyDNS = ''
+    }
+    if (settings.systemDefaultDNS === undefined) {
+      settings.systemDefaultDNS = ''
     }
     if (!settings.requestProxyMode) {
       settings.requestProxyMode = RequestProxyMode.System
@@ -215,7 +239,12 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     },
     systemProxyBypass() {
       if (envStore.systemProxy) {
-        envStore.setSystemProxy()
+        envStore.setSystemProxy().catch((err) => message.error(err))
+      }
+    },
+    systemDNS() {
+      if (app.value.autoSetSystemDNS) {
+        envStore.setSystemDNS(envStore.systemDNSSet).catch((err) => message.error(err))
       }
     },
   }
@@ -291,9 +320,15 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
   const setSystemProxyBypass = debounce(() => {
     applyAppSettings.systemProxyBypass()
   }, 3000)
+  watch(() => [app.value.proxyBypassList, app.value.systemProxyServices], setSystemProxyBypass)
+
+  /* Apply SystemDNS */
+  const setSystemDNS = debounce(() => {
+    applyAppSettings.systemDNS()
+  }, 3000)
   watch(
-    () => [app.value.proxyBypassList, app.value.darwinSystemProxyServices],
-    setSystemProxyBypass,
+    () => [app.value.systemProxyServices, app.value.systemProxyDNS, app.value.systemDefaultDNS],
+    setSystemDNS,
   )
 
   return { setupAppSettings, app, themeMode }
