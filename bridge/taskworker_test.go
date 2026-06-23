@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -328,6 +329,156 @@ func TestValidateSubscriptionTaskSupportAllowsActiveSubscribePlugin(t *testing.T
 	})
 	if err != nil {
 		t.Fatalf("expected active onSubscribe plugin to be allowed, got %v", err)
+	}
+}
+
+func TestSaveSubscriptionsPreservesDecryptPassword(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+	})
+
+	if err := saveSubscriptions([]subscriptionConfig{
+		{
+			ID:              "sub-1",
+			Name:            "Encrypted Subscription",
+			Type:            "Http",
+			URL:             "https://example.com/sub",
+			Path:            "data/subscribes/sub-1.json",
+			DecryptPassword: "V2free",
+		},
+	}); err != nil {
+		t.Fatalf("saveSubscriptions: %v", err)
+	}
+
+	subscribes, err := loadSubscriptions()
+	if err != nil {
+		t.Fatalf("loadSubscriptions: %v", err)
+	}
+	if len(subscribes) != 1 {
+		t.Fatalf("expected 1 subscription, got %d", len(subscribes))
+	}
+	if subscribes[0].DecryptPassword != "V2free" {
+		t.Fatalf("DecryptPassword = %q, want %q", subscribes[0].DecryptPassword, "V2free")
+	}
+}
+
+func TestSaveProfilesPreservesUnmodeledFields(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+	})
+
+	profilesYAML := `- id: profile-1
+  name: Main Profile
+  log:
+    disabled: false
+    level: info
+  inbounds:
+    - id: inbound-mixed
+      type: mixed
+      tag: Mixed
+  outbounds:
+    - id: outbound-select
+      tag: Select
+      type: selector
+      outbounds: []
+  route:
+    auto_detect_interface: true
+  dns:
+    final: dns-direct
+  mixin:
+    priority: gui
+  script:
+    code: return config
+`
+	if err := os.MkdirAll(resolvePath("data"), 0755); err != nil {
+		t.Fatalf("mkdir data: %v", err)
+	}
+	if err := os.WriteFile(resolvePath(profilesFilePath), []byte(profilesYAML), 0644); err != nil {
+		t.Fatalf("write profiles yaml: %v", err)
+	}
+
+	profiles, err := loadProfiles()
+	if err != nil {
+		t.Fatalf("loadProfiles: %v", err)
+	}
+	if err := saveProfiles(profiles); err != nil {
+		t.Fatalf("saveProfiles: %v", err)
+	}
+	content, err := os.ReadFile(resolvePath(profilesFilePath))
+	if err != nil {
+		t.Fatalf("read profiles yaml: %v", err)
+	}
+	for _, want := range []string{"name: Main Profile", "log:", "inbounds:", "route:", "dns:", "mixin:", "script:"} {
+		if !strings.Contains(string(content), want) {
+			t.Fatalf("expected saved profiles to contain %q, got:\n%s", want, string(content))
+		}
+	}
+}
+
+func TestSavePluginsPreservesConfigurationMetadata(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+	})
+
+	pluginsYAML := `- id: plugin-1
+  version: v1.0.0
+  name: Plugin
+  description: Description
+  type: Http
+  url: https://example.com/plugin.js
+  path: data/plugins/plugin-1.js
+  triggers: []
+  tags: []
+  hasUI: true
+  group: test
+  menus: {}
+  context:
+    profiles: {}
+    subscriptions: {}
+    rulesets: {}
+    plugins: {}
+    scheduledtasks: {}
+  configuration:
+    - id: config-1
+      title: Config Title
+      description: Config Description
+      key: token
+      component: Input
+      value: default-token
+      options:
+        - label: Default
+          value: default-token
+  disabled: false
+  status: 0
+`
+	if err := os.MkdirAll(resolvePath("data"), 0755); err != nil {
+		t.Fatalf("mkdir data: %v", err)
+	}
+	if err := os.WriteFile(resolvePath(pluginsFilePath), []byte(pluginsYAML), 0644); err != nil {
+		t.Fatalf("write plugins yaml: %v", err)
+	}
+
+	plugins, err := loadPlugins()
+	if err != nil {
+		t.Fatalf("loadPlugins: %v", err)
+	}
+	if err := savePlugins(plugins); err != nil {
+		t.Fatalf("savePlugins: %v", err)
+	}
+	content, err := os.ReadFile(resolvePath(pluginsFilePath))
+	if err != nil {
+		t.Fatalf("read plugins yaml: %v", err)
+	}
+	for _, want := range []string{"id: config-1", "title: Config Title", "description: Config Description", "component: Input", "options:"} {
+		if !strings.Contains(string(content), want) {
+			t.Fatalf("expected saved plugins to contain %q, got:\n%s", want, string(content))
+		}
 	}
 }
 

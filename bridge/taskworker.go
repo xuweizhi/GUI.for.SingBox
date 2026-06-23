@@ -93,6 +93,7 @@ type subscriptionConfig struct {
 	Type             string                    `json:"type" yaml:"type"`
 	URL              string                    `json:"url" yaml:"url"`
 	Website          string                    `json:"website" yaml:"website"`
+	DecryptPassword  string                    `json:"decryptPassword" yaml:"decryptPassword"`
 	Path             string                    `json:"path" yaml:"path"`
 	Include          string                    `json:"include" yaml:"include"`
 	Exclude          string                    `json:"exclude" yaml:"exclude"`
@@ -127,8 +128,19 @@ type profileOutboundConfig struct {
 }
 
 type profileConfig struct {
+	Extra     map[string]any          `json:",inline" yaml:",inline"`
 	ID        string                  `json:"id" yaml:"id"`
 	Outbounds []profileOutboundConfig `json:"outbounds" yaml:"outbounds"`
+}
+
+type pluginConfigurationConfig struct {
+	ID          string `json:"id" yaml:"id"`
+	Title       string `json:"title" yaml:"title"`
+	Description string `json:"description" yaml:"description"`
+	Key         string `json:"key" yaml:"key"`
+	Component   string `json:"component" yaml:"component"`
+	Value       any    `json:"value" yaml:"value"`
+	Options     any    `json:"options" yaml:"options"`
 }
 
 type pluginConfig struct {
@@ -145,12 +157,9 @@ type pluginConfig struct {
 	Group         string                       `json:"group" yaml:"group"`
 	Menus         map[string]string            `json:"menus" yaml:"menus"`
 	Context       map[string]map[string]string `json:"context" yaml:"context"`
-	Configuration []struct {
-		Key   string `json:"key" yaml:"key"`
-		Value any    `json:"value" yaml:"value"`
-	} `json:"configuration" yaml:"configuration"`
-	Disabled bool `json:"disabled" yaml:"disabled"`
-	Status   int  `json:"status" yaml:"status"`
+	Configuration []pluginConfigurationConfig  `json:"configuration" yaml:"configuration"`
+	Disabled      bool                         `json:"disabled" yaml:"disabled"`
+	Status        int                          `json:"status" yaml:"status"`
 }
 
 type backendNetworkSettings struct {
@@ -2239,14 +2248,8 @@ func replacePluginInSlice(plugins *[]pluginConfig, id string, next pluginConfig)
 
 func reconcilePluginUserSettings(
 	pluginID string,
-	currentConfig []struct {
-		Key   string `json:"key" yaml:"key"`
-		Value any    `json:"value" yaml:"value"`
-	},
-	nextConfig []struct {
-		Key   string `json:"key" yaml:"key"`
-		Value any    `json:"value" yaml:"value"`
-	},
+	currentConfig []pluginConfigurationConfig,
+	nextConfig []pluginConfigurationConfig,
 ) error {
 	settings, err := loadUserSettingsMap()
 	if err != nil {
