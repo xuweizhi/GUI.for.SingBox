@@ -19,7 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-//go:embed all:frontend/dist taskworker/worker.mjs
+//go:embed all:frontend/dist taskworker/worker.mjs frontend/src/vendor/proxy-utils.esm.mjs
 var assets embed.FS
 
 //go:embed frontend/dist/favicon.ico

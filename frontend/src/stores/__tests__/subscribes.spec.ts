@@ -9,6 +9,7 @@ vi.mock('@/bridge', () => ({
   ReadFile: vi.fn(),
   WriteFile: writeFile,
   Requests: vi.fn(),
+  GetSystemProxy: vi.fn().mockResolvedValue(''),
   ReadDir: vi.fn().mockResolvedValue([]),
   GetSystemProxyBypass: vi.fn(),
   WindowSetSystemDefaultTheme: vi.fn(),
@@ -47,6 +48,7 @@ import { useAppSettingsStore } from '@/stores/appSettings'
 import { useProfilesStore } from '@/stores/profiles'
 import { useSubscribesStore } from '@/stores/subscribes'
 import { RequestMethod, RequestProxyMode } from '@/enums/app'
+import { Requests } from '@/bridge'
 
 import type { Subscription } from '@/types/app'
 
@@ -83,6 +85,9 @@ const subscription = (id: string): Subscription =>
 describe('subscribes store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    Object.assign(window, {
+      AsyncFunction: Object.getPrototypeOf(async function () {}).constructor,
+    })
     vi.stubGlobal(
       'matchMedia',
       vi.fn().mockReturnValue({
@@ -262,5 +267,83 @@ describe('subscribes store', () => {
     ])
     expect(secondProfile.outbounds[0]!.outbounds).toEqual([])
     expect(secondProfile.outbounds[1]!.outbounds).toEqual([])
+  })
+
+  it('updates share-link subscriptions without requiring the node-convert plugin', async () => {
+    const subscribesStore = useSubscribesStore()
+    subscribesStore.subscribes = [subscription('sub-share-link')].map((item) => ({
+      ...item,
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }))
+
+    vi.mocked(Requests).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: 'ss://YWVzLTEyOC1nY206cGFzc3dvcmRAZXhhbXBsZS5jb206ODM4OA==#ss-node',
+    } as Awaited<ReturnType<typeof Requests>>)
+
+    await expect(subscribesStore.updateSubscribe('sub-share-link')).resolves.toBe(
+      'Subscription [sub-share-link] updated successfully.',
+    )
+
+    expect(subscribesStore.subscribes[0]?.proxies).toEqual([
+      expect.objectContaining({
+        tag: 'ss-node',
+        type: 'shadowsocks',
+      }),
+    ])
+  })
+
+  it('keeps failed subscription update results in bulk updates', async () => {
+    const subscribesStore = useSubscribesStore()
+    subscribesStore.subscribes = [subscription('sub-ok'), subscription('sub-fail')].map((item) => ({
+      ...item,
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }))
+
+    vi.mocked(Requests)
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        body: '{"outbounds":[{"tag":"node-a","type":"vmess"}]}',
+      } as Awaited<ReturnType<typeof Requests>>)
+      .mockRejectedValueOnce(new Error('network down'))
+
+    const result = await subscribesStore.updateSubscribes()
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ok: true,
+          id: 'sub-ok',
+          result: 'Subscription [sub-ok] updated successfully.',
+        }),
+        expect.objectContaining({
+          ok: false,
+          id: 'sub-fail',
+          result: 'Failed to update subscription [sub-fail]. Reason: network down',
+        }),
+      ]),
+    )
+  })
+
+  it('throws the failed results when bulk updates request strict handling', async () => {
+    const subscribesStore = useSubscribesStore()
+    subscribesStore.subscribes = [subscription('sub-ok'), subscription('sub-fail')].map((item) => ({
+      ...item,
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }))
+
+    vi.mocked(Requests)
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        body: '{"outbounds":[{"tag":"node-a","type":"vmess"}]}',
+      } as Awaited<ReturnType<typeof Requests>>)
+      .mockRejectedValueOnce(new Error('network down'))
+
+    await expect(subscribesStore.updateSubscribes({ throwOnFailure: true })).rejects.toThrowError(
+      'Failed to update subscription [sub-fail]. Reason: network down',
+    )
   })
 })

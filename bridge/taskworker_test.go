@@ -1,13 +1,69 @@
 package bridge
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/md5"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 )
+
+func encryptSubscriptionPayload(password string, plaintext string) string {
+	key := md5.Sum([]byte(password))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		panic(err)
+	}
+
+	iv := []byte("0123456789abcdef")
+	padding := aes.BlockSize - (len(plaintext) % aes.BlockSize)
+	padded := append([]byte(plaintext), bytesRepeat(byte(padding), padding)...)
+	ciphertext := make([]byte, len(padded))
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, padded)
+
+	payload := append(append([]byte{}, iv...), ciphertext...)
+	return base64.StdEncoding.EncodeToString(payload)
+}
+
+func bytesRepeat(value byte, count int) []byte {
+	output := make([]byte, count)
+	for index := range output {
+		output[index] = value
+	}
+	return output
+}
+
+func seedTaskWorkerArtifacts(t *testing.T) {
+	t.Helper()
+
+	artifacts := map[string]string{
+		scheduledTaskWorkerScriptSrc:     scheduledTaskWorkerScriptDst,
+		scheduledTaskWorkerProxyUtilsSrc: scheduledTaskWorkerProxyUtilsDst,
+	}
+
+	for src, dst := range artifacts {
+		data, err := os.ReadFile(src)
+		if err != nil {
+			data, err = os.ReadFile(filepath.Join("..", src))
+		}
+		if err != nil {
+			t.Fatalf("read %s: %v", src, err)
+		}
+		target := resolvePath(dst)
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(target), err)
+		}
+		if err := os.WriteFile(target, data, 0644); err != nil {
+			t.Fatalf("write %s: %v", target, err)
+		}
+	}
+}
 
 func TestNormalizeScheduledTaskSpec(t *testing.T) {
 	tests := []struct {
@@ -495,6 +551,57 @@ func TestParseSubscriptionProxiesTreatsShareLinksAsPluginInput(t *testing.T) {
 	}
 }
 
+func TestDoUpdateSubscriptionHTTPConvertsShareLinksWithoutPlugin(t *testing.T) {
+	previousBasePath := Env.BasePath
+	previousOS := Env.OS
+	Env.BasePath = t.TempDir()
+	Env.OS = "linux"
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+		Env.OS = previousOS
+	})
+
+	seedTaskWorkerArtifacts(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ss://YWVzLTEyOC1nY206cGFzc3dvcmRAZXhhbXBsZS5jb206ODM4OA==#ss-node"))
+	}))
+	defer server.Close()
+
+	worker := (&App{}).taskWorker()
+	subscribe := &subscriptionConfig{
+		ID:               "sub-share-link",
+		Name:             "Share Link Subscription",
+		Type:             "Http",
+		URL:              server.URL,
+		Path:             "data/subscribes/sub-share-link.json",
+		RequestMethod:    "GET",
+		RequestTimeout:   15,
+		RequestProxyMode: "none",
+		Header: struct {
+			Request  map[string]string `json:"request" yaml:"request"`
+			Response map[string]string `json:"response" yaml:"response"`
+		}{
+			Request:  map[string]string{},
+			Response: map[string]string{},
+		},
+	}
+
+	if err := worker.doUpdateSubscription(subscribe, backendNetworkSettings{RequestProxyMode: "none"}); err != nil {
+		t.Fatalf("doUpdateSubscription: %v", err)
+	}
+
+	if len(subscribe.Proxies) != 1 {
+		t.Fatalf("expected 1 proxy after share-link conversion, got %d", len(subscribe.Proxies))
+	}
+	if subscribe.Proxies[0].Tag != "ss-node" {
+		t.Fatalf("unexpected proxy tag: %s", subscribe.Proxies[0].Tag)
+	}
+	if subscribe.Proxies[0].Type != "shadowsocks" {
+		t.Fatalf("unexpected proxy type: %s", subscribe.Proxies[0].Type)
+	}
+}
+
 func TestDoUpdateSubscriptionManualPurePath(t *testing.T) {
 	previousBasePath := Env.BasePath
 	Env.BasePath = t.TempDir()
@@ -584,6 +691,58 @@ func TestDoUpdateSubscriptionHTTPFollowsRedirect(t *testing.T) {
 	}
 	if len(subscribe.Proxies) != 1 {
 		t.Fatalf("expected 1 proxy after redirect follow, got %d", len(subscribe.Proxies))
+	}
+	if subscribe.Proxies[0].Tag != "node-a" {
+		t.Fatalf("unexpected proxy tag: %s", subscribe.Proxies[0].Tag)
+	}
+}
+
+func TestDoUpdateSubscriptionHTTPDecryptsEncryptedPayload(t *testing.T) {
+	previousBasePath := Env.BasePath
+	previousOS := Env.OS
+	Env.BasePath = t.TempDir()
+	Env.OS = "linux"
+	t.Cleanup(func() {
+		Env.BasePath = previousBasePath
+		Env.OS = previousOS
+	})
+
+	encrypted := encryptSubscriptionPayload(
+		"correct-password",
+		`{"outbounds":[{"tag":"node-a","type":"vmess"}]}`,
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-Encryption", "true")
+		_, _ = w.Write([]byte(encrypted))
+	}))
+	defer server.Close()
+
+	worker := (&App{}).taskWorker()
+	subscribe := &subscriptionConfig{
+		ID:               "sub-encrypted",
+		Name:             "Encrypted Subscription",
+		Type:             "Http",
+		URL:              server.URL,
+		Path:             "data/subscribes/sub-encrypted.json",
+		DecryptPassword:  "correct-password",
+		RequestMethod:    "GET",
+		RequestTimeout:   15,
+		RequestProxyMode: "none",
+		Header: struct {
+			Request  map[string]string `json:"request" yaml:"request"`
+			Response map[string]string `json:"response" yaml:"response"`
+		}{
+			Request:  map[string]string{},
+			Response: map[string]string{},
+		},
+	}
+
+	if err := worker.doUpdateSubscription(subscribe, backendNetworkSettings{RequestProxyMode: "none"}); err != nil {
+		t.Fatalf("doUpdateSubscription: %v", err)
+	}
+	if len(subscribe.Proxies) != 1 {
+		t.Fatalf("expected 1 proxy after decrypt, got %d", len(subscribe.Proxies))
 	}
 	if subscribe.Proxies[0].Tag != "node-a" {
 		t.Fatalf("unexpected proxy tag: %s", subscribe.Proxies[0].Tag)

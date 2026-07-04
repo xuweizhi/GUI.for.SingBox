@@ -78,12 +78,34 @@ const withBrowserLikeGlobals = async (fn) => {
   }
 }
 
+const withSubStoreLikeGlobals = async (fn) => {
+  const hasPlugins = Object.prototype.hasOwnProperty.call(globalThis, '$Plugins')
+  const previousPlugins = globalThis.$Plugins
+  globalThis.$Plugins = {
+    SubStoreCache: {
+      get: () => '{}',
+      set: () => true,
+    },
+  }
+
+  try {
+    return await withBrowserLikeGlobals(fn)
+  } finally {
+    if (hasPlugins) {
+      globalThis.$Plugins = previousPlugins
+    } else {
+      delete globalThis.$Plugins
+    }
+  }
+}
+
 const state = {
   basePath: process.cwd(),
   env: {},
 }
 
 const supportedTypes = ['run::script', 'run::plugin']
+let proxyUtilsModulePromise
 
 const reply = (id, result = null, error = '') => {
   process.stdout.write(
@@ -101,6 +123,23 @@ const failMessage = (error) => {
     return error.message || error.toString()
   }
   return String(error)
+}
+
+const withMutedConsole = async (fn) => {
+  const methods = ['log', 'info', 'warn', 'error', 'debug']
+  const previous = methods.map((method) => [method, console[method]])
+
+  methods.forEach((method) => {
+    console[method] = () => {}
+  })
+
+  try {
+    return await fn()
+  } finally {
+    previous.forEach(([method, handler]) => {
+      console[method] = handler
+    })
+  }
 }
 
 const resolvePath = (target = '') => {
@@ -189,6 +228,53 @@ const resolveExecPath = (command = '') => {
 
 const notSupported = (name) => {
   throw new Error(`${name} is not supported by the node scheduled-task worker yet`)
+}
+
+const loadProxyUtilsModule = async () => {
+  if (!proxyUtilsModulePromise) {
+    const url = new URL('./proxy-utils.esm.mjs', import.meta.url).href
+    proxyUtilsModulePromise = withSubStoreLikeGlobals(async () => import(url))
+  }
+  return proxyUtilsModulePromise
+}
+
+const needsNativeSubscriptionConvert = (proxies = []) => {
+  return (
+    proxies.some((proxy) => proxy?.name && !proxy?.tag) || typeof proxies[0]?.base64 === 'string'
+  )
+}
+
+const normalizeSubscriptionProxiesNative = async (payload = {}) => {
+  let proxies = Array.isArray(payload.proxies) ? cloneValue(payload.proxies) : []
+  if (!needsNativeSubscriptionConvert(proxies)) {
+    return proxies
+  }
+
+  const { parse, produce } = await loadProxyUtilsModule()
+
+  proxies = await withMutedConsole(async () => {
+    let converted = proxies
+
+    if (typeof converted[0]?.base64 === 'string') {
+      converted = parse(converted[0].base64)
+    }
+
+    if (converted.some((proxy) => proxy?.name && !proxy?.tag)) {
+      const produced = produce(converted, 'singbox', 'internal')
+      if (!Array.isArray(produced)) {
+        throw new Error('Failed to convert subscription data')
+      }
+      converted = produced
+    }
+
+    return converted
+  })
+
+  proxies.forEach((proxy) => {
+    delete proxy.domain_resolver
+  })
+
+  return proxies
 }
 
 const plugins = new Proxy(
@@ -510,6 +596,8 @@ const handleRequest = async (message) => {
         message.params?.plugins || [],
         message.params?.pluginSettings || {},
       )
+    case 'subscription.normalizeNative':
+      return normalizeSubscriptionProxiesNative(message.params || {})
     case 'subscription.runScript':
       return runSubscriptionScript(message.params || {})
     case 'worker.shutdown':

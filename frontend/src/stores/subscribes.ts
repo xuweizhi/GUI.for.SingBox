@@ -24,6 +24,7 @@ import {
   getHeaderValue,
   isEncryptedSubscription,
   isSubscriptionShareLinkList,
+  normalizeSubscriptionProxies,
   SubscriptionEncryptionHeader,
 } from '@/utils'
 
@@ -243,6 +244,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     const pluginStore = usePluginsStore()
 
     proxies = await pluginStore.onSubscribeTrigger(proxies, s)
+    proxies = await normalizeSubscriptionProxies(proxies)
 
     if (proxies.some((proxy) => proxy.name && !proxy.tag) || proxies[0]?.base64) {
       throw 'You need to install the [节点转换] plugin first'
@@ -323,7 +325,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     return `Subscription [${s.name}] updated successfully.`
   }
 
-  const updateSubscribes = async () => {
+  const updateSubscribes = async (options: { throwOnFailure?: boolean } = {}) => {
     let needSave = false
 
     const update = async (s: Subscription) => {
@@ -352,7 +354,15 @@ export const useSubscribesStore = defineStore('subscribes', () => {
 
     eventBus.emit('subscriptionsChange', undefined)
 
-    return result.flatMap((v) => (v.ok && v.value) || [])
+    const output = result.flatMap((v) => (v.ok && v.value) || [])
+    if (options.throwOnFailure) {
+      const failed = output.filter((item) => !item.ok)
+      if (failed.length !== 0) {
+        throw new Error(failed.map((item) => item.result).join('\n'))
+      }
+    }
+
+    return output
   }
 
   const getSubscribeById = (id: string) => subscribes.value.find((v) => v.id === id)

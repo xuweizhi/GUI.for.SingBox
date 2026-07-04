@@ -144,11 +144,11 @@ const handleShowSubForm = (id?: string) => {
 
 const handleUpdateSubs = async () => {
   try {
-    await subscribeStore.updateSubscribes()
+    await subscribeStore.updateSubscribes({ throwOnFailure: true })
     message.success('common.success')
   } catch (error: any) {
     console.error('updateSubscribes: ', error)
-    message.error(error)
+    message.error(error.message || error)
   }
 }
 

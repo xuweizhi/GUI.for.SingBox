@@ -266,6 +266,7 @@ func extractEmbeddedFiles(fs embed.FS) {
 	imgSrc := "frontend/dist/imgs"
 	imgDst := "data/.cache/imgs"
 	workerDst := resolvePath(scheduledTaskWorkerScriptDst)
+	proxyUtilsDst := resolvePath(scheduledTaskWorkerProxyUtilsDst)
 
 	if err := os.MkdirAll(resolvePath(iconDst), os.ModePerm); err != nil {
 		log.Printf("Failed to create icon cache directory: %v", err)
@@ -277,6 +278,7 @@ func extractEmbeddedFiles(fs embed.FS) {
 	extractFiles(fs, iconSrc, iconDst)
 	extractFiles(fs, imgSrc, imgDst)
 	extractEmbeddedFile(fs, scheduledTaskWorkerScriptSrc, workerDst)
+	extractEmbeddedFile(fs, scheduledTaskWorkerProxyUtilsSrc, proxyUtilsDst)
 }
 
 func extractFiles(fs embed.FS, srcDir, dstDir string) {

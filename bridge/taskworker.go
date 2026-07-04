@@ -2,6 +2,9 @@ package bridge
 
 import (
 	"bufio"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/md5"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -23,18 +26,22 @@ import (
 )
 
 const (
-	scheduledTasksFilePath        = "data/scheduledtasks.yaml"
-	subscribesFilePath            = "data/subscribes.yaml"
-	profilesFilePath              = "data/profiles.yaml"
-	pluginsFilePath               = "data/plugins.yaml"
-	pluginHubFilePath             = "data/.cache/plugin-list.json"
-	rulesetsFilePath              = "data/rulesets.yaml"
-	scheduledTaskWorkerScriptSrc  = "taskworker/worker.mjs"
-	scheduledTaskWorkerScriptDst  = "data/.cache/taskworker/worker.mjs"
-	scheduledTaskLogEventName     = "scheduledTaskLog"
-	scheduledTaskLogFileCategory  = "scheduledtasks"
-	scheduledTaskWorkerLogsMaxLen = 200
-	defaultSubscribeScript        = "const onSubscribe = async (proxies, subscription) => {\n  return { proxies, subscription }\n}"
+	scheduledTasksFilePath           = "data/scheduledtasks.yaml"
+	subscribesFilePath               = "data/subscribes.yaml"
+	profilesFilePath                 = "data/profiles.yaml"
+	pluginsFilePath                  = "data/plugins.yaml"
+	pluginHubFilePath                = "data/.cache/plugin-list.json"
+	rulesetsFilePath                 = "data/rulesets.yaml"
+	scheduledTaskWorkerScriptSrc     = "taskworker/worker.mjs"
+	scheduledTaskWorkerScriptDst     = "data/.cache/taskworker/worker.mjs"
+	scheduledTaskWorkerProxyUtilsSrc = "frontend/src/vendor/proxy-utils.esm.mjs"
+	scheduledTaskWorkerProxyUtilsDst = "data/.cache/taskworker/proxy-utils.esm.mjs"
+	scheduledTaskLogEventName        = "scheduledTaskLog"
+	scheduledTaskLogFileCategory     = "scheduledtasks"
+	scheduledTaskWorkerLogsMaxLen    = 200
+	defaultSubscribeScript           = "const onSubscribe = async (proxies, subscription) => {\n  return { proxies, subscription }\n}"
+	subscriptionEncryptionHeader     = "Subscription-Encryption"
+	subscriptionEncryptionValue      = "true"
 )
 
 var goScheduledTaskTypes = map[string]struct{}{
@@ -1799,6 +1806,13 @@ func (w *scheduledTaskWorkerSupervisor) doUpdateSubscription(
 		return err
 	}
 
+	if needsNativeSubscriptionConvert(proxies) {
+		proxies, err = w.normalizeSubscriptionProxiesWithWorker(proxies)
+		if err != nil {
+			return err
+		}
+	}
+
 	proxies, err = applySubscriptionFilters(proxies, subscribe)
 	if err != nil {
 		return err
@@ -1859,6 +1873,26 @@ func (w *scheduledTaskWorkerSupervisor) applySubscriptionPluginsWithWorker(
 		"subscription":   subscribe,
 		"plugins":        activePlugins,
 		"pluginSettings": pluginSettings,
+	}, 2*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+
+	var nextProxies []map[string]any
+	if err := json.Unmarshal(rawResult, &nextProxies); err != nil {
+		return nil, err
+	}
+	if nextProxies == nil {
+		return []map[string]any{}, nil
+	}
+	return nextProxies, nil
+}
+
+func (w *scheduledTaskWorkerSupervisor) normalizeSubscriptionProxiesWithWorker(
+	proxies []map[string]any,
+) ([]map[string]any, error) {
+	rawResult, err := w.call("subscription.normalizeNative", map[string]any{
+		"proxies": proxies,
 	}, 2*time.Minute)
 	if err != nil {
 		return nil, err
@@ -1946,6 +1980,18 @@ func (w *scheduledTaskWorkerSupervisor) loadSubscriptionBody(
 			result.Headers.Set(key, value)
 		}
 		parseSubscriptionUserInfo(userInfo, result.Headers.Get("Subscription-Userinfo"))
+		if isEncryptedSubscription(result.Headers.Values(subscriptionEncryptionHeader)) {
+			decryptPassword := strings.TrimSpace(subscribe.DecryptPassword)
+			if decryptPassword == "" {
+				return "", userInfo, errors.New("Subscription is encrypted. Set a decrypt password first")
+			}
+
+			decryptedBody, err := decryptEncryptedSubscription(decryptPassword, result.Body)
+			if err != nil {
+				return "", userInfo, err
+			}
+			return decryptedBody, userInfo, nil
+		}
 		return result.Body, userInfo, nil
 	default:
 		return "", userInfo, fmt.Errorf("unsupported subscription type: %s", subscribe.Type)
@@ -2000,6 +2046,80 @@ func parseSubscriptionUserInfo(target map[string]int64, header string) {
 	}
 }
 
+func isEncryptedSubscription(headerValues []string) bool {
+	for _, value := range headerValues {
+		if strings.EqualFold(strings.TrimSpace(value), subscriptionEncryptionValue) {
+			return true
+		}
+	}
+	return false
+}
+
+func decryptEncryptedSubscription(password string, base64Data string) (string, error) {
+	normalized := strings.TrimSpace(base64Data)
+	if password == "" || normalized == "" {
+		return "", errors.New("Failed to decrypt subscription. Check the decrypt password")
+	}
+
+	normalized = strings.ReplaceAll(normalized, "\n", "")
+	normalized = strings.ReplaceAll(normalized, "\r", "")
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	normalized = strings.ReplaceAll(normalized, "\t", "")
+	normalized = strings.ReplaceAll(normalized, "-", "+")
+	normalized = strings.ReplaceAll(normalized, "_", "/")
+	switch len(normalized) % 4 {
+	case 2:
+		normalized += "=="
+	case 3:
+		normalized += "="
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(normalized)
+	if err != nil || len(raw) <= aes.BlockSize {
+		return "", errors.New("Failed to decrypt subscription. Check the decrypt password")
+	}
+
+	sum := md5.Sum([]byte(password))
+	block, err := aes.NewCipher(sum[:])
+	if err != nil {
+		return "", errors.New("Failed to decrypt subscription. Check the decrypt password")
+	}
+
+	iv := raw[:aes.BlockSize]
+	ciphertext := raw[aes.BlockSize:]
+	if len(ciphertext) == 0 || len(ciphertext)%aes.BlockSize != 0 {
+		return "", errors.New("Failed to decrypt subscription. Check the decrypt password")
+	}
+
+	plaintext := make([]byte, len(ciphertext))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(plaintext, ciphertext)
+	plaintext, err = unpadPKCS7(plaintext, aes.BlockSize)
+	if err != nil {
+		return "", errors.New("Failed to decrypt subscription. Check the decrypt password")
+	}
+
+	return string(plaintext), nil
+}
+
+func unpadPKCS7(payload []byte, blockSize int) ([]byte, error) {
+	if len(payload) == 0 || len(payload)%blockSize != 0 {
+		return nil, errors.New("invalid PKCS7 payload")
+	}
+
+	padding := int(payload[len(payload)-1])
+	if padding == 0 || padding > blockSize || padding > len(payload) {
+		return nil, errors.New("invalid PKCS7 padding")
+	}
+
+	for _, value := range payload[len(payload)-padding:] {
+		if int(value) != padding {
+			return nil, errors.New("invalid PKCS7 padding")
+		}
+	}
+
+	return payload[:len(payload)-padding], nil
+}
+
 func parseSubscriptionProxies(body string, subscriptionType string) ([]map[string]any, error) {
 	if outbounds, ok := parseSubscriptionJSONOutbounds(body); ok {
 		return outbounds, nil
@@ -2052,6 +2172,21 @@ func anySliceToMapSlice(items []any) []map[string]any {
 		}
 	}
 	return output
+}
+
+func needsNativeSubscriptionConvert(proxies []map[string]any) bool {
+	if len(proxies) == 0 {
+		return false
+	}
+	if _, ok := proxies[0]["base64"]; ok {
+		return true
+	}
+	for _, proxy := range proxies {
+		if stringValue(proxy["name"]) != "" && stringValue(proxy["tag"]) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func applySubscriptionFilters(
