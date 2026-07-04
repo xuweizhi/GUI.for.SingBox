@@ -315,11 +315,43 @@ export default {
     subscriptions: '订阅',
     rulesets: '规则集',
     plugins: '插件',
+    netcheck: '网络检测',
     settings: '设置',
     about: '关于',
     profiles: '配置',
     kernel: '核心',
     scheduledtasks: '计划任务',
+  },
+  netCheck: {
+    target: {
+      description: '输入目标 URL 或域名，检查当前核心代理的 HTTP 连通性，并补充一个 TCP 直连探测。',
+    },
+    actions: {
+      run: '开始检测',
+      clear: '清空结果',
+    },
+    results: {
+      title: '检测结果',
+      empty: '暂无检测结果',
+      core: '核心状态',
+      proxyHttp: '代理 HTTP',
+      tcp: 'TCP 连通',
+      duration: '耗时 {0} ms',
+    },
+    summary: {
+      coreOk: 'Sing-Box Clash API 可达',
+      coreFailed: '核心未运行或控制接口不可达',
+      proxySkipped: '核心不可达，跳过代理 HTTP 检查',
+      proxyMissing: '缺少可用的内核代理入口',
+      proxyFailed: '代理 HTTP 检查失败',
+      tcpFailed: 'TCP 连通失败',
+    },
+    node: {
+      title: '节点诊断',
+      coreUnavailable: '核心不可达，无法加载节点诊断。',
+      testGroup: '整组测速',
+    },
+    invalidTarget: '目标地址无效',
   },
   auth: {
     title: '连接 WebUI',

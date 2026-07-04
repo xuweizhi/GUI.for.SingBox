@@ -315,11 +315,44 @@ export default {
     subscriptions: 'Subscriptions',
     rulesets: 'Rulesets',
     plugins: 'Plugins',
+    netcheck: 'Net Check',
     settings: 'Settings',
     about: 'About',
     profiles: 'Profiles',
     kernel: 'Core',
     scheduledtasks: 'Tasks',
+  },
+  netCheck: {
+    target: {
+      description:
+        'Enter a target URL or hostname to check HTTP reachability through the current core proxy and run a direct TCP probe.',
+    },
+    actions: {
+      run: 'Run Check',
+      clear: 'Clear Results',
+    },
+    results: {
+      title: 'Check Results',
+      empty: 'No check results yet',
+      core: 'Core Status',
+      proxyHttp: 'Proxy HTTP',
+      tcp: 'TCP Reachability',
+      duration: 'Duration {0} ms',
+    },
+    summary: {
+      coreOk: 'Sing-Box Clash API is reachable',
+      coreFailed: 'The core is not running or the control API is unavailable',
+      proxySkipped: 'Skipped proxy HTTP check because the core is unavailable',
+      proxyMissing: 'No kernel proxy endpoint is available',
+      proxyFailed: 'Proxy HTTP check failed',
+      tcpFailed: 'TCP reachability check failed',
+    },
+    node: {
+      title: 'Node Diagnostics',
+      coreUnavailable: 'The core is unavailable, so node diagnostics cannot be loaded.',
+      testGroup: 'Test Group',
+    },
+    invalidTarget: 'Invalid target address',
   },
   auth: {
     title: 'Connect to WebUI',
