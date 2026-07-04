@@ -1,36 +1,34 @@
-import * as App from "@wails/go/bridge/App";
+import * as Bridge from '@wails/go/bridge/App'
 import {
   IsNotificationAvailable,
   RequestNotificationAuthorization,
   SendNotification,
-} from "@wails/runtime/runtime";
+} from '@wails/runtime/runtime'
 
-import { sampleID } from "@/utils";
+import { sampleID } from '@/utils'
 
-import type { AppEnv } from "@/types/app";
+export const RestartApp = Bridge.RestartApp
 
-export const RestartApp = App.RestartApp;
+export const ExitApp = Bridge.ExitApp
 
-export const ExitApp = App.ExitApp;
+export const ShowMainWindow = Bridge.ShowMainWindow
 
-export const ShowMainWindow = App.ShowMainWindow;
+export const UpdateTray = Bridge.UpdateTray
 
-export const UpdateTray = App.UpdateTray;
+export const UpdateTrayMenus = Bridge.UpdateTrayMenus
 
-export const UpdateTrayMenus = App.UpdateTrayMenus;
-
-export const UpdateTrayAndMenus = App.UpdateTrayAndMenus;
+export const UpdateTrayAndMenus = Bridge.UpdateTrayAndMenus
 
 export const GetEnv = <T extends string | undefined = undefined>(
   key?: T,
-): Promise<T extends string ? string : AppEnv> => {
-  return App.GetEnv(key || "");
-};
+): Promise<T extends string ? string : App.AppEnv> => {
+  return Bridge.GetEnv(key || '')
+}
 
-export const IsStartup = App.IsStartup;
+export const IsStartup = Bridge.IsStartup
 
 export const GetSystemProxy = async () => {
-  const { flag, data } = await App.GetSystemProxy()
+  const { flag, data } = await Bridge.GetSystemProxy()
   if (!flag) {
     throw data
   }
@@ -44,7 +42,7 @@ export const SetSystemProxy = async (
   bypass = '',
   services: string[] = [],
 ) => {
-  const { flag, data } = await App.SetSystemProxy(enable, server, proxyType, bypass, services)
+  const { flag, data } = await Bridge.SetSystemProxy(enable, server, proxyType, bypass, services)
   if (!flag) {
     throw data
   }
@@ -52,7 +50,7 @@ export const SetSystemProxy = async (
 }
 
 export const SetSystemDNS = async (servers: string, services: string[] = []) => {
-  const { flag, data } = await App.SetSystemDNS(servers, services)
+  const { flag, data } = await Bridge.SetSystemDNS(servers, services)
   if (!flag) {
     throw data
   }
@@ -60,7 +58,7 @@ export const SetSystemDNS = async (servers: string, services: string[] = []) => 
 }
 
 export const GetSystemProxyBypass = async () => {
-  const { flag, data } = await App.GetSystemProxyBypass()
+  const { flag, data } = await Bridge.GetSystemProxyBypass()
   if (!flag) {
     throw data
   }
@@ -68,79 +66,79 @@ export const GetSystemProxyBypass = async () => {
 }
 
 export const GetInterfaces = async () => {
-  const { flag, data } = await App.GetInterfaces();
+  const { flag, data } = await Bridge.GetInterfaces()
   if (!flag) {
-    throw data;
+    throw data
   }
-  return data.split("|");
-};
+  return data.split('|')
+}
 
 export interface ScheduledTaskWorkerStatus {
-  available: boolean;
-  nodePath: string;
-  supportedTypes: string[];
+  available: boolean
+  nodePath: string
+  supportedTypes: string[]
 }
 
 export interface ScheduledTaskWorkerLogRecord {
-  id?: string;
-  name: string;
-  startTime: number;
-  endTime: number;
-  result: { ok: boolean; result: string }[];
+  id?: string
+  name: string
+  startTime: number
+  endTime: number
+  result: { ok: boolean; result: string }[]
 }
 
 export const GetScheduledTaskWorkerStatus = async (): Promise<ScheduledTaskWorkerStatus> => {
-  const { flag, data } = await App.GetScheduledTaskWorkerStatus();
+  const { flag, data } = await Bridge.GetScheduledTaskWorkerStatus()
   if (!flag) {
-    throw data;
+    throw data
   }
-  return JSON.parse(data || "{}") as ScheduledTaskWorkerStatus;
-};
+  return JSON.parse(data || '{}') as ScheduledTaskWorkerStatus
+}
 
 export const GetScheduledTaskWorkerLogs = async (): Promise<ScheduledTaskWorkerLogRecord[]> => {
-  const { flag, data } = await App.GetScheduledTaskWorkerLogs();
+  const { flag, data } = await Bridge.GetScheduledTaskWorkerLogs()
   if (!flag) {
-    throw data;
+    throw data
   }
-  return JSON.parse(data || "[]") as ScheduledTaskWorkerLogRecord[];
-};
+  return JSON.parse(data || '[]') as ScheduledTaskWorkerLogRecord[]
+}
 
 export const ClearScheduledTaskWorkerLogs = async () => {
-  const { flag, data } = await App.ClearScheduledTaskWorkerLogs();
+  const { flag, data } = await Bridge.ClearScheduledTaskWorkerLogs()
   if (!flag) {
-    throw data;
+    throw data
   }
-  return data;
-};
+  return data
+}
 
 export const RecordScheduledTaskLog = async (record: ScheduledTaskWorkerLogRecord) => {
-  const { flag, data } = await App.RecordScheduledTaskLog(JSON.stringify(record));
+  const { flag, data } = await Bridge.RecordScheduledTaskLog(JSON.stringify(record))
   if (!flag) {
-    throw data;
+    throw data
   }
-  return data;
-};
+  return data
+}
 
 export const ReloadScheduledTaskWorker = async () => {
-  const { flag, data } = await App.ReloadScheduledTaskWorker();
+  const { flag, data } = await Bridge.ReloadScheduledTaskWorker()
   if (!flag) {
-    throw data;
+    throw data
   }
-  return data;
-};
+  return data
+}
 
 export const RunScheduledTaskWorker = async (id: string) => {
-  const { flag, data } = await App.RunScheduledTaskWorker(id);
+  const { flag, data } = await Bridge.RunScheduledTaskWorker(id)
   if (!flag) {
-    throw data;
+    throw data
   }
-  return data;
-};
+  return data
+}
 
 export const Notify = async (title: string, body: string) => {
   if (!(await IsNotificationAvailable())) {
-    throw new Error("Notifications not available on this platform");
+    throw new Error('Notifications not available on this platform')
   }
-  await RequestNotificationAuthorization();
-  await SendNotification({ id: sampleID(), title, body });
-};
+  await RequestNotificationAuthorization()
+  await SendNotification({ id: sampleID(), title, body })
+}

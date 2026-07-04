@@ -5,7 +5,7 @@ import { parse, stringify } from 'yaml'
 
 import { message } from '@/utils'
 
-const model = defineModel<{ mixin: IProfile['mixin']; script: IProfile['script'] }>({
+const model = defineModel<{ mixin: App.Profile['mixin']; script: App.Profile['script'] }>({
   required: true,
 })
 
@@ -60,10 +60,10 @@ const onFormatChange = (val: 'json' | 'yaml', old: 'json' | 'yaml') => {
           @change="onFormatChange"
         />
       </div>
-      <CodeViewer v-model="model.mixin.config" :lang="model.mixin.format" editable />
+      <CodeEditor v-model="model.mixin.config" :lang="model.mixin.format" editable />
     </template>
     <template #script>
-      <CodeViewer v-model="model.script.code" lang="javascript" editable />
+      <CodeEditor v-model="model.script.code" lang="javascript" editable />
     </template>
   </Tabs>
 </template>

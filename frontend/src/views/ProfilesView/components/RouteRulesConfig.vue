@@ -26,15 +26,15 @@ interface Props {
   inboundOptions: { label: string; value: string }[]
   outboundOptions: { label: string; value: string }[]
   serverOptions: { label: string; value: string }[]
-  ruleSet: IRuleSet[]
+  ruleSet: App.ProfileRuleSet[]
 }
 
 const props = defineProps<Props>()
 
-const model = defineModel<IRule[]>({ required: true })
+const model = defineModel<App.Rule[]>({ required: true })
 
 let ruleId = 0
-const fields = ref<IRule>(DefaultRouteRule())
+const fields = ref<App.Rule>(DefaultRouteRule())
 
 const { t } = useI18n()
 const [showEditModal] = useBool(false)
@@ -111,7 +111,7 @@ const isInsertionPointMissing = computed(
   () => model.value.findIndex((rule) => rule.type === RuleType.InsertionPoint) === -1,
 )
 
-const hasLost = (rule: IRule) => {
+const hasLost = (rule: App.Rule) => {
   const rulesValidationFlags: boolean[] = []
   const hasMissingInbound = !props.inboundOptions.find((v) => v.value === rule.payload)
   const hasMissingOutbound = !props.outboundOptions.find((v) => v.value === rule.outbound)
@@ -139,7 +139,7 @@ const hasLost = (rule: IRule) => {
   return rulesValidationFlags.some((v) => v) || !rule.payload
 }
 
-const renderRule = (rule: IRule) => {
+const renderRule = (rule: App.Rule) => {
   const { type, payload, outbound, action, invert } = rule
   const children: string[] = [type]
   let _payload = payload
@@ -253,7 +253,7 @@ const renderRule = (rule: IRule) => {
         v-model="fields.payload"
         :options="inboundOptions"
       />
-      <CodeViewer
+      <CodeEditor
         v-else-if="fields.type === RuleType.Inline"
         v-model="fields.payload"
         editable
@@ -281,7 +281,7 @@ const renderRule = (rule: IRule) => {
       <template v-else-if="fields.action === RuleAction.RouteOptions">
         <div class="form-item">
           {{ t('kernel.route.rules.routeOptions') }}
-          <CodeViewer v-model="fields.outbound" editable lang="json" style="min-width: 320px" />
+          <CodeEditor v-model="fields.outbound" editable lang="json" style="min-width: 320px" />
         </div>
       </template>
       <template v-else-if="fields.action === RuleAction.Reject">

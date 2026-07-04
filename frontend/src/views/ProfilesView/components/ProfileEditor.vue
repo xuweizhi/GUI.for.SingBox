@@ -8,7 +8,7 @@ import { generateConfig, message, restoreProfile } from '@/utils'
 import Button from '@/components/Button/index.vue'
 
 interface Props {
-  profile: IProfile
+  profile: App.Profile
 }
 
 const props = defineProps<Props>()
@@ -87,5 +87,5 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <CodeViewer v-model="profileText" lang="json" editable class="h-full" />
+  <CodeEditor v-model="profileText" lang="json" editable class="h-full" />
 </template>

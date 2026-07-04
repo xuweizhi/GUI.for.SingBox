@@ -16,10 +16,10 @@ interface Props {
 
 defineProps<Props>()
 
-const model = defineModel<IRuleSet[]>({ required: true })
+const model = defineModel<App.ProfileRuleSet[]>({ required: true })
 
 let rulesetId = 0
-const fields = ref<IRuleSet>(DefaultRouteRuleset())
+const fields = ref<App.ProfileRuleSet>(DefaultRouteRuleset())
 
 const { t } = useI18n()
 const [showEditModal] = useBool(false)
@@ -53,7 +53,7 @@ const handleDelete = (index: number) => {
 
 const showLost = () => message.warn('kernel.route.rule_set.notFound')
 
-const hasLost = (ruleset: IRuleSet) => {
+const hasLost = (ruleset: App.ProfileRuleSet) => {
   if (ruleset.type !== RulesetType.Local) return false
   return !rulesetsStore.getRulesetById(ruleset.path)
 }
@@ -165,7 +165,7 @@ const handleUse = (ruleset: any) => {
       </div>
     </template>
     <template v-else-if="fields.type === RulesetType.Inline">
-      <CodeViewer v-model="fields.rules" lang="json" editable />
+      <CodeEditor v-model="fields.rules" lang="json" editable />
     </template>
   </Modal>
 </template>

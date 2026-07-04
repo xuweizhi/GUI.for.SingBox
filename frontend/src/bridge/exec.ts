@@ -1,4 +1,4 @@
-import * as App from '@wails/go/bridge/App'
+import * as Bridge from '@wails/go/bridge/App'
 import { EventsOn, EventsOff } from '@wails/runtime/runtime'
 
 import { sampleID } from '@/utils'
@@ -28,7 +28,7 @@ const mergeExecOptions = (options: ExecOptions) => {
 }
 
 export const Exec = async (path: string, args: string[], options: ExecOptions = {}) => {
-  const { flag, data } = await App.Exec(path, args, mergeExecOptions(options))
+  const { flag, data } = await Bridge.Exec(path, args, mergeExecOptions(options))
   if (!flag) {
     throw data
   }
@@ -57,7 +57,13 @@ export const ExecBackground = async (
     })
   }
 
-  const { flag, data } = await App.ExecBackground(path, args, outEvent, endEvent, mergeExecOptions(options))
+  const { flag, data } = await Bridge.ExecBackground(
+    path,
+    args,
+    outEvent,
+    endEvent,
+    mergeExecOptions(options),
+  )
   if (!flag) {
     outEvent && EventsOff(outEvent)
     endEvent && EventsOff(endEvent)
@@ -68,7 +74,7 @@ export const ExecBackground = async (
 }
 
 export const ProcessInfo = async (pid: number) => {
-  const { flag, data } = await App.ProcessInfo(pid)
+  const { flag, data } = await Bridge.ProcessInfo(pid)
   if (!flag) {
     throw data
   }
@@ -76,7 +82,7 @@ export const ProcessInfo = async (pid: number) => {
 }
 
 export const FindListeningProcess = async (port: number) => {
-  const { flag, data } = await App.FindListeningProcess(port)
+  const { flag, data } = await Bridge.FindListeningProcess(port)
   if (!flag) {
     throw data
   }
@@ -84,7 +90,7 @@ export const FindListeningProcess = async (port: number) => {
 }
 
 export const ProcessMemory = async (pid: number) => {
-  const { flag, data } = await App.ProcessMemory(pid)
+  const { flag, data } = await Bridge.ProcessMemory(pid)
   if (!flag) {
     throw data
   }
@@ -92,7 +98,7 @@ export const ProcessMemory = async (pid: number) => {
 }
 
 export const KillProcess = async (pid: number, timeout = 10) => {
-  const { flag, data } = await App.KillProcess(pid, timeout)
+  const { flag, data } = await Bridge.KillProcess(pid, timeout)
   if (!flag) {
     throw data
   }

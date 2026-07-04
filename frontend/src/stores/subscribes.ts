@@ -28,10 +28,8 @@ import {
   SubscriptionEncryptionHeader,
 } from '@/utils'
 
-import type { Subscription } from '@/types/app'
-
 export const useSubscribesStore = defineStore('subscribes', () => {
-  const subscribes = ref<Subscription[]>([])
+  const subscribes = ref<App.Subscription[]>([])
 
   const defaultOutboundIds = ['outbound-select', 'outbound-urltest']
 
@@ -47,7 +45,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     return WriteFile(SubscribesFilePath, stringifyNoFolding(s))
   }
 
-  const addSubscribeToDefaultOutbounds = async (s: Subscription) => {
+  const addSubscribeToDefaultOutbounds = async (s: App.Subscription) => {
     const profilesStore = useProfilesStore()
     const profile = profilesStore.currentProfile
     if (!profile) return
@@ -125,7 +123,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     return { added, removed }
   }
 
-  const addSubscribe = async (s: Subscription) => {
+  const addSubscribe = async (s: App.Subscription) => {
     subscribes.value.push(s)
     try {
       await saveSubscribes()
@@ -158,7 +156,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     eventBus.emit('subscriptionChange', { id })
   }
 
-  const editSubscribe = async (id: string, s: Subscription) => {
+  const editSubscribe = async (id: string, s: App.Subscription) => {
     const idx = subscribes.value.findIndex((v) => v.id === id)
     if (idx === -1) return
     const backup = subscribes.value.splice(idx, 1, s)[0]!
@@ -172,7 +170,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     eventBus.emit('subscriptionChange', { id })
   }
 
-  const _doUpdateSub = async (s: Subscription, options: Partial<Subscription> = {}) => {
+  const _doUpdateSub = async (s: App.Subscription, options: Partial<App.Subscription> = {}) => {
     const userInfo: Recordable = {}
     let body = ''
     let proxies: Record<string, any>[] = []
@@ -233,7 +231,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     } else if (isValidBase64(body)) {
       proxies = [{ base64: body }]
     } else if (isSubscriptionShareLinkList(body)) {
-      // Reuse the existing node-convert plugin path for line-based share-link subscriptions.
+      // Treat line-based share links the same as base64 subscriptions.
       proxies = [{ base64: body }]
     } else if (s.type === 'Manual') {
       proxies = JSON.parse(body)
@@ -288,8 +286,8 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       `${s.script}; return await ${PluginTriggerEvent.OnSubscribe}(proxies, subscription)`,
     ) as (
       proxies: Recordable[],
-      subscription: Subscription,
-    ) => Promise<{ proxies: Recordable[]; subscription: Subscription }>
+      subscription: App.Subscription,
+    ) => Promise<{ proxies: Recordable[]; subscription: App.Subscription }>
 
     const { proxies: _proxies, subscription } = await fn(proxies, s)
 
@@ -306,7 +304,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     }
   }
 
-  const updateSubscribe = async (id: string, options: Partial<Subscription> = {}) => {
+  const updateSubscribe = async (id: string, options: Partial<App.Subscription> = {}) => {
     const s = subscribes.value.find((v) => v.id === id)
     if (!s) throw id + ' Not Found'
     if (s.disabled) throw s.name + ' Disabled'
@@ -328,7 +326,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
   const updateSubscribes = async (options: { throwOnFailure?: boolean } = {}) => {
     let needSave = false
 
-    const update = async (s: Subscription) => {
+    const update = async (s: App.Subscription) => {
       const result = { ok: true, id: s.id, name: s.name, result: '' }
       try {
         s.updating = true
@@ -367,7 +365,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
 
   const getSubscribeById = (id: string) => subscribes.value.find((v) => v.id === id)
 
-  const getSubscribeTemplate = (name = '', options: { url?: string } = {}): Subscription => {
+  const getSubscribeTemplate = (name = '', options: { url?: string } = {}): App.Subscription => {
     const id = sampleID()
     return {
       id: id,
