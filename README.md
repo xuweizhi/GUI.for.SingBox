@@ -124,6 +124,28 @@ sudo systemctl restart gui.for.singbox-headless
 sudo systemctl status gui.for.singbox-headless
 ```
 
+Or use the repo helper script to rebuild and restart in one step:
+
+```bash
+./scripts/rebuild-restart-headless.sh
+```
+
+Optional flags:
+
+- `--no-install` skips `pnpm install --frozen-lockfile`
+- `--service <name>` restarts a different systemd service name
+- `--status-only` only shows the current systemd status
+- `--restart-only` restarts the service without rebuilding
+
+Examples:
+
+```bash
+./scripts/rebuild-restart-headless.sh --no-install
+./scripts/rebuild-restart-headless.sh --service gui.for.singbox-headless
+./scripts/rebuild-restart-headless.sh --status-only
+./scripts/rebuild-restart-headless.sh --restart-only
+```
+
 Keep the existing `data/` directory unless you intentionally want to replace runtime data.
 
 ### Service configuration notes
