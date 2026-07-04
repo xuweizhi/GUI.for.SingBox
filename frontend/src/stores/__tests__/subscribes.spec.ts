@@ -1,15 +1,17 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { writeFile } = vi.hoisted(() => ({
+const { writeFile, getSystemProxy, getProxyEndpoint } = vi.hoisted(() => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
+  getSystemProxy: vi.fn().mockResolvedValue(''),
+  getProxyEndpoint: vi.fn(),
 }))
 
 vi.mock('@/bridge', () => ({
   ReadFile: vi.fn(),
   WriteFile: writeFile,
   Requests: vi.fn(),
-  GetSystemProxy: vi.fn().mockResolvedValue(''),
+  GetSystemProxy: getSystemProxy,
   ReadDir: vi.fn().mockResolvedValue([]),
   GetSystemProxyBypass: vi.fn(),
   WindowSetSystemDefaultTheme: vi.fn(),
@@ -34,8 +36,23 @@ vi.mock('@/lang', () => ({
   loadLocale: vi.fn(),
 }))
 
+vi.mock('@/utils/env', () => ({
+  APP_TITLE: 'GUI.for.SingBox',
+  APP_VERSION: 'test-version',
+  APP_VERSION_API: 'test-version-api',
+  APP_LOCALES_URL: '',
+  PROJECT_URL: '',
+  TG_GROUP: '',
+  TG_CHANNEL: '',
+  APP_RUNTIME: 'webui',
+  isWebui: true,
+  isDev: false,
+}))
+
 vi.mock('@/stores/kernelApi', () => ({
-  useKernelApiStore: () => ({}),
+  useKernelApiStore: () => ({
+    getProxyEndpoint,
+  }),
 }))
 
 vi.mock('@/stores/env', () => ({
@@ -97,6 +114,9 @@ describe('subscribes store', () => {
       }),
     )
     writeFile.mockClear()
+    getSystemProxy.mockReset()
+    getSystemProxy.mockResolvedValue('')
+    getProxyEndpoint.mockReset()
   })
 
   it('adds a new subscription to the default selector and urltest groups', async () => {
@@ -292,6 +312,42 @@ describe('subscribes store', () => {
         type: 'shadowsocks',
       }),
     ])
+  })
+
+  it('falls back to the kernel proxy in webui when a subscription uses system mode but no system proxy is available', async () => {
+    const appSettingsStore = useAppSettingsStore()
+    const subscribesStore = useSubscribesStore()
+    appSettingsStore.app.requestProxyMode = RequestProxyMode.Kernel
+    getProxyEndpoint.mockReturnValue({
+      schema: 'http',
+      host: '127.0.0.1',
+      port: 20122,
+      username: '',
+      password: '',
+      proxyType: 'mixed',
+    })
+    subscribesStore.subscribes = [subscription('sub-webui-system-fallback')].map((item) => ({
+      ...item,
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }))
+
+    vi.mocked(Requests).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: '{"outbounds":[{"tag":"node-a","type":"vmess"}]}',
+    } as Awaited<ReturnType<typeof Requests>>)
+
+    await expect(subscribesStore.updateSubscribe('sub-webui-system-fallback')).resolves.toBe(
+      'Subscription [sub-webui-system-fallback] updated successfully.',
+    )
+
+    expect(Requests).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          Proxy: 'http://127.0.0.1:20122',
+        }),
+      }),
+    )
   })
 
   it('keeps failed subscription update results in bulk updates', async () => {

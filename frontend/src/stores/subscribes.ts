@@ -6,7 +6,8 @@ import { ReadFile, WriteFile, Requests } from '@/bridge'
 import { DefaultSubscribeScript, SubscribesFilePath } from '@/constant/app'
 import { DefaultExcludeProtocols } from '@/constant/kernel'
 import { PluginTriggerEvent, RequestMethod, RequestProxyMode } from '@/enums/app'
-import { usePluginsStore, useProfilesStore } from '@/stores'
+import { useAppSettingsStore, usePluginsStore, useProfilesStore } from '@/stores'
+import { isWebui } from '@/utils/env'
 import {
   sampleID,
   isValidSubJson,
@@ -43,6 +44,28 @@ export const useSubscribesStore = defineStore('subscribes', () => {
   const saveSubscribes = () => {
     const s = omitArray(subscribes.value, ['updating'])
     return WriteFile(SubscribesFilePath, stringifyNoFolding(s))
+  }
+
+  const resolveSubscribeRequestProxy = async (
+    requestProxyMode: App.RequestProxyMode,
+    customProxy: string,
+    explicitRequestProxyMode?: App.RequestProxyMode,
+  ) => {
+    const proxy = await GetRequestProxy(
+      requestProxyMode === RequestProxyMode.Global ? undefined : requestProxyMode,
+      requestProxyMode === RequestProxyMode.Global ? undefined : customProxy,
+    )
+    if (proxy || explicitRequestProxyMode || !isWebui) return proxy
+
+    const appSettingsStore = useAppSettingsStore()
+    if (
+      requestProxyMode !== RequestProxyMode.System ||
+      appSettingsStore.app.requestProxyMode !== RequestProxyMode.Kernel
+    ) {
+      return proxy
+    }
+
+    return GetRequestProxy(RequestProxyMode.Kernel)
   }
 
   const addSubscribeToDefaultOutbounds = async (s: App.Subscription) => {
@@ -192,11 +215,10 @@ export const useSubscribesStore = defineStore('subscribes', () => {
         autoTransformBody: false,
         options: {
           Insecure: options.inSecure ?? s.inSecure,
-          Proxy: await GetRequestProxy(
-            requestProxyMode === RequestProxyMode.Global ? undefined : requestProxyMode,
-            requestProxyMode === RequestProxyMode.Global
-              ? undefined
-              : (options.customProxy ?? s.customProxy),
+          Proxy: await resolveSubscribeRequestProxy(
+            requestProxyMode,
+            options.customProxy ?? s.customProxy,
+            options.requestProxyMode,
           ),
           Timeout: options.requestTimeout ?? s.requestTimeout,
         },
