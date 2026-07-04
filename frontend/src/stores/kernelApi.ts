@@ -42,6 +42,10 @@ import {
 } from '@/stores'
 import { resolveCoreStopPid } from '@/stores/kernelProcess'
 import {
+  getProxyProfileOptionsFromRuntime,
+  resolveRuntimeInboundState,
+} from '@/stores/kernelApiRuntime'
+import {
   generateConfigFile,
   updateTrayAndMenus,
   getKernelFileName,
@@ -128,22 +132,15 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       }
     }
 
-    const mixed = runtimeProfile.inbounds.find((v) => v.enable && v.mixed)
-    const http = runtimeProfile.inbounds.find((v) => v.enable && v.http)
-    const socks = runtimeProfile.inbounds.find((v) => v.enable && v.socks)
-    const tun = runtimeProfile.inbounds.find((v) => v.tun)
-    config.value['mixed-port'] = mixed?.mixed?.listen.listen_port || 0
-    config.value['port'] = http?.http?.listen.listen_port || 0
-    config.value['socks-port'] = socks?.socks?.listen.listen_port || 0
-    config.value['allow-lan'] = [
-      mixed?.mixed?.listen.listen,
-      http?.http?.listen.listen,
-      socks?.socks?.listen.listen,
-    ].some((address) => address === '0.0.0.0' || address === '::')
+    const runtimeInboundState = resolveRuntimeInboundState(runtimeProfile.inbounds)
+    config.value['mixed-port'] = runtimeInboundState.mixedPort
+    config.value['port'] = runtimeInboundState.httpPort
+    config.value['socks-port'] = runtimeInboundState.socksPort
+    config.value['allow-lan'] = runtimeInboundState.allowLan
 
-    config.value.tun.enable = !!tun?.enable
-    config.value.tun.device = tun?.tun?.interface_name || ''
-    config.value.tun.stack = tun?.tun?.stack || ''
+    config.value.tun.enable = runtimeInboundState.tunEnable
+    config.value.tun.device = runtimeInboundState.tunDevice
+    config.value.tun.stack = runtimeInboundState.tunStack
     config.value['interface-name'] = runtimeProfile.route.default_interface
   }
 
@@ -465,36 +462,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   }
 
   const getProxyProfileOptions = (proxyType: ProxyType) => {
-    const inboundTypeMap = {
-      mixed: Inbound.Mixed,
-      http: Inbound.Http,
-      socks: Inbound.Socks,
-    } satisfies Record<ProxyType, Inbound>
-
-    const inbound = runtimeProfile?.inbounds.find(
-      (item) => item.enable && item.type === inboundTypeMap[proxyType],
-    )
-
-    const inboundOptions =
-      proxyType === Inbound.Mixed
-        ? inbound?.mixed
-        : proxyType === Inbound.Http
-          ? inbound?.http
-          : inbound?.socks
-
-    const listen = inboundOptions?.listen.listen || ''
-    const auth = inboundOptions?.users[0]?.trim()
-    const host = normalizeProxyHost((listen || '').trim())
-
-    if (!auth) return { host, username: '', password: '' }
-
-    const [username, ...passwordParts] = auth.split(':')
-
-    return {
-      host,
-      username: username || '',
-      password: passwordParts.join(':'),
-    }
+    return getProxyProfileOptionsFromRuntime(runtimeProfile?.inbounds || [], proxyType)
   }
 
   const getProxyEndpoint = (): ProxyEndpoint | undefined => {

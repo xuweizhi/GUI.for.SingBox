@@ -1,5 +1,5 @@
-import * as Bridge from '@/bridge/wailsjs/go/bridge/App'
 import { useKernelApiStore } from '@/stores/kernelApi'
+import { isWebui } from '@/utils/env'
 import { useNetworkCheck } from '@/views/NetCheckView/useNetworkCheck'
 
 type RequestMethod = 'GET' | 'HEAD'
@@ -8,13 +8,46 @@ type RequestOptions = {
   Timeout?: number
 }
 
+type BridgeHttpResult = {
+  flag: boolean
+  status: number
+  headers: Record<string, string[]>
+  body: string
+}
+
+type BridgeTcpResult = {
+  flag: boolean
+  data: string
+}
+
+type RuntimeBridge = {
+  Requests: (
+    method: string,
+    url: string,
+    headers: Record<string, string>,
+    body: string,
+    options: Record<string, unknown>,
+  ) => Promise<BridgeHttpResult>
+  TcpPing: (address: string, options: Record<string, unknown>) => Promise<BridgeTcpResult>
+}
+
+let bridgePromise: Promise<RuntimeBridge> | undefined
+
+const loadBridge = (): Promise<RuntimeBridge> => {
+  bridgePromise ||= (
+    isWebui
+      ? import('@/bridge/browser/go/bridge/App')
+      : import('@/bridge/wailsjs/go/bridge/App')
+  ).then((module) => ({
+    Requests: module.Requests as RuntimeBridge['Requests'],
+    TcpPing: module.TcpPing as RuntimeBridge['TcpPing'],
+  }))
+  return bridgePromise
+}
+
 const requestWithoutBody = async (method: RequestMethod, url: string, options: RequestOptions = {}) => {
-  const {
-    flag,
-    status,
-    headers,
-    body,
-  } = await Bridge.Requests(method, url, {}, '', {
+  const bridge = await loadBridge()
+  const result = await bridge.Requests(method, url, {}, '', {
     Proxy: options.Proxy || '',
     Insecure: false,
     Redirect: true,
@@ -25,14 +58,14 @@ const requestWithoutBody = async (method: RequestMethod, url: string, options: R
     Stream: '',
   })
 
-  if (!flag) throw body
+  if (!result.flag) throw result.body
 
   return {
-    status,
+    status: result.status,
     headers: Object.fromEntries(
-      Object.entries(headers).map(([key, value]) => [key, value.length > 1 ? value : value[0]!]),
+      Object.entries(result.headers).map(([key, value]) => [key, value.length > 1 ? value : (value[0] ?? '')]),
     ),
-    body,
+    body: result.body,
   }
 }
 
@@ -45,13 +78,14 @@ const httpGet = (url: string, _headers = {}, options: RequestOptions = {}) => {
 }
 
 const tcpPing = async (address: string, options: { Timeout?: number } = {}) => {
-  const { flag, data } = await Bridge.TcpPing(address, {
+  const bridge = await loadBridge()
+  const result = await bridge.TcpPing(address, {
     Mode: 'Text',
     Timeout: options.Timeout ?? 15,
   })
 
-  if (!flag) throw data
-  return Number(data)
+  if (!result.flag) throw result.data
+  return Number(result.data)
 }
 
 export const useRuntimeNetworkCheck = () => {
