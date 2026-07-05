@@ -9,10 +9,10 @@ export interface ParsedNetworkCheckTarget {
   targetKind: 'domain' | 'ip'
 }
 
-const stripIpv6Brackets = (host: string): string => host.replace(/^\[|\]$/g, '')
+const normalizeHost = (host: string): string => host.replace(/^\[|\]$/g, '')
 
 const isIpLiteral = (host: string): boolean => {
-  const normalizedHost = stripIpv6Brackets(host)
+  const normalizedHost = normalizeHost(host)
 
   if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(normalizedHost)) {
     return normalizedHost.split('.').every((segment) => {
@@ -37,17 +37,17 @@ export const parseNetworkCheckTarget = (raw: string): ParsedNetworkCheckTarget =
       throw new Error('netCheck.invalidTarget')
     }
 
-    const targetKind = isIpLiteral(url.hostname) ? 'ip' : 'domain'
-    const tcpHost = stripIpv6Brackets(url.hostname)
+    const requestHost = normalizeHost(url.hostname)
+    const targetKind = isIpLiteral(requestHost) ? 'ip' : 'domain'
 
     return {
       input: trimmed,
       requestUrl: url.toString(),
-      requestHost: url.hostname,
-      tcpHost,
+      requestHost,
+      tcpHost: requestHost,
       tcpPort: Number(url.port || (url.protocol === 'http:' ? 80 : 443)),
-      displayHost: tcpHost,
-      dnsLookupHost: targetKind === 'ip' ? '' : url.hostname,
+      displayHost: requestHost,
+      dnsLookupHost: targetKind === 'ip' ? '' : requestHost,
       targetKind,
     }
   } catch {

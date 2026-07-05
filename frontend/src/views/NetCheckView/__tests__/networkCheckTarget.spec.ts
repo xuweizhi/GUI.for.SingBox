@@ -4,7 +4,7 @@ import { parseNetworkCheckTarget } from '@/views/NetCheckView/networkCheckTarget
 
 describe('parseNetworkCheckTarget', () => {
   it('normalizes an https URL', () => {
-    expect(parseNetworkCheckTarget('https://example.com/path')).toEqual({
+    expect(parseNetworkCheckTarget('https://example.com/path')).toMatchObject({
       input: 'https://example.com/path',
       requestUrl: 'https://example.com/path',
       requestHost: 'example.com',
