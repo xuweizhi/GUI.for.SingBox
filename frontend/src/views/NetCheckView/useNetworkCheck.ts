@@ -171,7 +171,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
   const input = ref('https://www.gstatic.com/generate_204')
   const running = ref(false)
   const groups = ref<NetworkCheckResultGroup[]>([])
-  const results = computed(() => groups.value.flatMap((group) => group.items))
+  const results = computed(() => groups.value.find((group) => group.id === 'overview')?.items ?? [])
 
   const clear = () => {
     groups.value = []
@@ -188,6 +188,14 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     const dnsItems: NetworkCheckResultItem[] = []
     const outboundItems: NetworkCheckResultItem[] = []
     const rulesetItems: NetworkCheckResultItem[] = []
+    const syncGroups = () => {
+      groups.value = [
+        buildGroup('overview', 'netCheck.groups.overview', overviewItems),
+        buildGroup('dns', 'netCheck.groups.dns', dnsItems),
+        buildGroup('outbound', 'netCheck.groups.outbound', outboundItems),
+        buildGroup('rulesets', 'netCheck.groups.rulesets', rulesetItems),
+      ]
+    }
 
     try {
       const core = await measure(() => deps.probeApiAvailability())
@@ -208,6 +216,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         detail: normalizeErrorMessage(error),
       })
     }
+    syncGroups()
 
     if (!coreAvailable) {
       overviewItems.push({
@@ -262,6 +271,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         }
       }
     }
+    syncGroups()
 
     try {
       const tcp = await measure(() =>
@@ -283,6 +293,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         detail: normalizeErrorMessage(error),
       })
     }
+    syncGroups()
 
     if (target.targetKind === 'ip') {
       dnsItems.push(createSkippedItem('dns-query', 'netCheck.results.dns', 'ip target'))
@@ -313,6 +324,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         })
       }
     }
+    syncGroups()
 
     if (!deps.getPrimaryOutboundState) {
       outboundItems.push(createSkippedItem('primary-outbound', 'netCheck.results.primaryOutbound', 'outbound unavailable'))
@@ -341,6 +353,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         })
       }
     }
+    syncGroups()
 
     if (!deps.getLatestRuleMatch) {
       outboundItems.push(createSkippedItem('rule-match', 'netCheck.results.ruleMatch', 'rule match unavailable'))
@@ -370,6 +383,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         })
       }
     }
+    syncGroups()
 
     if (!deps.getRulesetStates) {
       rulesetItems.push(createSkippedItem('rulesets', 'netCheck.results.rulesets', 'rulesets unavailable'))
@@ -399,13 +413,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         })
       }
     }
-
-    groups.value = [
-      buildGroup('overview', 'netCheck.groups.overview', overviewItems),
-      buildGroup('dns', 'netCheck.groups.dns', dnsItems),
-      buildGroup('outbound', 'netCheck.groups.outbound', outboundItems),
-      buildGroup('rulesets', 'netCheck.groups.rulesets', rulesetItems),
-    ]
+    syncGroups()
     running.value = false
   }
 

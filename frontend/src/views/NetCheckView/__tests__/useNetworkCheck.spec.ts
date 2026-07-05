@@ -82,15 +82,7 @@ describe('useNetworkCheck', () => {
       status: 'success',
       summary: '100 rules',
     })
-    expect(vm.results.value.map((item) => item.id)).toEqual([
-      'core',
-      'proxy-http',
-      'tcp',
-      'dns-query',
-      'primary-outbound',
-      'rule-match',
-      'rs-1',
-    ])
+    expect(vm.results.value.map((item) => item.id)).toEqual(['core', 'proxy-http', 'tcp'])
     expect(vm.results.value[1]).toMatchObject({
       status: 'success',
       summary: 'HEAD https://example.com/ -> 204',
@@ -125,6 +117,44 @@ describe('useNetworkCheck', () => {
       status: 'skipped',
     })
     expect(mocks.dnsQuery).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('keeps only overview items in results when new deps are missing', async () => {
+    mocks.probeApiAvailability.mockResolvedValue({ version: 'ok' })
+    mocks.getKernelProxyEndpoint.mockResolvedValue({
+      schema: 'http',
+      host: '127.0.0.1',
+      port: 7890,
+      username: '',
+      password: '',
+    })
+    mocks.httpHead.mockResolvedValue({ status: 204, headers: {}, body: '' })
+    mocks.tcpPing.mockResolvedValue(33)
+
+    const scope = effectScope()
+    const vm = scope.run(() =>
+      useNetworkCheck({
+        probeApiAvailability: mocks.probeApiAvailability,
+        getKernelProxyEndpoint: mocks.getKernelProxyEndpoint,
+        httpHead: mocks.httpHead,
+        httpGet: mocks.httpGet,
+        tcpPing: mocks.tcpPing,
+      }),
+    )!
+
+    await vm.run('example.com')
+
+    expect(vm.groups.value.map((group) => group.id)).toEqual(['overview', 'dns', 'outbound', 'rulesets'])
+    expect(vm.groups.value.find((group) => group.id === 'dns')?.items[0]).toMatchObject({ status: 'skipped' })
+    expect(vm.groups.value.find((group) => group.id === 'outbound')?.items).toMatchObject([
+      { id: 'primary-outbound', status: 'skipped' },
+      { id: 'rule-match', status: 'skipped' },
+    ])
+    expect(vm.groups.value.find((group) => group.id === 'rulesets')?.items[0]).toMatchObject({
+      status: 'skipped',
+    })
+    expect(vm.results.value.map((item) => item.id)).toEqual(['core', 'proxy-http', 'tcp'])
     scope.stop()
   })
 
