@@ -28,11 +28,35 @@ export interface CoreApiProxies {
   proxies: Record<string, CoreApiProxy>
 }
 
+export interface CoreApiDnsQueryResponse {
+  Status: number
+  Server: string
+  Answer?: { data: string; name: string; type: number; TTL: number }[]
+}
+
+export interface CoreApiConnectionRecord {
+  id: string
+  chains: string[]
+  download: number
+  upload: number
+  rule: string
+  rulePayload: string
+  start: string
+  metadata: {
+    host: string
+    destinationIP: string
+    destinationPort: string
+    dnsMode: string
+    network: string
+    processPath: string
+    sourceIP: string
+    sourcePort: string
+    type: string
+  }
+}
+
 export interface CoreApiConnections {
-  connections: {
-    id: string
-    chains: string[]
-  }[]
+  connections: CoreApiConnectionRecord[]
 }
 
 export interface CoreApiTrafficData {
@@ -54,26 +78,7 @@ export interface CoreApiConnectionsData {
   memory: number
   uploadTotal: number
   downloadTotal: number
-  connections: {
-    chains: string[]
-    download: number
-    id: string
-    metadata: {
-      destinationIP: string
-      destinationPort: string
-      dnsMode: string
-      host: string
-      network: string
-      processPath: string
-      sourceIP: string
-      sourcePort: string
-      type: string
-    }
-    rule: string
-    rulePayload: string
-    start: string
-    upload: number
-  }[]
+  connections: CoreApiConnectionRecord[]
 }
 
 export type CoreApiWsDataMap = {

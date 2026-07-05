@@ -5,6 +5,7 @@ import { isWebui, formatProxyHost, normalizeProxyHost } from '@/utils'
 
 import type {
   CoreApiConfig,
+  CoreApiDnsQueryResponse,
   CoreApiProxies,
   CoreApiConnections,
   CoreApiWsDataMap,
@@ -26,6 +27,7 @@ export enum Api {
   Proxies = '/proxies',
   ProxyDelay = '/proxies/{0}/delay',
   Connections = '/connections',
+  DnsQuery = '/dns/query',
   Traffic = '/traffic',
   Logs = '/logs',
 }
@@ -141,6 +143,9 @@ export const getConfigs = () => request.get<CoreApiConfig>(Api.Configs)
 export const setConfigs = (body = {}) => request.patch<null>(Api.Configs, body)
 export const getProxies = () => request.get<CoreApiProxies>(Api.Proxies)
 export const getConnections = () => request.get<CoreApiConnections>(Api.Connections)
+export const dnsQuery = (name: string) => {
+  return request.get<CoreApiDnsQueryResponse>(Api.DnsQuery, { name })
+}
 export const deleteConnection = (id: string) => request.delete<null>(Api.Connections + '/' + id)
 export const useProxy = (group: string, proxy: string) => {
   return request.put<null>(Api.Proxies + '/' + group, { name: proxy })
