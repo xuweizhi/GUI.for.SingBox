@@ -445,6 +445,7 @@ export default {
       readonly: '当前模式不允许切换节点',
       nodeMissing: '节点已不存在，请刷新后重试',
       alreadyTesting: '该节点正在测速',
+      notDelayTestable: '该条目不支持延迟测速',
       switching: '正在切换节点，请稍候',
     },
     controller: {

@@ -5,6 +5,7 @@ import { parse } from 'yaml'
 import { HttpGet, ReadFile, RemoveFile, Requests, WriteFile } from '@/bridge'
 import { PluginHubFilePath, PluginsFilePath } from '@/constant/app'
 import { PluginTrigger, PluginTriggerEvent, RequestMethod } from '@/enums/app'
+import { normalizePluginCode } from '@/stores/pluginCompat'
 import { useAppSettingsStore } from '@/stores'
 import {
   ignoredError,
@@ -225,12 +226,15 @@ export const usePluginsStore = defineStore('plugins', () => {
       return cache.module.modulePromise
     }
     if (cache.code === undefined) {
-      cache.code = await ReadFile(cache.plugin.path).catch((error) => {
-        if (cache.plugin.type === 'File') {
-          return ''
-        }
-        throw error
-      })
+      cache.code = normalizePluginCode(
+        cache.plugin,
+        await ReadFile(cache.plugin.path).catch((error) => {
+          if (cache.plugin.type === 'File') {
+            return ''
+          }
+          throw error
+        }),
+      )
     }
 
     const events = new Set<PluginTriggerEvent | string>([
@@ -429,7 +433,7 @@ export const usePluginsStore = defineStore('plugins', () => {
       code = await ReadFile(path)
     }
     await disposePluginInstance(plugin.id)
-    upsertPluginCache(plugin, code)
+    upsertPluginCache(plugin, normalizePluginCode(plugin, code))
     resetPluginModuleCache(plugin.id)
     if (reloadTrigger) {
       syncPluginObservers(plugin, !plugin.disabled)
@@ -596,6 +600,8 @@ export const usePluginsStore = defineStore('plugins', () => {
       }
       code = body
     }
+
+    code = normalizePluginCode(nextPlugin, code)
 
     if (nextPlugin.type !== 'File') {
       await WriteFile(nextPlugin.path, code)

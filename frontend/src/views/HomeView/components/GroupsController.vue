@@ -22,6 +22,7 @@ import {
   createAsyncPool,
   buildSmartRegExp,
 } from '@/utils'
+import { getDelayTestableNodeNames, isDelayTestableNode } from '@/views/HomeView/nodeController'
 
 const expandedSet = ref<Set<string>>(new Set())
 const loadingSet = ref<Set<string>>(new Set())
@@ -113,13 +114,14 @@ const isFiltered = (group: string) => filterKeywordsMap.value[group]
 const handleGroupDelay = async (group: string) => {
   const _group = kernelApiStore.proxies[group]
   if (_group) {
+    const names = getDelayTestableNodeNames(_group, kernelApiStore.proxies)
     let index = 0
     let success = 0
     let failure = 0
 
     const delayTest = async (proxy: string) => {
       index += 1
-      update(`Testing... ${index} / ${_group.all.length}, success: ${success} failure: ${failure}`)
+      update(`Testing... ${index} / ${names.length}, success: ${success} failure: ${failure}`)
       const _proxy = kernelApiStore.proxies[proxy]
       try {
         loadingSet.value.add(proxy)
@@ -134,14 +136,14 @@ const handleGroupDelay = async (group: string) => {
         failure += 1
         _proxy && _proxy.history.push({ delay: 0 })
       }
-      update(`Testing... ${index} / ${_group.all.length}, success: ${success} failure: ${failure}`)
+      update(`Testing... ${index} / ${names.length}, success: ${success} failure: ${failure}`)
       loadingSet.value.delete(proxy)
     }
 
     loadingSet.value.add(group)
     const { run, controller } = createAsyncPool(
       appSettings.app.kernel.concurrencyLimit || DefaultConcurrencyLimit,
-      _group.all,
+      names,
       delayTest,
     )
     const {
@@ -155,7 +157,7 @@ const handleGroupDelay = async (group: string) => {
     await run()
     loadingSet.value.delete(group)
     msgSuccess(
-      `Completed. ${index} / ${_group.all.length}, success: ${success} failure: ${failure}`,
+      `Completed. ${index} / ${names.length}, success: ${success} failure: ${failure}`,
     )
     await sleep(3000)
     destroy()
@@ -163,6 +165,11 @@ const handleGroupDelay = async (group: string) => {
 }
 
 const handleProxyDelay = async (proxy: string) => {
+  const target = kernelApiStore.proxies[proxy]
+  if (!isDelayTestableNode(proxy, target)) {
+    message.warn('home.nodes.notDelayTestable')
+    return
+  }
   loadingSet.value.add(proxy)
   try {
     const { delay = 0 } = await getProxyDelay(
@@ -170,8 +177,7 @@ const handleProxyDelay = async (proxy: string) => {
       appSettings.app.kernel.testUrl || DefaultTestURL,
       appSettings.app.kernel.testTimeout || DefaultTestTimeout,
     )
-    const _proxy = kernelApiStore.proxies[proxy]
-    _proxy && _proxy.history.push({ delay })
+    target && target.history.push({ delay })
   } catch (error: any) {
     message.error(error + ': ' + proxy)
   }

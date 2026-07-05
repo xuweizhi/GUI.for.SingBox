@@ -448,6 +448,7 @@ export default {
       readonly: 'Node switching is unavailable in the current mode',
       nodeMissing: 'The node no longer exists. Refresh and try again.',
       alreadyTesting: 'This node is already being tested',
+      notDelayTestable: 'This entry does not support latency testing',
       switching: 'Another node switch is already in progress',
     },
     controller: {

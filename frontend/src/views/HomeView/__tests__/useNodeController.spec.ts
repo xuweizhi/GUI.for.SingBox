@@ -1,6 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick } from 'vue'
 
+function createKernelProxies() {
+  return {
+  Proxy: {
+    alive: true,
+    name: 'Proxy',
+    type: 'Selector',
+    all: ['HK 01', 'JP 01'],
+    now: 'HK 01',
+    udp: false,
+    history: [],
+  },
+  'HK 01': {
+    alive: true,
+    name: 'HK 01',
+    type: 'VLESS',
+    all: [],
+    now: '',
+    udp: true,
+    history: [{ delay: 80 }],
+  },
+  'JP 01': {
+    alive: true,
+    name: 'JP 01',
+    type: 'Trojan',
+    all: [],
+    now: '',
+    udp: false,
+    history: [],
+  },
+  }
+}
+
 const mocks = vi.hoisted(() => ({
   getProxyDelay: vi.fn(),
   handleUseProxy: vi.fn(),
@@ -23,35 +55,7 @@ vi.mock('@/stores', async () => {
   mocks.kernelStore ||= reactive({
     running: true,
     config: { mode: 'rule' },
-    proxies: {
-      Proxy: {
-        alive: true,
-        name: 'Proxy',
-        type: 'Selector',
-        all: ['HK 01', 'JP 01'],
-        now: 'HK 01',
-        udp: false,
-        history: [],
-      },
-      'HK 01': {
-        alive: true,
-        name: 'HK 01',
-        type: 'VLESS',
-        all: [],
-        now: '',
-        udp: true,
-        history: [{ delay: 80 }],
-      },
-      'JP 01': {
-        alive: true,
-        name: 'JP 01',
-        type: 'Trojan',
-        all: [],
-        now: '',
-        udp: false,
-        history: [],
-      },
-    },
+    proxies: createKernelProxies(),
     refreshProviderProxies: mocks.refreshProviderProxies,
   })
 
@@ -85,9 +89,7 @@ describe('useNodeController', () => {
     mocks.handleUseProxy.mockResolvedValue(undefined)
     mocks.kernelStore.running = true
     mocks.kernelStore.config.mode = 'rule'
-    mocks.kernelStore.proxies.Proxy.now = 'HK 01'
-    mocks.kernelStore.proxies['HK 01'].history = [{ delay: 80 }]
-    mocks.kernelStore.proxies['JP 01'].history = []
+    mocks.kernelStore.proxies = createKernelProxies()
   })
 
   afterEach(() => {
@@ -340,6 +342,58 @@ describe('useNodeController', () => {
     scope.stop()
   })
 
+  it('skips non-testable entries during group tests', async () => {
+    mocks.kernelStore.proxies.Proxy.all = [
+      'HK 01',
+      '🎈 自动选择',
+      '剩余流量：959.91 GB',
+      'block',
+      'JP 01',
+    ]
+    mocks.kernelStore.proxies['🎈 自动选择'] = {
+      alive: true,
+      name: '🎈 自动选择',
+      type: 'URLTest',
+      all: ['HK 01', 'JP 01'],
+      now: 'HK 01',
+      udp: true,
+      history: [],
+    }
+    mocks.kernelStore.proxies['剩余流量：959.91 GB'] = {
+      alive: true,
+      name: '剩余流量：959.91 GB',
+      type: 'VLESS',
+      all: [],
+      now: '',
+      udp: true,
+      history: [],
+    }
+    mocks.kernelStore.proxies.block = {
+      alive: true,
+      name: 'block',
+      type: 'Reject',
+      all: [],
+      now: '',
+      udp: true,
+      history: [],
+    }
+    mocks.getProxyDelay.mockResolvedValue({ delay: 88 })
+
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    await controller.testGroup()
+
+    expect(controller.batch.value.total).toBe(3)
+    expect(mocks.getProxyDelay.mock.calls.map(([name]) => decodeURIComponent(name))).toEqual([
+      'HK 01',
+      '🎈 自动选择',
+      'JP 01',
+    ])
+    scope.stop()
+  })
+
   it('keeps group test delay results when the trailing refresh has stale history', async () => {
     mocks.getProxyDelay.mockImplementation((name: string) =>
       Promise.resolve({ delay: name === 'HK%2001' ? 91 : 92 }),
@@ -358,6 +412,28 @@ describe('useNodeController', () => {
       expect.objectContaining({ name: 'HK 01', delay: 91, delayStatus: 'success' }),
       expect.objectContaining({ name: 'JP 01', delay: 92, delayStatus: 'success' }),
     ])
+    scope.stop()
+  })
+
+  it('does not call the delay API for a non-testable placeholder node', async () => {
+    mocks.kernelStore.proxies['剩余流量：959.91 GB'] = {
+      alive: true,
+      name: '剩余流量：959.91 GB',
+      type: 'VLESS',
+      all: [],
+      now: '',
+      udp: true,
+      history: [],
+    }
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const result = await controller.testNode('剩余流量：959.91 GB')
+
+    expect(result).toEqual({ ok: false, error: 'home.nodes.notDelayTestable' })
+    expect(mocks.getProxyDelay).not.toHaveBeenCalled()
+    expect(mocks.refreshProviderProxies).toHaveBeenCalledTimes(1)
     scope.stop()
   })
 

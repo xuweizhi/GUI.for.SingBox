@@ -7,6 +7,8 @@ import { handleUseProxy } from '@/utils/helper'
 import { createAsyncPool, normalizeErrorMessage } from '@/utils/others'
 import {
   filterAndSortNodes,
+  getDelayTestableNodeNames,
+  isDelayTestableNode,
   getVisibleGroups,
   resolvePrimaryNode,
 } from '@/views/HomeView/nodeController'
@@ -181,6 +183,9 @@ export const useNodeController = () => {
     if (!proxy) {
       return { ok: false, error: 'home.nodes.nodeMissing' }
     }
+    if (!isDelayTestableNode(name, proxy)) {
+      return { ok: false, error: 'home.nodes.notDelayTestable' }
+    }
 
     testingNodes.value.add(name)
     try {
@@ -213,6 +218,9 @@ export const useNodeController = () => {
 
   const testNode = async (name: string): Promise<NodeOperationResult> => {
     const result = await runNodeTest(name)
+    if (!result.ok && result.error === 'home.nodes.notDelayTestable') {
+      return result
+    }
     await refresh().catch(() => undefined)
     return result
   }
@@ -220,7 +228,7 @@ export const useNodeController = () => {
   const testGroup = async () => {
     if (batch.value.running || !selectedGroup.value) return
 
-    const names = [...new Set(selectedGroup.value.all || [])]
+    const names = [...new Set(getDelayTestableNodeNames(selectedGroup.value, kernelApiStore.proxies))]
     batch.value = {
       running: true,
       cancelled: false,

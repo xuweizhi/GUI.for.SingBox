@@ -30,6 +30,14 @@ export interface NodeListItem {
 
 type NodeProfile = Pick<IProfile, 'route' | 'outbounds'> | undefined
 
+const nonDelayTestableNamePatterns = [
+  /剩余流量/i,
+  /下次重置|重置剩余/i,
+  /套餐到期|套餐过期时间/i,
+  /线路持续更新/i,
+  /企业套餐/i,
+] as const
+
 const latestDelay = (proxy?: CoreApiProxy) => {
   const history = proxy?.history || []
   return history.length ? history[history.length - 1]!.delay : null
@@ -211,4 +219,17 @@ export const filterAndSortNodes = (
     if (b.delay !== null) return 1
     return a.originalIndex - b.originalIndex
   })
+}
+
+export const isDelayTestableNode = (name: string, proxy?: CoreApiProxy) => {
+  if (!proxy) return false
+  if (proxy.type === 'Reject') return false
+  return !nonDelayTestableNamePatterns.some((pattern) => pattern.test(name))
+}
+
+export const getDelayTestableNodeNames = (
+  group: CoreApiProxy,
+  proxies: Record<string, CoreApiProxy>,
+) => {
+  return (group.all || []).filter((name) => isDelayTestableNode(name, proxies[name]))
 }

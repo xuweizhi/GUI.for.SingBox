@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   filterAndSortNodes,
+  getDelayTestableNodeNames,
+  isDelayTestableNode,
   getVisibleGroups,
   resolvePrimaryNode,
   resolveProxyChain,
@@ -175,5 +177,27 @@ describe('filterAndSortNodes', () => {
     const nodes = filterAndSortNodes(proxies.Auto!, equal, '', true, new Map())
 
     expect(nodes.map((node) => node.name)).toEqual(['HK 01', 'JP 01'])
+  })
+})
+
+describe('delay test filtering', () => {
+  it('filters out reject nodes and subscription info placeholders', () => {
+    const values: Record<string, CoreApiProxy> = {
+      ...proxies,
+      block: proxy({ name: 'block', type: 'Reject' }),
+      '剩余流量：959.91 GB': proxy({ name: '剩余流量：959.91 GB', type: 'VLESS' }),
+      Proxy: proxy({
+        name: 'Proxy',
+        type: 'Selector',
+        all: ['Auto', '剩余流量：959.91 GB', 'block', 'HK 01'],
+        now: 'Auto',
+      }),
+    }
+
+    expect(isDelayTestableNode('HK 01', values['HK 01'])).toBe(true)
+    expect(isDelayTestableNode('Auto', values.Auto)).toBe(true)
+    expect(isDelayTestableNode('block', values.block)).toBe(false)
+    expect(isDelayTestableNode('剩余流量：959.91 GB', values['剩余流量：959.91 GB'])).toBe(false)
+    expect(getDelayTestableNodeNames(values.Proxy!, values)).toEqual(['Auto', 'HK 01'])
   })
 })
