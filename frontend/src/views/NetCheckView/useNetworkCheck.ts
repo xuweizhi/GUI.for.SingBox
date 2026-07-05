@@ -1,6 +1,6 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
-import { parseNetworkCheckTarget } from '@/views/NetCheckView/networkCheckTarget'
+import { parseNetworkCheckTarget, type ParsedNetworkCheckTarget } from '@/views/NetCheckView/networkCheckTarget'
 
 type ResultStatus = 'success' | 'failed' | 'skipped' | 'running'
 type NetworkRequestOptions = {
@@ -9,6 +9,37 @@ type NetworkRequestOptions = {
 }
 type NetworkResponse = {
   status: number
+}
+type DnsQueryAnswer = {
+  data: string
+}
+type DnsQueryResult = {
+  server?: string
+  status?: number
+  answers?: string[]
+  Server?: string
+  Status?: number
+  Answer?: DnsQueryAnswer[]
+}
+type PrimaryOutboundState = {
+  mode?: string
+  groupName?: string
+  leafName?: string
+  chain?: string[]
+  delay?: number
+}
+type RuleMatchState = {
+  host?: string
+  port?: number | string
+  rule?: string
+  chains?: string[]
+}
+type RulesetState = {
+  id: string
+  title: string
+  status: ResultStatus
+  summary: string
+  detail?: string
 }
 
 export type NetworkCheckProxyEndpoint = {
@@ -33,15 +64,27 @@ export interface NetworkCheckDeps {
     options?: NetworkRequestOptions,
   ) => Promise<NetworkResponse>
   tcpPing: (address: string, options?: { Timeout?: number }) => Promise<number>
+  dnsQuery?: (host: string) => Promise<DnsQueryResult>
+  getPrimaryOutboundState?: () => Promise<PrimaryOutboundState | undefined>
+  getLatestRuleMatch?: (target: ParsedNetworkCheckTarget) => Promise<RuleMatchState | undefined>
+  getRulesetStates?: () => Promise<RulesetState[]>
 }
 
 export interface NetworkCheckResultItem {
-  id: 'core' | 'proxy-http' | 'tcp'
+  id: string
   title: string
   status: ResultStatus
   summary: string
   detail?: string
   durationMs?: number
+}
+
+export interface NetworkCheckResultGroup {
+  id: 'overview' | 'dns' | 'outbound' | 'rulesets'
+  title: string
+  status: ResultStatus
+  summary: string
+  items: NetworkCheckResultItem[]
 }
 
 const measure = async <T>(fn: () => Promise<T>) => {
@@ -70,13 +113,68 @@ const buildProxyUrl = (endpoint: NetworkCheckProxyEndpoint | undefined) => {
   return `${schema}://${auth}${formatProxyHost(host)}:${port}`
 }
 
+const resolveGroupStatus = (items: NetworkCheckResultItem[]): ResultStatus => {
+  if (items.some((item) => item.status === 'failed')) return 'failed'
+  if (items.some((item) => item.status === 'running')) return 'running'
+  if (items.some((item) => item.status === 'success')) return 'success'
+  return 'skipped'
+}
+
+const summarizeGroupStatus = (items: NetworkCheckResultItem[]) => {
+  if (items.length === 0) return '0 items'
+
+  const counts = items.reduce<Record<ResultStatus, number>>(
+    (acc, item) => {
+      acc[item.status] += 1
+      return acc
+    },
+    { success: 0, failed: 0, skipped: 0, running: 0 },
+  )
+
+  return [counts.success && `${counts.success} success`, counts.failed && `${counts.failed} failed`, counts.skipped && `${counts.skipped} skipped`, counts.running && `${counts.running} running`]
+    .filter(Boolean)
+    .join(', ')
+}
+
+const buildGroup = (
+  id: NetworkCheckResultGroup['id'],
+  title: string,
+  items: NetworkCheckResultItem[],
+): NetworkCheckResultGroup => ({
+  id,
+  title,
+  status: resolveGroupStatus(items),
+  summary: summarizeGroupStatus(items),
+  items,
+})
+
+const createSkippedItem = (
+  id: string,
+  title: string,
+  summary: string,
+  detail?: string,
+): NetworkCheckResultItem => ({
+  id,
+  title,
+  status: 'skipped',
+  summary,
+  detail,
+})
+
+const normalizeDnsAnswers = (result: DnsQueryResult) => {
+  if (Array.isArray(result.answers)) return result.answers
+  if (Array.isArray(result.Answer)) return result.Answer.map((answer) => answer.data)
+  return []
+}
+
 export const useNetworkCheck = (deps: NetworkCheckDeps) => {
   const input = ref('https://www.gstatic.com/generate_204')
   const running = ref(false)
-  const results = ref<NetworkCheckResultItem[]>([])
+  const groups = ref<NetworkCheckResultGroup[]>([])
+  const results = computed(() => groups.value.flatMap((group) => group.items))
 
   const clear = () => {
-    results.value = []
+    groups.value = []
   }
 
   const run = async (raw = input.value) => {
@@ -86,11 +184,15 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     running.value = true
 
     let coreAvailable = false
+    const overviewItems: NetworkCheckResultItem[] = []
+    const dnsItems: NetworkCheckResultItem[] = []
+    const outboundItems: NetworkCheckResultItem[] = []
+    const rulesetItems: NetworkCheckResultItem[] = []
 
     try {
       const core = await measure(() => deps.probeApiAvailability())
       coreAvailable = true
-      results.value.push({
+      overviewItems.push({
         id: 'core',
         title: 'netCheck.results.core',
         status: 'success',
@@ -98,7 +200,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         durationMs: core.durationMs,
       })
     } catch (error) {
-      results.value.push({
+      overviewItems.push({
         id: 'core',
         title: 'netCheck.results.core',
         status: 'failed',
@@ -108,7 +210,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     }
 
     if (!coreAvailable) {
-      results.value.push({
+      overviewItems.push({
         id: 'proxy-http',
         title: 'netCheck.results.proxyHttp',
         status: 'skipped',
@@ -117,7 +219,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     } else {
       const proxy = buildProxyUrl(await deps.getKernelProxyEndpoint())
       if (!proxy) {
-        results.value.push({
+        overviewItems.push({
           id: 'proxy-http',
           title: 'netCheck.results.proxyHttp',
           status: 'failed',
@@ -128,7 +230,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
           const head = await measure(() =>
             deps.httpHead(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
           )
-          results.value.push({
+          overviewItems.push({
             id: 'proxy-http',
             title: 'netCheck.results.proxyHttp',
             status: 'success',
@@ -141,7 +243,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
             const request = await measure(() =>
               deps.httpGet(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
             )
-            results.value.push({
+            overviewItems.push({
               id: 'proxy-http',
               title: 'netCheck.results.proxyHttp',
               status: 'success',
@@ -149,7 +251,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
               durationMs: request.durationMs,
             })
           } else {
-            results.value.push({
+            overviewItems.push({
               id: 'proxy-http',
               title: 'netCheck.results.proxyHttp',
               status: 'failed',
@@ -165,7 +267,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
       const tcp = await measure(() =>
         deps.tcpPing(`${target.tcpHost}:${target.tcpPort}`, { Timeout: 15 }),
       )
-      results.value.push({
+      overviewItems.push({
         id: 'tcp',
         title: 'netCheck.results.tcp',
         status: 'success',
@@ -173,21 +275,144 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         durationMs: tcp.durationMs,
       })
     } catch (error) {
-      results.value.push({
+      overviewItems.push({
         id: 'tcp',
         title: 'netCheck.results.tcp',
         status: 'failed',
         summary: 'netCheck.summary.tcpFailed',
         detail: normalizeErrorMessage(error),
       })
-    } finally {
-      running.value = false
     }
+
+    if (target.targetKind === 'ip') {
+      dnsItems.push(createSkippedItem('dns-query', 'netCheck.results.dns', 'ip target'))
+    } else if (!deps.dnsQuery) {
+      dnsItems.push(createSkippedItem('dns-query', 'netCheck.results.dns', 'dns unavailable'))
+    } else {
+      try {
+        const dns = await deps.dnsQuery(target.dnsLookupHost)
+        const answers = normalizeDnsAnswers(dns)
+        const status = dns.status ?? dns.Status ?? 0
+        dnsItems.push({
+          id: 'dns-query',
+          title: 'netCheck.results.dns',
+          status: status === 0 ? 'success' : 'failed',
+          summary: answers[0] || `status ${status}`,
+          detail:
+            answers.length > 1
+              ? answers.join(', ')
+              : (dns.server ?? dns.Server) || undefined,
+        })
+      } catch (error) {
+        dnsItems.push({
+          id: 'dns-query',
+          title: 'netCheck.results.dns',
+          status: 'failed',
+          summary: 'dns failed',
+          detail: normalizeErrorMessage(error),
+        })
+      }
+    }
+
+    if (!deps.getPrimaryOutboundState) {
+      outboundItems.push(createSkippedItem('primary-outbound', 'netCheck.results.primaryOutbound', 'outbound unavailable'))
+    } else {
+      try {
+        const outbound = await deps.getPrimaryOutboundState()
+        if (!outbound) {
+          outboundItems.push(createSkippedItem('primary-outbound', 'netCheck.results.primaryOutbound', 'outbound unavailable'))
+        } else {
+          const chain = outbound.chain?.filter(Boolean).join(' -> ')
+          outboundItems.push({
+            id: 'primary-outbound',
+            title: 'netCheck.results.primaryOutbound',
+            status: 'success',
+            summary: chain || outbound.leafName || outbound.groupName || 'outbound ready',
+            detail: typeof outbound.delay === 'number' ? `${outbound.delay} ms` : outbound.mode,
+          })
+        }
+      } catch (error) {
+        outboundItems.push({
+          id: 'primary-outbound',
+          title: 'netCheck.results.primaryOutbound',
+          status: 'failed',
+          summary: 'outbound failed',
+          detail: normalizeErrorMessage(error),
+        })
+      }
+    }
+
+    if (!deps.getLatestRuleMatch) {
+      outboundItems.push(createSkippedItem('rule-match', 'netCheck.results.ruleMatch', 'rule match unavailable'))
+    } else {
+      try {
+        const ruleMatch = await deps.getLatestRuleMatch(target)
+        if (!ruleMatch) {
+          outboundItems.push(createSkippedItem('rule-match', 'netCheck.results.ruleMatch', 'rule match unavailable'))
+        } else {
+          const host = ruleMatch.host || target.displayHost
+          const port = ruleMatch.port ?? target.tcpPort
+          outboundItems.push({
+            id: 'rule-match',
+            title: 'netCheck.results.ruleMatch',
+            status: 'success',
+            summary: `${host}:${port}`,
+            detail: [ruleMatch.rule, ruleMatch.chains?.filter(Boolean).join(' -> ')].filter(Boolean).join(' | '),
+          })
+        }
+      } catch (error) {
+        outboundItems.push({
+          id: 'rule-match',
+          title: 'netCheck.results.ruleMatch',
+          status: 'failed',
+          summary: 'rule match failed',
+          detail: normalizeErrorMessage(error),
+        })
+      }
+    }
+
+    if (!deps.getRulesetStates) {
+      rulesetItems.push(createSkippedItem('rulesets', 'netCheck.results.rulesets', 'rulesets unavailable'))
+    } else {
+      try {
+        const states = await deps.getRulesetStates()
+        if (states.length === 0) {
+          rulesetItems.push(createSkippedItem('rulesets', 'netCheck.results.rulesets', 'no rulesets'))
+        } else {
+          rulesetItems.push(
+            ...states.map((item) => ({
+              id: item.id,
+              title: item.title,
+              status: item.status,
+              summary: item.summary,
+              detail: item.detail,
+            })),
+          )
+        }
+      } catch (error) {
+        rulesetItems.push({
+          id: 'rulesets',
+          title: 'netCheck.results.rulesets',
+          status: 'failed',
+          summary: 'rulesets failed',
+          detail: normalizeErrorMessage(error),
+        })
+      }
+    }
+
+    groups.value = [
+      buildGroup('overview', 'netCheck.groups.overview', overviewItems),
+      buildGroup('dns', 'netCheck.groups.dns', dnsItems),
+      buildGroup('outbound', 'netCheck.groups.outbound', outboundItems),
+      buildGroup('rulesets', 'netCheck.groups.rulesets', rulesetItems),
+    ]
+    running.value = false
   }
 
   return {
     input,
     running,
+    groups,
     results,
     clear,
     run,

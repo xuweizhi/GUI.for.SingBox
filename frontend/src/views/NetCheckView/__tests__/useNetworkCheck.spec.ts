@@ -9,6 +9,10 @@ const mocks = {
   httpGet: vi.fn(),
   tcpPing: vi.fn(),
   getKernelProxyEndpoint: vi.fn(),
+  dnsQuery: vi.fn(),
+  getPrimaryOutboundState: vi.fn(),
+  getLatestRuleMatch: vi.fn(),
+  getRulesetStates: vi.fn(),
 }
 
 describe('useNetworkCheck', () => {
@@ -16,7 +20,7 @@ describe('useNetworkCheck', () => {
     vi.resetAllMocks()
   })
 
-  it('runs core, proxy and tcp checks in order', async () => {
+  it('builds the four result groups for a domain target', async () => {
     mocks.probeApiAvailability.mockResolvedValue({ version: 'ok' })
     mocks.getKernelProxyEndpoint.mockResolvedValue({
       schema: 'http',
@@ -24,18 +28,69 @@ describe('useNetworkCheck', () => {
       port: 7890,
       username: '',
       password: '',
-      proxyType: 'mixed',
     })
     mocks.httpHead.mockResolvedValue({ status: 204, headers: {}, body: '' })
     mocks.tcpPing.mockResolvedValue(86)
+    mocks.dnsQuery.mockResolvedValue({
+      server: 'internal',
+      status: 0,
+      answers: ['142.250.129.94'],
+    })
+    mocks.getPrimaryOutboundState.mockResolvedValue({
+      mode: 'group',
+      groupName: 'Proxy',
+      leafName: 'HK 01',
+      chain: ['Proxy', 'HK 01'],
+      delay: 80,
+    })
+    mocks.getLatestRuleMatch.mockResolvedValue({
+      host: 'example.com',
+      port: 443,
+      rule: 'final => route(Proxy)',
+      chains: ['Proxy', 'HK 01'],
+    })
+    mocks.getRulesetStates.mockResolvedValue([
+      { id: 'rs-1', title: 'GeoIP-CN', status: 'success', summary: '100 rules' },
+    ])
 
     const scope = effectScope()
     const vm = scope.run(() => useNetworkCheck(mocks))!
 
     await vm.run('https://example.com')
 
-    expect(vm.results.value.map((item) => item.id)).toEqual(['core', 'proxy-http', 'tcp'])
-    expect(vm.results.value[0]).toMatchObject({ status: 'success' })
+    expect(vm.groups.value.map((group) => group.id)).toEqual(['overview', 'dns', 'outbound', 'rulesets'])
+    expect(vm.groups.value[0]).toMatchObject({ status: 'success' })
+    expect(vm.groups.value[0]?.items.map((item) => item.id)).toEqual(['core', 'proxy-http', 'tcp'])
+    expect(vm.groups.value[1]?.items[0]).toMatchObject({
+      id: 'dns-query',
+      status: 'success',
+      summary: '142.250.129.94',
+    })
+    expect(vm.groups.value[2]?.items).toMatchObject([
+      { id: 'primary-outbound', status: 'success' },
+      { id: 'rule-match', status: 'success' },
+    ])
+    expect(mocks.getLatestRuleMatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestHost: 'example.com',
+        tcpPort: 443,
+        targetKind: 'domain',
+      }),
+    )
+    expect(vm.groups.value[3]?.items[0]).toMatchObject({
+      id: 'rs-1',
+      status: 'success',
+      summary: '100 rules',
+    })
+    expect(vm.results.value.map((item) => item.id)).toEqual([
+      'core',
+      'proxy-http',
+      'tcp',
+      'dns-query',
+      'primary-outbound',
+      'rule-match',
+      'rs-1',
+    ])
     expect(vm.results.value[1]).toMatchObject({
       status: 'success',
       summary: 'HEAD https://example.com/ -> 204',
@@ -47,18 +102,29 @@ describe('useNetworkCheck', () => {
     scope.stop()
   })
 
-  it('skips proxy http when core is unavailable but still runs tcp', async () => {
-    mocks.probeApiAvailability.mockRejectedValue(new Error('offline'))
+  it('skips DNS when the target is an IP literal', async () => {
+    mocks.probeApiAvailability.mockResolvedValue({ version: 'ok' })
+    mocks.getKernelProxyEndpoint.mockResolvedValue({
+      schema: 'http',
+      host: '127.0.0.1',
+      port: 7890,
+      username: '',
+      password: '',
+    })
+    mocks.httpHead.mockResolvedValue({ status: 204, headers: {}, body: '' })
     mocks.tcpPing.mockResolvedValue(120)
+    mocks.getRulesetStates.mockResolvedValue([])
 
     const scope = effectScope()
     const vm = scope.run(() => useNetworkCheck(mocks))!
 
-    await vm.run('example.com')
+    await vm.run('1.1.1.1')
 
-    expect(vm.results.value[0]).toMatchObject({ id: 'core', status: 'failed' })
-    expect(vm.results.value[1]).toMatchObject({ id: 'proxy-http', status: 'skipped' })
-    expect(vm.results.value[2]).toMatchObject({ id: 'tcp', status: 'success' })
+    expect(vm.groups.value.find((group) => group.id === 'dns')?.items[0]).toMatchObject({
+      id: 'dns-query',
+      status: 'skipped',
+    })
+    expect(mocks.dnsQuery).not.toHaveBeenCalled()
     scope.stop()
   })
 
@@ -70,11 +136,11 @@ describe('useNetworkCheck', () => {
       port: 7890,
       username: '',
       password: '',
-      proxyType: 'mixed',
     })
     mocks.httpHead.mockRejectedValue({ status: 405, message: 'Method Not Allowed' })
     mocks.httpGet.mockResolvedValue({ status: 200, headers: {}, body: '' })
     mocks.tcpPing.mockResolvedValue(42)
+    mocks.getRulesetStates.mockResolvedValue([])
 
     const scope = effectScope()
     const vm = scope.run(() => useNetworkCheck(mocks))!
