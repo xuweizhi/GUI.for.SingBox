@@ -233,6 +233,123 @@ describe('useRuntimeNetworkCheck', () => {
     ])
   })
 
+  it('refreshes providers and probes delay for group primary nodes without cached delay', async () => {
+    kernelApiStore.proxies = { Proxy: {}, 'HK 01': {} }
+    profilesStore.currentProfile = { id: 'profile-1' } as App.Profile
+    mockResolvePrimaryNode.mockReturnValue({
+      kind: 'group',
+      groupName: 'Proxy',
+      leafName: 'HK 01',
+      chain: ['Proxy', 'HK 01'],
+      delay: null,
+    })
+    mockGetProxyDelay.mockResolvedValue({ delay: 91 })
+
+    useRuntimeNetworkCheck()
+    const deps = captured.mock.calls[0]?.[0]
+
+    await expect(deps.getPrimaryOutboundState()).resolves.toEqual({
+      mode: 'group',
+      groupName: 'Proxy',
+      leafName: 'HK 01',
+      chain: ['Proxy', 'HK 01'],
+      delay: 91,
+    })
+    expect(mockRefreshProviderProxies).toHaveBeenCalledTimes(1)
+    expect(mockResolvePrimaryNode).toHaveBeenCalledWith(
+      'rule',
+      profilesStore.currentProfile,
+      kernelApiStore.proxies,
+    )
+    expect(mockGetProxyDelay).toHaveBeenCalledWith(
+      'HK%2001',
+      'https://probe.example',
+      7000,
+    )
+  })
+
+  it('falls back to default test url and timeout when app settings are empty', async () => {
+    appSettingsStore.app.kernel.testUrl = ''
+    appSettingsStore.app.kernel.testTimeout = 0
+    mockResolvePrimaryNode.mockReturnValue({
+      kind: 'group',
+      groupName: 'Proxy',
+      leafName: 'HK 01',
+      chain: ['Proxy', 'HK 01'],
+      delay: null,
+    })
+
+    useRuntimeNetworkCheck()
+    const deps = captured.mock.calls[0]?.[0]
+
+    await deps.getPrimaryOutboundState()
+
+    expect(mockGetProxyDelay).toHaveBeenCalledWith(
+      'HK%2001',
+      'https://www.gstatic.com/generate_204',
+      5000,
+    )
+  })
+
+  it('does not probe delay when the primary group already has one', async () => {
+    mockResolvePrimaryNode.mockReturnValue({
+      kind: 'group',
+      groupName: 'Proxy',
+      leafName: 'HK 01',
+      chain: ['Proxy', 'HK 01'],
+      delay: 32,
+    })
+
+    useRuntimeNetworkCheck()
+    const deps = captured.mock.calls[0]?.[0]
+
+    await expect(deps.getPrimaryOutboundState()).resolves.toEqual({
+      mode: 'group',
+      groupName: 'Proxy',
+      leafName: 'HK 01',
+      chain: ['Proxy', 'HK 01'],
+      delay: 32,
+    })
+    expect(mockGetProxyDelay).not.toHaveBeenCalled()
+  })
+
+  it('does not probe delay for direct or unavailable primary nodes', async () => {
+    useRuntimeNetworkCheck()
+    const deps = captured.mock.calls[0]?.[0]
+
+    mockResolvePrimaryNode.mockReturnValueOnce({
+      kind: 'direct',
+      groupName: 'direct',
+      leafName: 'direct',
+      chain: ['direct'],
+      delay: null,
+    })
+    await expect(deps.getPrimaryOutboundState()).resolves.toEqual({
+      mode: 'direct',
+      groupName: 'direct',
+      leafName: 'direct',
+      chain: ['direct'],
+      delay: undefined,
+    })
+
+    mockResolvePrimaryNode.mockReturnValueOnce({
+      kind: 'unavailable',
+      groupName: '',
+      leafName: '',
+      chain: [],
+      delay: null,
+    })
+    await expect(deps.getPrimaryOutboundState()).resolves.toEqual({
+      mode: 'unavailable',
+      groupName: '',
+      leafName: '',
+      chain: [],
+      delay: undefined,
+    })
+
+    expect(mockGetProxyDelay).not.toHaveBeenCalled()
+  })
+
   it('keeps dynamic bridge imports for desktop-only bridge code', () => {
     const source = fs.readFileSync(
       path.resolve('src/views/NetCheckView/useRuntimeNetworkCheck.ts'),

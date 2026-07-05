@@ -131,7 +131,7 @@ export const useRuntimeNetworkCheck = () => {
         kernelApiStore.proxies,
       )
 
-      let delay = primary.delay
+      let delay = primary.delay ?? undefined
       if (primary.kind === 'group' && primary.leafName && delay == null) {
         const testUrl = appSettingsStore.app.kernel.testUrl || DefaultTestURL
         const testTimeout = appSettingsStore.app.kernel.testTimeout || DefaultTestTimeout
@@ -140,7 +140,7 @@ export const useRuntimeNetworkCheck = () => {
           testUrl,
           testTimeout,
         )
-        delay = result.delay ?? null
+        delay = result.delay ?? undefined
       }
 
       return {
