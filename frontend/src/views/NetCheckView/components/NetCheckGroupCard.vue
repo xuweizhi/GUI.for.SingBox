@@ -1,11 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { NetworkCheckResultGroup } from '@/views/NetCheckView/useNetworkCheck'
 
-const props = defineProps<{
+const props = withDefaults(
+  defineProps<{
   group: NetworkCheckResultGroup
-}>()
+  running?: boolean
+}>(),
+  {
+    running: false,
+  },
+)
 
 const { t, te } = useI18n()
 
@@ -14,17 +21,44 @@ const renderText = (value?: string) => {
   return te(value) ? t(value) : value
 }
 
+const countSummaryKeyMap = {
+  success: 'netCheck.summary.groupCountSuccess',
+  failed: 'netCheck.summary.groupCountFailed',
+  skipped: 'netCheck.summary.groupCountSkipped',
+  running: 'netCheck.summary.groupCountRunning',
+} as const
+
+const renderCountSummary = (summary: string) => {
+  if (summary === '0 items') {
+    return t('netCheck.summary.groupEmpty')
+  }
+
+  const parts = summary
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length === 0) return summary
+
+  const localized = parts.map((part) => {
+    const match = part.match(/^(\d+)\s+(success|failed|skipped|running)$/)
+    if (!match) return
+
+    const [, count, status] = match
+    return t(countSummaryKeyMap[status as keyof typeof countSummaryKeyMap], [count])
+  })
+
+  return localized.every(Boolean) ? localized.join(' · ') : summary
+}
+
 const renderGroupSummary = () => {
   const summary = props.group.summary
   if (!summary) return ''
   if (te(summary)) return t(summary)
-
-  if (props.group.items.length === 0) return t('netCheck.summary.groupEmpty')
-  if (props.group.status === 'failed') return t('netCheck.summary.groupAttention')
-  if (props.group.status === 'running') return t('netCheck.summary.groupRunning')
-  if (props.group.status === 'skipped') return t('netCheck.summary.groupSkipped')
-  return t('netCheck.summary.groupReady')
+  if (props.running && props.group.items.length === 0) return t('netCheck.summary.groupRunning')
+  return renderCountSummary(summary)
 }
+
+const showEmptyBody = computed(() => !props.running && props.group.items.length === 0)
 </script>
 
 <template>
@@ -38,7 +72,7 @@ const renderGroupSummary = () => {
       </div>
     </div>
 
-    <div v-if="props.group.items.length === 0" class="text-12">
+    <div v-if="showEmptyBody" class="text-12">
       {{ t('netCheck.results.empty') }}
     </div>
 

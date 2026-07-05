@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   run: vi.fn(),
@@ -9,7 +9,43 @@ const mocks = vi.hoisted(() => ({
   stopPolling: vi.fn(),
   prepareModal: vi.fn(),
   refresh: vi.fn(),
+  running: { value: false },
+  groups: { value: [
+    {
+      id: 'overview',
+      title: 'netCheck.groups.overview',
+      status: 'success',
+      summary: '1 success, 1 failed',
+      items: [
+        { id: 'core', title: 'netCheck.results.core', status: 'success', summary: 'ok' },
+      ],
+    },
+    {
+      id: 'dns',
+      title: 'netCheck.groups.dns',
+      status: 'skipped',
+      summary: '0 items',
+      items: [],
+    },
+  ] },
 }))
+
+const mountView = () =>
+  mount(NetCheckView, {
+    global: {
+      stubs: {
+        Card: { template: '<div><slot /><slot name="extra" /></div>' },
+        Button: { template: '<button v-bind="$attrs"><slot /></button>' },
+        Input: {
+          props: ['modelValue'],
+          template:
+            '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+        },
+        Icon: true,
+        NodeDiagnosticsPanel: { template: '<div class="node-panel" />' },
+      },
+    },
+  })
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -21,26 +57,9 @@ vi.mock('vue-i18n', () => ({
 vi.mock('@/views/NetCheckView/useRuntimeNetworkCheck', () => ({
   useRuntimeNetworkCheck: () => ({
     input: ref('https://www.gstatic.com/generate_204'),
-    running: ref(false),
+    running: mocks.running,
     results: ref([]),
-    groups: ref([
-      {
-        id: 'overview',
-        title: 'netCheck.groups.overview',
-        status: 'success',
-        summary: 'netCheck.summary.groupReady',
-        items: [
-          { id: 'core', title: 'netCheck.results.core', status: 'success', summary: 'ok' },
-        ],
-      },
-      {
-        id: 'dns',
-        title: 'netCheck.groups.dns',
-        status: 'skipped',
-        summary: 'netCheck.summary.groupSkipped',
-        items: [],
-      },
-    ]),
+    groups: mocks.groups,
     clear: mocks.clear,
     run: mocks.run,
   }),
@@ -85,22 +104,35 @@ vi.mock('@/stores', () => ({
 import NetCheckView from '@/views/NetCheckView/index.vue'
 
 describe('NetCheckView', () => {
-  it('renders groups and triggers a check', async () => {
-    const wrapper = mount(NetCheckView, {
-      global: {
-        stubs: {
-          Card: { template: '<div><slot /><slot name="extra" /></div>' },
-          Button: { template: '<button v-bind="$attrs"><slot /></button>' },
-          Input: {
-            props: ['modelValue'],
-            template:
-              '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
-          },
-          Icon: true,
-          NodeDiagnosticsPanel: { template: '<div class="node-panel" />' },
-        },
+  beforeEach(() => {
+    mocks.running.value = false
+    mocks.groups.value = [
+      {
+        id: 'overview',
+        title: 'netCheck.groups.overview',
+        status: 'success',
+        summary: '1 success, 1 failed',
+        items: [{ id: 'core', title: 'netCheck.results.core', status: 'success', summary: 'ok' }],
       },
-    })
+      {
+        id: 'dns',
+        title: 'netCheck.groups.dns',
+        status: 'skipped',
+        summary: '0 items',
+        items: [],
+      },
+    ]
+  })
+
+  it('renders localized count summaries from raw group summaries', () => {
+    const wrapper = mountView()
+
+    expect(wrapper.text()).toContain('netCheck.summary.groupCountSuccess')
+    expect(wrapper.text()).toContain('netCheck.summary.groupCountFailed')
+  })
+
+  it('renders groups and triggers a check', async () => {
+    const wrapper = mountView()
 
     await wrapper.get('[data-action="run-check"]').trigger('click')
 
@@ -109,5 +141,23 @@ describe('NetCheckView', () => {
     expect(wrapper.text()).toContain('netCheck.groups.overview')
     expect(wrapper.text()).toContain('netCheck.groups.dns')
     expect(wrapper.text()).toContain('ok')
+  })
+
+  it('shows groupRunning for empty groups while the page is still running', () => {
+    mocks.running.value = true
+    mocks.groups.value = [
+      {
+        id: 'dns',
+        title: 'netCheck.groups.dns',
+        status: 'skipped',
+        summary: '0 items',
+        items: [],
+      },
+    ]
+
+    const wrapper = mountView()
+
+    expect(wrapper.text()).toContain('netCheck.summary.groupRunning')
+    expect(wrapper.text()).not.toContain('netCheck.results.empty')
   })
 })

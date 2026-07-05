@@ -102,6 +102,7 @@ onUnmounted(() => {
           v-for="group in networkCheck.groups.value"
           :key="group.id"
           :group="group"
+          :running="networkCheck.running.value"
         />
       </div>
     </Card>
