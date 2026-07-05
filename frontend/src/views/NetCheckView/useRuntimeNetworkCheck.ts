@@ -1,5 +1,16 @@
+import { DefaultTestTimeout, DefaultTestURL } from '@/constant/app'
+import { useAppSettingsStore } from '@/stores/appSettings'
+import { getConnections, dnsQuery, getProxyDelay } from '@/api/kernel'
 import { useKernelApiStore } from '@/stores/kernelApi'
+import { useProfilesStore } from '@/stores/profiles'
+import { useRulesetsStore } from '@/stores/rulesets'
 import { isWebui } from '@/utils/env'
+import { resolvePrimaryNode } from '@/views/HomeView/nodeController'
+import {
+  buildRulesetCheckItems,
+  formatDnsAnswers,
+  matchLatestConnection,
+} from '@/views/NetCheckView/networkCheckRuntime'
 import { useNetworkCheck } from '@/views/NetCheckView/useNetworkCheck'
 
 type RequestMethod = 'GET' | 'HEAD'
@@ -89,7 +100,10 @@ const tcpPing = async (address: string, options: { Timeout?: number } = {}) => {
 }
 
 export const useRuntimeNetworkCheck = () => {
+  const appSettingsStore = useAppSettingsStore()
   const kernelApiStore = useKernelApiStore()
+  const profilesStore = useProfilesStore()
+  const rulesetsStore = useRulesetsStore()
 
   return useNetworkCheck({
     probeApiAvailability: async () => {
@@ -100,5 +114,62 @@ export const useRuntimeNetworkCheck = () => {
     httpHead,
     httpGet,
     tcpPing,
+    dnsQuery: async (host: string) => {
+      const response = await dnsQuery(host)
+      return {
+        server: response.Server,
+        status: response.Status,
+        answers: formatDnsAnswers(response.Answer),
+      }
+    },
+    getPrimaryOutboundState: async () => {
+      await kernelApiStore.refreshProviderProxies()
+
+      const primary = resolvePrimaryNode(
+        kernelApiStore.config.mode as 'rule' | 'global' | 'direct',
+        profilesStore.currentProfile,
+        kernelApiStore.proxies,
+      )
+
+      let delay = primary.delay
+      if (primary.kind === 'group' && primary.leafName && delay == null) {
+        const testUrl = appSettingsStore.app.kernel.testUrl || DefaultTestURL
+        const testTimeout = appSettingsStore.app.kernel.testTimeout || DefaultTestTimeout
+        const result = await getProxyDelay(
+          encodeURIComponent(primary.leafName),
+          testUrl,
+          testTimeout,
+        )
+        delay = result.delay ?? null
+      }
+
+      return {
+        mode: primary.kind,
+        groupName: primary.groupName,
+        leafName: primary.leafName,
+        chain: primary.chain,
+        delay,
+      }
+    },
+    getLatestRuleMatch: async (target) => {
+      const { connections } = await getConnections()
+      const match = matchLatestConnection(connections, {
+        targetHost: target.requestHost,
+        targetPort: target.tcpPort,
+      })
+
+      if (!match) return
+
+      return {
+        host: match.metadata.host || match.metadata.destinationIP,
+        port: Number(match.metadata.destinationPort || 0),
+        rule: match.rule,
+        chains: match.chains,
+      }
+    },
+    getRulesetStates: async () => {
+      const profileRulesets = profilesStore.currentProfile?.route.rule_set ?? []
+      return buildRulesetCheckItems(profileRulesets, rulesetsStore.rulesets)
+    },
   })
 }
