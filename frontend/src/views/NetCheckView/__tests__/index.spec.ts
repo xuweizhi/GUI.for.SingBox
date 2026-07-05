@@ -22,7 +22,25 @@ vi.mock('@/views/NetCheckView/useRuntimeNetworkCheck', () => ({
   useRuntimeNetworkCheck: () => ({
     input: ref('https://www.gstatic.com/generate_204'),
     running: ref(false),
-    results: ref([{ id: 'core', title: 'netCheck.results.core', status: 'success', summary: 'ok' }]),
+    results: ref([]),
+    groups: ref([
+      {
+        id: 'overview',
+        title: 'netCheck.groups.overview',
+        status: 'success',
+        summary: 'netCheck.summary.groupReady',
+        items: [
+          { id: 'core', title: 'netCheck.results.core', status: 'success', summary: 'ok' },
+        ],
+      },
+      {
+        id: 'dns',
+        title: 'netCheck.groups.dns',
+        status: 'skipped',
+        summary: 'netCheck.summary.groupSkipped',
+        items: [],
+      },
+    ]),
     clear: mocks.clear,
     run: mocks.run,
   }),
@@ -67,7 +85,7 @@ vi.mock('@/stores', () => ({
 import NetCheckView from '@/views/NetCheckView/index.vue'
 
 describe('NetCheckView', () => {
-  it('renders results and triggers a check', async () => {
+  it('renders groups and triggers a check', async () => {
     const wrapper = mount(NetCheckView, {
       global: {
         stubs: {
@@ -88,6 +106,8 @@ describe('NetCheckView', () => {
 
     expect(mocks.startPolling).toHaveBeenCalled()
     expect(mocks.run).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('netCheck.groups.overview')
+    expect(wrapper.text()).toContain('netCheck.groups.dns')
     expect(wrapper.text()).toContain('ok')
   })
 })

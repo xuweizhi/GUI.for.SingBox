@@ -131,7 +131,12 @@ const summarizeGroupStatus = (items: NetworkCheckResultItem[]) => {
     { success: 0, failed: 0, skipped: 0, running: 0 },
   )
 
-  return [counts.success && `${counts.success} success`, counts.failed && `${counts.failed} failed`, counts.skipped && `${counts.skipped} skipped`, counts.running && `${counts.running} running`]
+  return [
+    counts.success && `${counts.success} success`,
+    counts.failed && `${counts.failed} failed`,
+    counts.skipped && `${counts.skipped} skipped`,
+    counts.running && `${counts.running} running`,
+  ]
     .filter(Boolean)
     .join(', ')
 }
@@ -296,9 +301,17 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     syncGroups()
 
     if (target.targetKind === 'ip') {
-      dnsItems.push(createSkippedItem('dns-query', 'netCheck.results.dns', 'ip target'))
+      dnsItems.push(
+        createSkippedItem('dns-query', 'netCheck.results.dnsQuery', 'netCheck.summary.ipTarget'),
+      )
     } else if (!deps.dnsQuery) {
-      dnsItems.push(createSkippedItem('dns-query', 'netCheck.results.dns', 'dns unavailable'))
+      dnsItems.push(
+        createSkippedItem(
+          'dns-query',
+          'netCheck.results.dnsQuery',
+          'netCheck.summary.dnsUnavailable',
+        ),
+      )
     } else {
       try {
         const dns = await deps.dnsQuery(target.dnsLookupHost)
@@ -306,7 +319,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         const status = dns.status ?? dns.Status ?? 0
         dnsItems.push({
           id: 'dns-query',
-          title: 'netCheck.results.dns',
+          title: 'netCheck.results.dnsQuery',
           status: status === 0 ? 'success' : 'failed',
           summary: answers[0] || `status ${status}`,
           detail:
@@ -317,9 +330,9 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
       } catch (error) {
         dnsItems.push({
           id: 'dns-query',
-          title: 'netCheck.results.dns',
+          title: 'netCheck.results.dnsQuery',
           status: 'failed',
-          summary: 'dns failed',
+          summary: 'netCheck.summary.dnsFailed',
           detail: normalizeErrorMessage(error),
         })
       }
@@ -327,28 +340,40 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     syncGroups()
 
     if (!deps.getPrimaryOutboundState) {
-      outboundItems.push(createSkippedItem('primary-outbound', 'netCheck.results.primaryOutbound', 'outbound unavailable'))
+      outboundItems.push(
+        createSkippedItem(
+          'primary-outbound',
+          'netCheck.results.outboundDelay',
+          'netCheck.summary.outboundUnavailable',
+        ),
+      )
     } else {
       try {
         const outbound = await deps.getPrimaryOutboundState()
         if (!outbound) {
-          outboundItems.push(createSkippedItem('primary-outbound', 'netCheck.results.primaryOutbound', 'outbound unavailable'))
+          outboundItems.push(
+            createSkippedItem(
+              'primary-outbound',
+              'netCheck.results.outboundDelay',
+              'netCheck.summary.outboundUnavailable',
+            ),
+          )
         } else {
           const chain = outbound.chain?.filter(Boolean).join(' -> ')
           outboundItems.push({
             id: 'primary-outbound',
-            title: 'netCheck.results.primaryOutbound',
+            title: 'netCheck.results.outboundDelay',
             status: 'success',
-            summary: chain || outbound.leafName || outbound.groupName || 'outbound ready',
+            summary: chain || outbound.leafName || outbound.groupName || 'netCheck.summary.outboundReady',
             detail: typeof outbound.delay === 'number' ? `${outbound.delay} ms` : outbound.mode,
           })
         }
       } catch (error) {
         outboundItems.push({
           id: 'primary-outbound',
-          title: 'netCheck.results.primaryOutbound',
+          title: 'netCheck.results.outboundDelay',
           status: 'failed',
-          summary: 'outbound failed',
+          summary: 'netCheck.summary.outboundFailed',
           detail: normalizeErrorMessage(error),
         })
       }
@@ -356,18 +381,30 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     syncGroups()
 
     if (!deps.getLatestRuleMatch) {
-      outboundItems.push(createSkippedItem('rule-match', 'netCheck.results.ruleMatch', 'rule match unavailable'))
+      outboundItems.push(
+        createSkippedItem(
+          'rule-match',
+          'netCheck.results.latestRuleMatch',
+          'netCheck.summary.ruleMatchUnavailable',
+        ),
+      )
     } else {
       try {
         const ruleMatch = await deps.getLatestRuleMatch(target)
         if (!ruleMatch) {
-          outboundItems.push(createSkippedItem('rule-match', 'netCheck.results.ruleMatch', 'rule match unavailable'))
+          outboundItems.push(
+            createSkippedItem(
+              'rule-match',
+              'netCheck.results.latestRuleMatch',
+              'netCheck.summary.ruleMatchUnavailable',
+            ),
+          )
         } else {
           const host = ruleMatch.host || target.displayHost
           const port = ruleMatch.port ?? target.tcpPort
           outboundItems.push({
             id: 'rule-match',
-            title: 'netCheck.results.ruleMatch',
+            title: 'netCheck.results.latestRuleMatch',
             status: 'success',
             summary: `${host}:${port}`,
             detail: [ruleMatch.rule, ruleMatch.chains?.filter(Boolean).join(' -> ')].filter(Boolean).join(' | '),
@@ -376,9 +413,9 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
       } catch (error) {
         outboundItems.push({
           id: 'rule-match',
-          title: 'netCheck.results.ruleMatch',
+          title: 'netCheck.results.latestRuleMatch',
           status: 'failed',
-          summary: 'rule match failed',
+          summary: 'netCheck.summary.ruleMatchFailed',
           detail: normalizeErrorMessage(error),
         })
       }
@@ -386,12 +423,20 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     syncGroups()
 
     if (!deps.getRulesetStates) {
-      rulesetItems.push(createSkippedItem('rulesets', 'netCheck.results.rulesets', 'rulesets unavailable'))
+      rulesetItems.push(
+        createSkippedItem(
+          'rulesets',
+          'netCheck.results.rulesetItem',
+          'netCheck.summary.rulesetsUnavailable',
+        ),
+      )
     } else {
       try {
         const states = await deps.getRulesetStates()
         if (states.length === 0) {
-          rulesetItems.push(createSkippedItem('rulesets', 'netCheck.results.rulesets', 'no rulesets'))
+          rulesetItems.push(
+            createSkippedItem('rulesets', 'netCheck.results.rulesetItem', 'netCheck.summary.noRulesets'),
+          )
         } else {
           rulesetItems.push(
             ...states.map((item) => ({
@@ -406,9 +451,9 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
       } catch (error) {
         rulesetItems.push({
           id: 'rulesets',
-          title: 'netCheck.results.rulesets',
+          title: 'netCheck.results.rulesetItem',
           status: 'failed',
-          summary: 'rulesets failed',
+          summary: 'netCheck.summary.rulesetsFailed',
           detail: normalizeErrorMessage(error),
         })
       }

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 
 import { useKernelApiStore } from '@/stores'
 import { useNodeController } from '@/views/HomeView/useNodeController'
+import NetCheckGroupCard from '@/views/NetCheckView/components/NetCheckGroupCard.vue'
 import NodeDiagnosticsPanel from '@/views/NetCheckView/components/NodeDiagnosticsPanel.vue'
 import { useRuntimeNetworkCheck } from '@/views/NetCheckView/useRuntimeNetworkCheck'
 
@@ -93,39 +94,18 @@ onUnmounted(() => {
     </Card>
 
     <Card :title="t('netCheck.results.title')">
-      <div v-if="networkCheck.results.value.length === 0" class="text-12">
+      <div v-if="networkCheck.groups.value.length === 0" class="text-12">
         {{ t('netCheck.results.empty') }}
       </div>
       <div v-else class="flex flex-col gap-8">
-        <div
-          v-for="item in networkCheck.results.value"
-          :key="item.id"
-          class="result-item rounded-8 p-8"
-          :data-result="item.id"
-        >
-          <div class="font-bold">
-            {{ renderText(item.title) }}
-          </div>
-          <div class="text-12 mt-4">
-            {{ renderText(item.summary) }}
-          </div>
-          <div v-if="item.detail" class="text-12 mt-4">
-            {{ renderText(item.detail) }}
-          </div>
-          <div v-if="item.durationMs !== undefined" class="text-12 mt-4">
-            {{ t('netCheck.results.duration', [item.durationMs]) }}
-          </div>
-        </div>
+        <NetCheckGroupCard
+          v-for="group in networkCheck.groups.value"
+          :key="group.id"
+          :group="group"
+        />
       </div>
     </Card>
 
     <NodeDiagnosticsPanel :controller="nodeController" :core-ready="coreReady" />
   </div>
 </template>
-
-<style scoped lang="less">
-.result-item {
-  border: 1px solid var(--border-color, #e5e7eb);
-  background: var(--card-bg, #fff);
-}
-</style>
