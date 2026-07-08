@@ -7,6 +7,25 @@ SKIP_INSTALL=0
 STATUS_ONLY=0
 RESTART_ONLY=0
 
+resolve_wails() {
+  if command -v wails >/dev/null 2>&1; then
+    command -v wails
+    return 0
+  fi
+
+  if command -v go >/dev/null 2>&1; then
+    local gopath
+    gopath="$(go env GOPATH 2>/dev/null || true)"
+    if [[ -n "$gopath" && -x "$gopath/bin/wails" ]]; then
+      printf '%s\n' "$gopath/bin/wails"
+      return 0
+    fi
+  fi
+
+  printf 'wails command not found. Install Wails CLI or add it to PATH.\n' >&2
+  return 1
+}
+
 usage() {
   cat <<'EOF'
 Usage: ./scripts/rebuild-restart-headless.sh [--no-install] [--service <name>] [--status-only] [--restart-only]
@@ -73,7 +92,7 @@ fi
 pnpm build
 
 cd "$ROOT_DIR"
-wails build
+"$(resolve_wails)" build
 
 sudo systemctl restart "$SERVICE_NAME"
 systemctl status "$SERVICE_NAME" --no-pager
