@@ -51,6 +51,15 @@ export const useAppStore = defineStore('app', () => {
   /* Modal Stack */
   const modalStack: (() => void)[] = []
   const modalZIndexCounter = 999
+  const modalMinimized = ref<
+    {
+      id: string
+      title: () => string
+      openFn: () => void
+      closeFn: () => MaybePromise<void>
+      minimizeFn: () => void
+    }[]
+  >([])
 
   /* i18n */
   const localesLoading = ref(false)
@@ -210,6 +219,7 @@ export const useAppStore = defineStore('app', () => {
     tipsMessage,
     tipsPosition,
     modalStack,
+    modalMinimized,
     modalZIndexCounter,
     showAbout,
     checkForUpdatesLoading,

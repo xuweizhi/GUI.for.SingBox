@@ -52,6 +52,9 @@ export default {
     downloading: 'Downloading...',
     empty: 'Data is empty',
     pressAgainToClose: 'Press again to close the modal',
+    modalList: 'Modal List',
+    openAll: 'Open all',
+    minimizeAll: 'Minimize all',
   },
   kernel: {
     rule: 'Rule',
@@ -115,6 +118,10 @@ export default {
         system: 'System',
         gvisor: 'gVisor',
         mixed: 'Mixed',
+      },
+      direct: {
+        network: 'Listen Network',
+        default: 'Both if empty',
       },
       mixedPort: 'Mixed Port',
       httpPort: 'HTTP(s) Port',

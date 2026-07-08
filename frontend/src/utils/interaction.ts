@@ -296,19 +296,41 @@ export const confirm = (
 }
 
 export const modal = (options: ModalProps = {}, slots: ModalSlots = {}) => {
-  const [Modal, api] = useModal(options, slots)
+  const id = 'Modal-' + sampleID()
+
+  const container = document.createElement('div')
+  container.id = id
+  container.dataset['title'] = options.title
+  document.body.appendChild(container)
+
+  let cleaned = false
+  const cleanup = () => {
+    if (cleaned) return
+    cleaned = true
+    render(null, container)
+    container.remove()
+  }
+
+  const [Modal, api] = useModal(
+    {
+      ...options,
+      container: '#' + id,
+      afterDestroy() {
+        options.afterDestroy?.()
+        cleanup()
+      },
+    },
+    slots,
+  )
   const vnode = h(Modal)
   bindAppContext(vnode)
 
-  const container = document.createElement('div')
-  document.body.appendChild(container)
   render(vnode, container)
 
   const destroy = () => {
     api.close()
     nextTick(() => {
-      render(null, container)
-      container.remove()
+      cleanup()
     })
   }
   const powerApi = { ...api, destroy }

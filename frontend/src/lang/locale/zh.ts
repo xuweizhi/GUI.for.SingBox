@@ -52,6 +52,9 @@ export default {
     downloading: '下载中...',
     empty: '数据为空',
     pressAgainToClose: '再按一次关闭弹窗',
+    modalList: '模态框列表',
+    openAll: '打开所有',
+    minimizeAll: '最小化所有',
   },
   kernel: {
     rule: '规则',
@@ -115,6 +118,10 @@ export default {
         system: 'System',
         gvisor: 'gVisor',
         mixed: 'Mixed',
+      },
+      direct: {
+        network: '监听网络协议',
+        default: '默认所有',
       },
       mixedPort: '混合代理端口',
       httpPort: 'HTTP(s)代理端口',

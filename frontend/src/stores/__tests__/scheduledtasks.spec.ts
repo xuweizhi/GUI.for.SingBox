@@ -1,21 +1,27 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
 
+const bridgeMocks = vi.hoisted(() => ({
+  GetScheduledTaskWorkerLogs: vi.fn(),
+  RecordScheduledTaskLog: vi.fn(),
+  RunScheduledTaskWorker: vi.fn(),
+}))
+
 vi.mock('@/bridge', () => ({
   EventsOn: vi.fn(),
   ReadFile: vi.fn(),
   WriteFile: vi.fn(),
   Notify: vi.fn(),
-  GetScheduledTaskWorkerLogs: vi.fn().mockResolvedValue([]),
+  GetScheduledTaskWorkerLogs: bridgeMocks.GetScheduledTaskWorkerLogs,
   GetScheduledTaskWorkerStatus: vi.fn().mockResolvedValue({
     available: false,
     nodePath: '',
     supportedTypes: [],
   }),
   ReloadScheduledTaskWorker: vi.fn(),
-  RunScheduledTaskWorker: vi.fn(),
+  RunScheduledTaskWorker: bridgeMocks.RunScheduledTaskWorker,
   ClearScheduledTaskWorkerLogs: vi.fn(),
-  RecordScheduledTaskLog: vi.fn(),
+  RecordScheduledTaskLog: bridgeMocks.RecordScheduledTaskLog,
   ReadDir: vi.fn().mockResolvedValue([]),
   GetSystemProxyBypass: vi.fn(),
   WindowSetSystemDefaultTheme: vi.fn(),
@@ -104,5 +110,75 @@ describe('scheduledtasks store', () => {
       { ok: true, result: 'updated' },
       { ok: true, result: 'Subscription outbound refs synced. Added: 2; Removed: 1.' },
     ])
+  })
+
+  it('returns the local scheduled task log when a task runs in the frontend', async () => {
+    setActivePinia(createPinia())
+    bridgeMocks.GetScheduledTaskWorkerLogs.mockResolvedValue([])
+    bridgeMocks.RecordScheduledTaskLog.mockResolvedValue(undefined)
+    const scheduledTasksStore = useScheduledTasksStore()
+    const subscribesStore = useSubscribesStore()
+
+    vi.spyOn(subscribesStore, 'updateSubscribe').mockResolvedValue('updated')
+
+    scheduledTasksStore.scheduledtasks.push({
+      id: 'task-1',
+      name: 'Update subscription',
+      type: ScheduledTasksType.UpdateSubscription,
+      subscriptions: ['sub-1'],
+      rulesets: [],
+      plugins: [],
+      script: '',
+      cron: '* * * * * *',
+      notification: false,
+      disabled: false,
+      lastTime: 0,
+    })
+
+    const log = await scheduledTasksStore.runScheduledTask('task-1')
+
+    expect(log).toMatchObject({
+      id: 'task-1',
+      name: 'Update subscription',
+      result: [{ ok: true, result: 'updated' }],
+    })
+    expect(log?.startTime).toEqual(expect.any(Number))
+    expect(log?.endTime).toEqual(expect.any(Number))
+    expect(bridgeMocks.RecordScheduledTaskLog).toHaveBeenCalledWith(log)
+  })
+
+  it('returns the worker scheduled task log when a task runs in the backend', async () => {
+    setActivePinia(createPinia())
+    const workerLog = {
+      id: 'task-1',
+      name: 'Update plugin',
+      startTime: 100,
+      endTime: 200,
+      result: [{ ok: true, result: 'updated' }],
+    }
+    bridgeMocks.RunScheduledTaskWorker.mockResolvedValue('Success')
+    bridgeMocks.GetScheduledTaskWorkerLogs.mockResolvedValue([workerLog])
+    const scheduledTasksStore = useScheduledTasksStore()
+
+    scheduledTasksStore.workerStatus = {
+      available: true,
+      nodePath: '/usr/bin/node',
+      supportedTypes: [ScheduledTasksType.UpdatePlugin],
+    }
+    scheduledTasksStore.scheduledtasks.push({
+      id: 'task-1',
+      name: 'Update plugin',
+      type: ScheduledTasksType.UpdatePlugin,
+      subscriptions: [],
+      rulesets: [],
+      plugins: [],
+      script: '',
+      cron: '* * * * * *',
+      notification: false,
+      disabled: false,
+      lastTime: 0,
+    })
+
+    await expect(scheduledTasksStore.runScheduledTask('task-1')).resolves.toEqual(workerLog)
   })
 })

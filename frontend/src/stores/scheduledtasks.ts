@@ -28,6 +28,14 @@ import { ignoredError, stringifyNoFolding } from '@/utils'
 
 import type { ScheduledTaskWorkerLogRecord, ScheduledTaskWorkerStatus } from '@/bridge'
 
+type ScheduledTaskLog = {
+  id: string
+  name: string
+  startTime: number
+  endTime: number
+  result: { ok: boolean; result: unknown }[] | { ok: boolean; result: string }[]
+}
+
 export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
   const scheduledtasks = ref<App.ScheduledTask[]>([])
   const cronJobsMap: Recordable<Cron> = {}
@@ -103,7 +111,9 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
 
     scheduledtasks.value.forEach((task) => {
       if (!task.disabled && !isHandledByWorker(task)) {
-        cronJobsMap[task.id] = new Cron(task.cron, () => runScheduledTask(task.id))
+        cronJobsMap[task.id] = new Cron(task.cron, () => {
+          runScheduledTask(task.id)
+        })
       }
     })
   }
@@ -144,7 +154,7 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
     refreshLocalCronJobs()
   }
 
-  const runScheduledTaskLocally = async (id: string) => {
+  const runScheduledTaskLocally = async (id: string): Promise<ScheduledTaskLog | undefined> => {
     const task = getScheduledTaskById(id)
     if (!task) return
 
@@ -156,13 +166,15 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
     try {
       const result = await getTaskFn(task)()
 
-      await RecordScheduledTaskLog({
+      const log = {
         id: task.id,
         name: task.name,
         startTime,
         endTime: Date.now(),
         result,
-      })
+      }
+
+      await RecordScheduledTaskLog(log)
       recorded = true
 
       if (task.notification) {
@@ -172,6 +184,8 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
         const content = `Successes: ${successes}; Failures: ${failures}. \n\n${details}`
         await Notify(task.name, content)
       }
+
+      return log
     } catch (error) {
       if (!recorded) {
         task.lastTime = previousLastTime
@@ -186,10 +200,11 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
 
     if (isHandledByWorker(task)) {
       await RunScheduledTaskWorker(id)
-      return
+      const logs = (await ignoredError(GetScheduledTaskWorkerLogs)) ?? []
+      return logs.find((log) => log.id === id)
     }
 
-    await runScheduledTaskLocally(id)
+    return runScheduledTaskLocally(id)
   }
 
   const withOutput = <T>(list: string[], fn: (id: string) => Promise<T>) => {
