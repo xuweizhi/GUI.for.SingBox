@@ -251,19 +251,33 @@ describe('useNodeController', () => {
     scope.stop()
   })
 
-  it('records a failed delay without exposing 0 ms', async () => {
+  it('records a failed delay after three attempts without exposing 0 ms', async () => {
     mocks.getProxyDelay.mockRejectedValue(new Error('timeout'))
     const scope = effectScope()
     const controller = scope.run(() => useNodeController())!
     await controller.prepareModal()
+    const initialHistoryLength = mocks.kernelStore.proxies['JP 01'].history.length
+    mocks.refreshProviderProxies.mockImplementationOnce(async () => {
+      expect(mocks.kernelStore.proxies['JP 01'].history).toHaveLength(initialHistoryLength + 1)
+      expect(mocks.kernelStore.proxies['JP 01'].history.at(-1)).toEqual({ delay: 0 })
+      mocks.kernelStore.proxies['JP 01'].history = [{ delay: 99 }]
+    })
 
-    const result = await controller.testNode('JP 01')
+    const testing = controller.testNode('JP 01')
+    await vi.advanceTimersByTimeAsync(600)
+    const result = await testing
 
     expect(result.ok).toBe(false)
-    expect(controller.nodeErrors.value.get('JP 01')).toContain('timeout')
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(3)
+    expect(controller.nodeErrors.value.get('JP 01')).toEqual({
+      category: 'timeout',
+      message: 'timeout',
+      attempts: 3,
+    })
     expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
       delay: null,
       delayStatus: 'failed',
+      error: { category: 'timeout', attempts: 3 },
     })
     scope.stop()
   })
@@ -274,11 +288,65 @@ describe('useNodeController', () => {
     const controller = scope.run(() => useNodeController())!
     await controller.prepareModal()
     mocks.refreshProviderProxies.mockClear()
+    mocks.refreshProviderProxies.mockImplementationOnce(async () => {
+      mocks.kernelStore.proxies['JP 01'].history = []
+    })
 
     const result = await controller.testNode('JP 01')
 
     expect(result.ok).toBe(true)
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(1)
+    expect(controller.nodeAttempts.value.get('JP 01')).toBe(1)
     expect(mocks.refreshProviderProxies).toHaveBeenCalledTimes(1)
+    scope.stop()
+  })
+
+  it('keeps a node busy until its trailing refresh finishes', async () => {
+    mocks.getProxyDelay.mockResolvedValue({ delay: 65 })
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+    let resolveRefresh!: () => void
+    mocks.refreshProviderProxies.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRefresh = resolve
+        }),
+    )
+
+    const first = controller.testNode('JP 01')
+    await Promise.resolve()
+    await Promise.resolve()
+    const secondTesting = controller.testNode('JP 01')
+    await Promise.resolve()
+    const callsWhileBlocked = mocks.getProxyDelay.mock.calls.length
+    const busyWhileBlocked = controller.testingNodes.value.has('JP 01')
+
+    resolveRefresh()
+    const [second] = await Promise.all([secondTesting, first])
+    expect(second).toEqual({ ok: false, error: 'home.nodes.alreadyTesting' })
+    expect(callsWhileBlocked).toBe(1)
+    expect(busyWhileBlocked).toBe(true)
+    expect(controller.testingNodes.value.has('JP 01')).toBe(false)
+
+    await controller.testNode('JP 01')
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(2)
+    scope.stop()
+  })
+
+  it('clears busy and protection state when a trailing refresh rejects', async () => {
+    mocks.getProxyDelay.mockResolvedValue({ delay: 65 })
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+    mocks.refreshProviderProxies.mockRejectedValueOnce(new Error('refresh failed'))
+
+    await controller.testNode('JP 01')
+
+    expect(controller.testingNodes.value.has('JP 01')).toBe(false)
+    mocks.kernelStore.proxies['JP 01'].history = [{ delay: 80 }]
+    await controller.refresh()
+    expect(controller.nodeAttempts.value.has('JP 01')).toBe(false)
     scope.stop()
   })
 
@@ -288,13 +356,16 @@ describe('useNodeController', () => {
     const controller = scope.run(() => useNodeController())!
     await controller.prepareModal()
 
-    await controller.testNode('JP 01')
+    const testing = controller.testNode('JP 01')
+    await vi.advanceTimersByTimeAsync(600)
+    await testing
     expect(controller.nodeErrors.value.has('JP 01')).toBe(true)
 
     mocks.kernelStore.proxies['JP 01'].history = [{ delay: 72 }]
     await controller.refresh()
 
     expect(controller.nodeErrors.value.has('JP 01')).toBe(false)
+    expect(controller.nodeAttempts.value.has('JP 01')).toBe(false)
     expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
       delay: 72,
       delayStatus: 'success',
@@ -308,9 +379,17 @@ describe('useNodeController', () => {
     const controller = scope.run(() => useNodeController())!
     await controller.prepareModal()
 
-    const result = await controller.testNode('JP 01')
+    const testing = controller.testNode('JP 01')
+    await vi.advanceTimersByTimeAsync(600)
+    const result = await testing
 
     expect(result).toEqual({ ok: false, error: 'home.nodes.unavailable' })
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(3)
+    expect(controller.nodeErrors.value.get('JP 01')).toEqual({
+      category: 'unknown',
+      message: 'home.nodes.unavailable',
+      attempts: 3,
+    })
     expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
       delay: null,
       delayStatus: 'failed',
@@ -318,12 +397,106 @@ describe('useNodeController', () => {
     scope.stop()
   })
 
+  it('retries once, records one successful history entry, and yields to refreshed history', async () => {
+    mocks.getProxyDelay
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce({ delay: 72 })
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+    const initialHistoryLength = mocks.kernelStore.proxies['JP 01'].history.length
+    mocks.refreshProviderProxies.mockImplementationOnce(async () => {
+      expect(mocks.kernelStore.proxies['JP 01'].history).toHaveLength(initialHistoryLength + 1)
+      expect(mocks.kernelStore.proxies['JP 01'].history.at(-1)).toEqual({ delay: 72 })
+    })
+
+    const testing = controller.testNode('JP 01')
+    await vi.advanceTimersByTimeAsync(300)
+    const result = await testing
+
+    expect(result).toEqual({ ok: true })
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(2)
+    expect(controller.nodeAttempts.value.get('JP 01')).toBe(2)
+    expect(controller.nodeErrors.value.has('JP 01')).toBe(false)
+    expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
+      delay: 72,
+      attempts: 2,
+    })
+
+    mocks.refreshProviderProxies.mockImplementationOnce(async () => {
+      mocks.kernelStore.proxies['JP 01'].history = [{ delay: 80 }]
+    })
+    await controller.refresh()
+
+    expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
+      delay: 80,
+      attempts: undefined,
+    })
+    expect(controller.nodeAttempts.value.has('JP 01')).toBe(false)
+    scope.stop()
+  })
+
+  it('protects only the node whose result joins an in-flight refresh', async () => {
+    mocks.getProxyDelay.mockImplementation((name: string) =>
+      Promise.resolve({ delay: name === 'JP%2001' ? 72 : 73 }),
+    )
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    await controller.testNode('JP 01')
+    expect(controller.nodeAttempts.value.get('JP 01')).toBe(1)
+
+    let resolveRefresh!: () => void
+    mocks.refreshProviderProxies.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRefresh = () => {
+            mocks.kernelStore.proxies['HK 01'].history = [{ delay: 90 }]
+            mocks.kernelStore.proxies['JP 01'].history = [{ delay: 91 }]
+            resolve()
+          }
+        }),
+    )
+    const ordinaryRefresh = controller.refresh()
+    const testing = controller.testNode('HK 01')
+    await Promise.resolve()
+    resolveRefresh()
+    await Promise.all([ordinaryRefresh, testing])
+
+    expect(controller.nodeAttempts.value.has('JP 01')).toBe(false)
+    expect(controller.nodeAttempts.value.get('HK 01')).toBe(1)
+    expect(controller.nodes.value.find((node) => node.name === 'HK 01')).toMatchObject({
+      delay: 73,
+      attempts: 1,
+    })
+    scope.stop()
+  })
+
+  it('classifies the final connection-refused error after three attempts', async () => {
+    mocks.getProxyDelay.mockRejectedValue(new Error('connection refused'))
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const testing = controller.testNode('JP 01')
+    await vi.advanceTimersByTimeAsync(600)
+    await testing
+
+    expect(controller.nodeErrors.value.get('JP 01')).toEqual({
+      category: 'connection-refused',
+      message: 'connection refused',
+      attempts: 3,
+    })
+    scope.stop()
+  })
+
   it('cancels queued group tests while allowing the active request to finish', async () => {
-    let release!: () => void
+    let reject!: (error: Error) => void
     mocks.getProxyDelay.mockImplementation(
       () =>
-        new Promise((resolve) => {
-          release = () => resolve({ delay: 90 })
+        new Promise((_, rejectRequest) => {
+          reject = rejectRequest
         }),
     )
     const scope = effectScope()
@@ -334,11 +507,146 @@ describe('useNodeController', () => {
     await Promise.resolve()
     await Promise.resolve()
     controller.cancelGroupTest()
-    release()
+    reject(new Error('timeout'))
     await testing
 
     expect(mocks.getProxyDelay).toHaveBeenCalledTimes(1)
     expect(controller.batch.value.cancelled).toBe(true)
+    expect(controller.batch.value.completed).toBe(0)
+    expect(controller.batch.value.failure).toBe(0)
+    scope.stop()
+  })
+
+  it('counts retried group results once per node', async () => {
+    mocks.getProxyDelay
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce({ delay: 81 })
+      .mockRejectedValue(new Error('connection refused'))
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+    mocks.refreshProviderProxies.mockImplementationOnce(async () => {
+      mocks.kernelStore.proxies['HK 01'].history = [{ delay: 95 }]
+      mocks.kernelStore.proxies['JP 01'].history = [{ delay: 96 }]
+    })
+
+    const testing = controller.testGroup()
+    await vi.advanceTimersByTimeAsync(900)
+    await testing
+
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(5)
+    expect(controller.batch.value).toMatchObject({ completed: 2, success: 1, failure: 1 })
+    expect(controller.nodeAttempts.value.get('HK 01')).toBe(2)
+    expect(controller.nodeErrors.value.get('JP 01')).toMatchObject({
+      category: 'connection-refused',
+      attempts: 3,
+    })
+
+    await controller.refresh()
+
+    expect(controller.nodeAttempts.value.has('HK 01')).toBe(false)
+    expect(controller.nodeErrors.value.has('JP 01')).toBe(false)
+    scope.stop()
+  })
+
+  it('keeps completed group nodes busy through the group trailing refresh', async () => {
+    mocks.getProxyDelay.mockResolvedValue({ delay: 70 })
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+    let resolveRefresh!: () => void
+    mocks.refreshProviderProxies.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRefresh = resolve
+        }),
+    )
+
+    const groupTesting = controller.testGroup()
+    for (let index = 0; index < 100 && !resolveRefresh; index += 1) {
+      await Promise.resolve()
+    }
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(2)
+    expect(resolveRefresh).toBeTypeOf('function')
+    const singleTesting = controller.testNode('HK 01')
+    await Promise.resolve()
+    const callsWhileBlocked = mocks.getProxyDelay.mock.calls.length
+    const busyWhileBlocked = controller.testingNodes.value.has('HK 01')
+
+    resolveRefresh()
+    const [singleResult] = await Promise.all([singleTesting, groupTesting])
+    expect(singleResult).toEqual({ ok: false, error: 'home.nodes.alreadyTesting' })
+    expect(callsWhileBlocked).toBe(2)
+    expect(busyWhileBlocked).toBe(true)
+    expect(controller.testingNodes.value.size).toBe(0)
+
+    await controller.testNode('HK 01')
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(3)
+    scope.stop()
+  })
+
+  it('excludes a busy node from group totals and tests the remaining node', async () => {
+    let releaseBusy!: () => void
+    mocks.getProxyDelay.mockImplementation((name: string) => {
+      if (name === 'HK%2001') {
+        return new Promise((resolve) => {
+          releaseBusy = () => resolve({ delay: 70 })
+        })
+      }
+      return Promise.resolve({ delay: 71 })
+    })
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const singleTesting = controller.testNode('HK 01')
+    await Promise.resolve()
+    await controller.testGroup()
+
+    expect(controller.batch.value).toMatchObject({
+      total: 1,
+      completed: 1,
+      success: 1,
+      running: false,
+    })
+    expect(mocks.getProxyDelay.mock.calls.map(([name]) => decodeURIComponent(name))).toEqual([
+      'HK 01',
+      'JP 01',
+    ])
+
+    releaseBusy()
+    await singleTesting
+    scope.stop()
+  })
+
+  it('finishes an all-busy group without starting new requests', async () => {
+    const releases = new Map<string, () => void>()
+    mocks.getProxyDelay.mockImplementation(
+      (name: string) =>
+        new Promise((resolve) => {
+          releases.set(name, () => resolve({ delay: 70 }))
+        }),
+    )
+    const scope = effectScope()
+    const controller = scope.run(() => useNodeController())!
+    await controller.prepareModal()
+
+    const hkTesting = controller.testNode('HK 01')
+    const jpTesting = controller.testNode('JP 01')
+    await Promise.resolve()
+    await controller.testGroup()
+
+    expect(controller.batch.value).toMatchObject({
+      total: 0,
+      completed: 0,
+      success: 0,
+      failure: 0,
+      running: false,
+    })
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(2)
+
+    releases.forEach((release) => release())
+    await Promise.all([hkTesting, jpTesting])
     scope.stop()
   })
 

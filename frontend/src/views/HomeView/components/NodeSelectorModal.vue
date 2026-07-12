@@ -161,16 +161,22 @@ const testNode = async (name: string) => {
           <Button
             :data-delay="node.name"
             :loading="testingNodes.has(node.name)"
+            :aria-description="node.error?.message"
+            :title="node.error?.message"
+            v-tips.fast="node.error?.message"
             type="text"
             size="small"
             class="ml-auto"
             @click.stop="testNode(node.name)"
           >
             <span v-if="node.delayStatus === 'success'" class="delay-success">
-              {{ node.delay }} ms
+              {{ node.delay }} ms<span v-if="(node.attempts ?? 1) > 1">
+                · {{ node.attempts }} {{ t('home.nodes.attempts') }}</span
+              >
             </span>
             <span v-else-if="node.delayStatus === 'failed'" class="delay-failed">
-              {{ t('home.nodes.unavailable') }}
+              {{ t(`home.nodes.delayError.${node.error?.category ?? 'unknown'}`) }} ·
+              {{ node.error?.attempts ?? 1 }}/3
             </span>
             <span v-else>{{ t('home.nodes.untested') }}</span>
           </Button>

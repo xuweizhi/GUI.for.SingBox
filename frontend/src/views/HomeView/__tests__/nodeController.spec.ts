@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  classifyDelayError,
   filterAndSortNodes,
   getDelayTestableNodeNames,
   isDelayTestableNode,
@@ -159,13 +160,33 @@ describe('filterAndSortNodes', () => {
   })
 
   it('marks local errors as unavailable', () => {
-    const errors = new Map([['JP 01', 'timeout']])
+    const error = { category: 'timeout', message: 'deadline exceeded', attempts: 3 } as const
+    const errors = new Map([['JP 01', error]])
     const nodes = filterAndSortNodes(proxies.Auto!, proxies, '', false, errors)
 
     expect(nodes[1]).toMatchObject({
       name: 'JP 01',
       delayStatus: 'failed',
-      error: 'timeout',
+      error,
+    })
+  })
+
+  it('includes the successful attempt count', () => {
+    const nodes = filterAndSortNodes(
+      proxies.Auto!,
+      proxies,
+      '',
+      false,
+      new Map(),
+      new Map([['JP 01', 120]]),
+      new Map([['JP 01', 2]]),
+    )
+
+    expect(nodes[1]).toMatchObject({
+      name: 'JP 01',
+      delay: 120,
+      delayStatus: 'success',
+      attempts: 2,
     })
   })
 
@@ -177,6 +198,34 @@ describe('filterAndSortNodes', () => {
     const nodes = filterAndSortNodes(proxies.Auto!, equal, '', true, new Map())
 
     expect(nodes.map((node) => node.name)).toEqual(['HK 01', 'JP 01'])
+  })
+})
+
+describe('classifyDelayError', () => {
+  it('classifies uppercase ASCII keywords independently of locale', () => {
+    expect(classifyDelayError('TIMEOUT')).toBe('timeout')
+    expect(classifyDelayError('NXDOMAIN')).toBe('dns')
+  })
+
+  it.each([
+    ['LOOKUP example.com failed', 'dns'],
+    ['no such host', 'dns'],
+    ['NXDOMAIN', 'dns'],
+    ['Authentication failed', 'authentication'],
+    ['UNAUTHORIZED', 'authentication'],
+    ['TLS handshake failed', 'tls'],
+    ['x509 CERTIFICATE expired', 'tls'],
+    ['Reality verification failed', 'tls'],
+    ['CONNECTION REFUSED', 'connection-refused'],
+    ['Network is unreachable', 'network-unreachable'],
+    ['NO ROUTE to host', 'network-unreachable'],
+    ['RESET BY PEER', 'connection-reset'],
+    ['unexpected EOF', 'connection-reset'],
+    ['request TIMEOUT', 'timeout'],
+    ['Deadline Exceeded', 'timeout'],
+    ['generic transport failure', 'unknown'],
+  ] as const)('classifies %s as %s', (message, category) => {
+    expect(classifyDelayError(message)).toBe(category)
   })
 })
 

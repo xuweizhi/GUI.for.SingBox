@@ -3,6 +3,21 @@ import type { CoreApiProxy } from '@/types/kernel'
 export type NodeMode = 'rule' | 'global' | 'direct'
 export type ChainError = 'missing' | 'cycle'
 export type DelayStatus = 'untested' | 'success' | 'failed'
+export type DelayErrorCategory =
+  | 'dns'
+  | 'authentication'
+  | 'tls'
+  | 'connection-refused'
+  | 'network-unreachable'
+  | 'connection-reset'
+  | 'timeout'
+  | 'unknown'
+
+export interface NodeDelayError {
+  category: DelayErrorCategory
+  message: string
+  attempts: number
+}
 
 export interface ProxyChain {
   chain: string[]
@@ -25,7 +40,8 @@ export interface NodeListItem {
   delay: number | null
   delayStatus: DelayStatus
   originalIndex: number
-  error?: string
+  error?: NodeDelayError
+  attempts?: number
 }
 
 type NodeProfile = Pick<IProfile, 'route' | 'outbounds'> | undefined
@@ -37,6 +53,18 @@ const nonDelayTestableNamePatterns = [
   /线路持续更新/i,
   /企业套餐/i,
 ] as const
+
+export const classifyDelayError = (error: string): DelayErrorCategory => {
+  const message = error.toLowerCase()
+  if (/lookup|no such host|nxdomain/.test(message)) return 'dns'
+  if (/authentication|unauthorized/.test(message)) return 'authentication'
+  if (/tls|certificate|reality/.test(message)) return 'tls'
+  if (/connection refused/.test(message)) return 'connection-refused'
+  if (/network is unreachable|no route/.test(message)) return 'network-unreachable'
+  if (/reset by peer|eof/.test(message)) return 'connection-reset'
+  if (/timeout|deadline exceeded/.test(message)) return 'timeout'
+  return 'unknown'
+}
 
 const latestDelay = (proxy?: CoreApiProxy) => {
   const history = proxy?.history || []
@@ -188,8 +216,9 @@ export const filterAndSortNodes = (
   proxies: Record<string, CoreApiProxy>,
   query: string,
   sortByDelay: boolean,
-  errors: Map<string, string>,
+  errors: Map<string, NodeDelayError>,
   localDelays = new Map<string, number>(),
+  attempts = new Map<string, number>(),
 ): NodeListItem[] => {
   const keyword = query.trim().toLocaleLowerCase()
   const nodes = (group.all || []).map((name, originalIndex) => {
@@ -203,6 +232,7 @@ export const filterAndSortNodes = (
       delayStatus: failed ? 'failed' : delay ? 'success' : 'untested',
       originalIndex,
       error: errors.get(name),
+      attempts: attempts.get(name),
     } satisfies NodeListItem
   })
 

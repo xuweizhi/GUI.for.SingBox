@@ -23,6 +23,59 @@ const createController = () => {
   const selectedGroupName = ref('Proxy')
   const query = ref('')
   const sortByDelay = ref(false)
+  const nodes = ref([
+    {
+      name: 'HK 01',
+      proxy: {
+        alive: true,
+        name: 'HK 01',
+        type: 'VLESS',
+        all: [],
+        now: '',
+        udp: true,
+        history: [{ delay: 80 }],
+      },
+      delay: 80,
+      delayStatus: 'success' as const,
+      attempts: 2,
+      originalIndex: 0,
+    },
+    {
+      name: 'JP 01',
+      proxy: {
+        alive: true,
+        name: 'JP 01',
+        type: 'Trojan',
+        all: [],
+        now: '',
+        udp: false,
+        history: [],
+      },
+      delay: null,
+      delayStatus: 'untested' as const,
+      originalIndex: 1,
+    },
+    {
+      name: 'US Timeout',
+      proxy: {
+        alive: true,
+        name: 'US Timeout',
+        type: 'Trojan',
+        all: [],
+        now: '',
+        udp: false,
+        history: [{ delay: 0 }],
+      },
+      delay: null,
+      delayStatus: 'failed' as const,
+      error: {
+        category: 'timeout' as const,
+        message: 'context deadline exceeded',
+        attempts: 3,
+      },
+      originalIndex: 2,
+    },
+  ])
   const group = {
     alive: true,
     name: 'Proxy',
@@ -61,53 +114,7 @@ const createController = () => {
       readonly: false,
     })),
     selectedGroup: computed(() => group),
-    nodes: computed(() => [
-      {
-        name: 'HK 01',
-        proxy: {
-          alive: true,
-          name: 'HK 01',
-          type: 'VLESS',
-          all: [],
-          now: '',
-          udp: true,
-          history: [{ delay: 80 }],
-        },
-        delay: 80,
-        delayStatus: 'success' as const,
-        originalIndex: 0,
-      },
-      {
-        name: 'JP 01',
-        proxy: {
-          alive: true,
-          name: 'JP 01',
-          type: 'Trojan',
-          all: [],
-          now: '',
-          udp: false,
-          history: [],
-        },
-        delay: null,
-        delayStatus: 'untested' as const,
-        originalIndex: 1,
-      },
-      {
-        name: 'US Timeout',
-        proxy: {
-          alive: true,
-          name: 'US Timeout',
-          type: 'Trojan',
-          all: [],
-          now: '',
-          udp: false,
-          history: [{ delay: 0 }],
-        },
-        delay: null,
-        delayStatus: 'failed' as const,
-        originalIndex: 2,
-      },
-    ]),
+    nodes,
     readonlyMode: computed(() => false),
     refresh: vi.fn(),
     prepareModal: vi.fn().mockResolvedValue(undefined),
@@ -158,6 +165,17 @@ const mountModal = (controller = createController()) =>
         Empty: { template: '<div class="empty" />' },
         Icon: true,
       },
+      directives: {
+        tips: {
+          mounted(el, binding) {
+            el.dataset.tips = binding.value
+            el.dataset.tipsFast = String(binding.modifiers.fast)
+          },
+          updated(el, binding) {
+            el.dataset.tips = binding.value
+          },
+        },
+      },
     },
   })
 
@@ -186,15 +204,56 @@ describe('NodeSelectorModal', () => {
     expect(controller.testNode).toHaveBeenCalledWith('JP 01')
   })
 
-  it('colors successful and failed delay results', () => {
+  it('shows localized successful, failed and untested delay results', () => {
     const wrapper = mountModal()
 
-    expect(wrapper.get('[data-delay="HK 01"] .delay-success').text()).toBe('80 ms')
-    expect(wrapper.get('[data-delay="US Timeout"] .delay-failed').text()).toBe(
-      'home.nodes.unavailable',
-    )
+    const success = wrapper.get('[data-delay="HK 01"] .delay-success').text()
+    expect(success).toContain('80 ms')
+    expect(success).toContain('2')
+    expect(success).toContain('home.nodes.attempts')
+
+    const failure = wrapper.get('[data-delay="US Timeout"] .delay-failed').text()
+    expect(failure).toContain('home.nodes.delayError.timeout')
+    expect(failure).toContain('3/3')
+
+    expect(wrapper.get('[data-delay="JP 01"]').text()).toContain('home.nodes.untested')
     expect(wrapper.find('[data-delay="JP 01"] .delay-success').exists()).toBe(false)
     expect(wrapper.find('[data-delay="JP 01"] .delay-failed').exists()).toBe(false)
+  })
+
+  it('exposes the original delay error through the fast tips directive', () => {
+    const failureButton = mountModal().get('[data-delay="US Timeout"]')
+
+    expect(failureButton.attributes('data-tips')).toBe('context deadline exceeded')
+    expect(failureButton.attributes('data-tips-fast')).toBe('true')
+  })
+
+  it('updates the accessible error description when an untested node fails', async () => {
+    const controller = createController()
+    const wrapper = mountModal(controller)
+    const button = wrapper.get('[data-delay="JP 01"]')
+    expect(button.attributes('aria-description')).toBeUndefined()
+
+    controller.nodes.value[1] = {
+      name: 'JP 01',
+      proxy: {
+        alive: true,
+        name: 'JP 01',
+        type: 'Trojan',
+        all: [],
+        now: '',
+        udp: false,
+        history: [{ delay: 0 }],
+      },
+      delay: null,
+      delayStatus: 'failed',
+      error: { category: 'timeout', message: 'new timeout error', attempts: 3 },
+      originalIndex: 1,
+    }
+    await wrapper.vm.$nextTick()
+
+    expect(button.attributes('aria-description')).toBe('new timeout error')
+    expect(button.attributes('data-tips')).toBe('new timeout error')
   })
 
   it('disables node switching while another switch is in progress', async () => {
