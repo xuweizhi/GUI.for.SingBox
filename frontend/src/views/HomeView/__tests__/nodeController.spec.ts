@@ -160,7 +160,12 @@ describe('filterAndSortNodes', () => {
   })
 
   it('marks local errors as unavailable', () => {
-    const error = { category: 'timeout', message: 'deadline exceeded', attempts: 3 } as const
+    const error = {
+      category: 'timeout',
+      message: 'deadline exceeded',
+      attempts: 3,
+      maxAttempts: 3,
+    } as const
     const errors = new Map([['JP 01', error]])
     const nodes = filterAndSortNodes(proxies.Auto!, proxies, '', false, errors)
 

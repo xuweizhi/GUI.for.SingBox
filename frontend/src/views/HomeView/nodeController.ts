@@ -17,6 +17,7 @@ export interface NodeDelayError {
   category: DelayErrorCategory
   message: string
   attempts: number
+  maxAttempts: number
 }
 
 export interface ProxyChain {

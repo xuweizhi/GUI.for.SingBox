@@ -189,7 +189,7 @@ export const useNodeController = () => {
 
   const runNodeTest = async (
     name: string,
-    options: { cancelled?: () => boolean } = {},
+    options: { cancelled?: () => boolean; maxAttempts?: number } = {},
   ): Promise<NodeOperationResult> => {
     const proxy = kernelApiStore.proxies[name]
     if (!proxy) {
@@ -199,8 +199,9 @@ export const useNodeController = () => {
       return { ok: false, error: 'home.nodes.notDelayTestable' }
     }
 
+    const maxAttempts = options.maxAttempts ?? MAX_DELAY_ATTEMPTS
     let lastError = 'home.nodes.unavailable'
-    for (let attempt = 1; attempt <= MAX_DELAY_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         const { delay = 0 } = await getProxyDelay(
           encodeURIComponent(name),
@@ -222,7 +223,7 @@ export const useNodeController = () => {
       }
 
       if (disposed || options.cancelled?.()) return { ok: false, error: 'common.canceled' }
-      if (attempt < MAX_DELAY_ATTEMPTS) {
+      if (attempt < maxAttempts) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, DELAY_RETRY_INTERVAL))
         if (disposed || options.cancelled?.()) return { ok: false, error: 'common.canceled' }
       }
@@ -235,7 +236,8 @@ export const useNodeController = () => {
     nodeErrors.value.set(name, {
       category: classifyDelayError(lastError),
       message: lastError,
-      attempts: MAX_DELAY_ATTEMPTS,
+      attempts: maxAttempts,
+      maxAttempts,
     })
     protectedLocalResults.add(name)
     return { ok: false, error: lastError }
@@ -285,7 +287,10 @@ export const useNodeController = () => {
         }
         testingNodes.value.add(name)
         busyNames.add(name)
-        const result = await runNodeTest(name, { cancelled: () => batch.value.cancelled })
+        const result = await runNodeTest(name, {
+          cancelled: () => batch.value.cancelled,
+          maxAttempts: 1,
+        })
         if (!disposed && (result.ok || result.error !== 'common.canceled')) {
           completedNames.add(name)
           batch.value.completed += 1

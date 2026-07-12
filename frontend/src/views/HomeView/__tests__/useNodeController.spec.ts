@@ -273,6 +273,7 @@ describe('useNodeController', () => {
       category: 'timeout',
       message: 'timeout',
       attempts: 3,
+      maxAttempts: 3,
     })
     expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
       delay: null,
@@ -389,6 +390,7 @@ describe('useNodeController', () => {
       category: 'unknown',
       message: 'home.nodes.unavailable',
       attempts: 3,
+      maxAttempts: 3,
     })
     expect(controller.nodes.value.find((node) => node.name === 'JP 01')).toMatchObject({
       delay: null,
@@ -487,6 +489,7 @@ describe('useNodeController', () => {
       category: 'connection-refused',
       message: 'connection refused',
       attempts: 3,
+      maxAttempts: 3,
     })
     scope.stop()
   })
@@ -517,35 +520,26 @@ describe('useNodeController', () => {
     scope.stop()
   })
 
-  it('counts retried group results once per node', async () => {
-    mocks.getProxyDelay
-      .mockRejectedValueOnce(new Error('timeout'))
-      .mockResolvedValueOnce({ delay: 81 })
-      .mockRejectedValue(new Error('connection refused'))
+  it('tests each group node only once and records actual attempts', async () => {
+    mocks.getProxyDelay.mockImplementation((name: string) =>
+      name === 'HK%2001' ? Promise.reject(new Error('timeout')) : Promise.resolve({ delay: 81 }),
+    )
     const scope = effectScope()
     const controller = scope.run(() => useNodeController())!
     await controller.prepareModal()
-    mocks.refreshProviderProxies.mockImplementationOnce(async () => {
-      mocks.kernelStore.proxies['HK 01'].history = [{ delay: 95 }]
-      mocks.kernelStore.proxies['JP 01'].history = [{ delay: 96 }]
-    })
 
     const testing = controller.testGroup()
-    await vi.advanceTimersByTimeAsync(900)
+    await vi.advanceTimersByTimeAsync(1_000)
     await testing
 
-    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(5)
+    expect(mocks.getProxyDelay).toHaveBeenCalledTimes(2)
     expect(controller.batch.value).toMatchObject({ completed: 2, success: 1, failure: 1 })
-    expect(controller.nodeAttempts.value.get('HK 01')).toBe(2)
-    expect(controller.nodeErrors.value.get('JP 01')).toMatchObject({
-      category: 'connection-refused',
-      attempts: 3,
+    expect(controller.nodeErrors.value.get('HK 01')).toMatchObject({
+      category: 'timeout',
+      attempts: 1,
+      maxAttempts: 1,
     })
-
-    await controller.refresh()
-
-    expect(controller.nodeAttempts.value.has('HK 01')).toBe(false)
-    expect(controller.nodeErrors.value.has('JP 01')).toBe(false)
+    expect(controller.nodeAttempts.value.get('JP 01')).toBe(1)
     scope.stop()
   })
 

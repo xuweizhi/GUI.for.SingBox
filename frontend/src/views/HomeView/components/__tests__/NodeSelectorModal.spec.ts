@@ -72,6 +72,7 @@ const createController = () => {
         category: 'timeout' as const,
         message: 'context deadline exceeded',
         attempts: 3,
+        maxAttempts: 3,
       },
       originalIndex: 2,
     },
@@ -221,6 +222,20 @@ describe('NodeSelectorModal', () => {
     expect(wrapper.find('[data-delay="JP 01"] .delay-failed').exists()).toBe(false)
   })
 
+  it('shows the actual attempt limit for a failed delay test', () => {
+    const controller = createController()
+    const failedNode = controller.nodes.value.find((node) => node.name === 'US Timeout')!
+    failedNode.error = {
+      category: 'timeout',
+      message: 'timeout',
+      attempts: 1,
+      maxAttempts: 1,
+    }
+    const wrapper = mountModal(controller)
+
+    expect(wrapper.get('[data-delay="US Timeout"] .delay-failed').text()).toContain('1/1')
+  })
+
   it('exposes the original delay error through the fast tips directive', () => {
     const failureButton = mountModal().get('[data-delay="US Timeout"]')
 
@@ -247,7 +262,7 @@ describe('NodeSelectorModal', () => {
       },
       delay: null,
       delayStatus: 'failed',
-      error: { category: 'timeout', message: 'new timeout error', attempts: 3 },
+      error: { category: 'timeout', message: 'new timeout error', attempts: 3, maxAttempts: 3 },
       originalIndex: 1,
     }
     await wrapper.vm.$nextTick()

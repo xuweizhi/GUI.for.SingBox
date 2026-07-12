@@ -176,7 +176,7 @@ const testNode = async (name: string) => {
             </span>
             <span v-else-if="node.delayStatus === 'failed'" class="delay-failed">
               {{ t(`home.nodes.delayError.${node.error?.category ?? 'unknown'}`) }} ·
-              {{ node.error?.attempts ?? 1 }}/3
+              {{ node.error?.attempts ?? 1 }}/{{ node.error?.maxAttempts ?? 3 }}
             </span>
             <span v-else>{{ t('home.nodes.untested') }}</span>
           </Button>
