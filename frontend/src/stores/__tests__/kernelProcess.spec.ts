@@ -18,4 +18,15 @@ describe('kernel process helpers', () => {
 
     expect(findListeningProcess).toHaveBeenCalledWith(20123)
   })
+
+  it('falls back to the pid file when the listening process cannot be found', async () => {
+    const findListeningProcess = vi.fn().mockRejectedValue('process not found')
+    const readPidFile = vi.fn().mockResolvedValue('105992')
+
+    await expect(resolveCoreStopPid(-1, 20123, findListeningProcess, readPidFile)).resolves.toBe(
+      105992,
+    )
+
+    expect(readPidFile).toHaveBeenCalledOnce()
+  })
 })

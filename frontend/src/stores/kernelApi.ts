@@ -440,6 +440,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
         corePid.value,
         getCoreControllerPort(),
         FindListeningProcess,
+        () => ReadFile(CorePidFilePath),
       )
       corePid.value = pid
       await KillProcess(pid)
