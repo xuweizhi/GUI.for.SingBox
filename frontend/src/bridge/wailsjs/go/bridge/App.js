@@ -54,12 +54,12 @@ export function FileExists(arg1) {
   return window['go']['bridge']['App']['FileExists'](arg1);
 }
 
-export function FindListeningProcess(arg1) {
-  return window['go']['bridge']['App']['FindListeningProcess'](arg1);
-}
-
 export function FileSHA256(arg1) {
   return window['go']['bridge']['App']['FileSHA256'](arg1);
+}
+
+export function FindListeningProcess(arg1) {
+  return window['go']['bridge']['App']['FindListeningProcess'](arg1);
 }
 
 export function GetEnv(arg1) {

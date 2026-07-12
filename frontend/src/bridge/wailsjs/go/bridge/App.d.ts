@@ -28,9 +28,9 @@ export function ExitApp():Promise<void>;
 
 export function FileExists(arg1:string):Promise<bridge.FlagResult>;
 
-export function FindListeningProcess(arg1:number):Promise<bridge.FlagResult>;
-
 export function FileSHA256(arg1:string):Promise<bridge.FlagResult>;
+
+export function FindListeningProcess(arg1:number):Promise<bridge.FlagResult>;
 
 export function GetEnv(arg1:string):Promise<any>;
 
