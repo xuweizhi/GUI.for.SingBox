@@ -441,6 +441,8 @@ export default {
       testGroup: 'Test Group',
       testProgress: 'Completed {0}/{1}, success {2}, failed {3}',
       attempts: 'attempts',
+      queued: 'Queued',
+      retryQueued: 'Waiting to retry',
       delayError: {
         dns: 'DNS failure',
         authentication: 'Authentication failure',
@@ -708,7 +710,8 @@ export default {
     'update::ruleset': 'update::ruleset',
     'update::plugin': 'update::plugin',
     'update::all::subscription': 'update::all::subscription',
-    'update::all::subscription::sync-outbound-refs': 'update::all::subscription::sync-outbound-refs',
+    'update::all::subscription::sync-outbound-refs':
+      'update::all::subscription::sync-outbound-refs',
     'update::all::ruleset': 'update::all::ruleset',
     'update::all::plugin': 'update::all::plugin',
     'run::plugin': 'run::plugin',

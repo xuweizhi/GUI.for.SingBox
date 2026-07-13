@@ -14,6 +14,7 @@ const {
   selectedGroupName,
   query,
   sortByDelay,
+  nodePhases,
   testingNodes,
   switchingNode,
   batch,
@@ -169,7 +170,13 @@ const testNode = async (name: string) => {
             class="ml-auto"
             @click.stop="testNode(node.name)"
           >
-            <span v-if="node.delayStatus === 'success'" class="delay-success">
+            <span v-if="nodePhases.get(node.name) === 'queued'">
+              {{ t('home.nodes.queued') }}
+            </span>
+            <span v-else-if="nodePhases.get(node.name) === 'retry-queued'">
+              {{ t('home.nodes.retryQueued') }}
+            </span>
+            <span v-else-if="node.delayStatus === 'success'" class="delay-success">
               {{ node.delay }} ms<span v-if="(node.attempts ?? 1) > 1">
                 · {{ node.attempts }} {{ t('home.nodes.attempts') }}</span
               >

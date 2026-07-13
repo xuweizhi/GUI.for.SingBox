@@ -5,6 +5,7 @@ import {
   filterAndSortNodes,
   getDelayTestableNodeNames,
   isDelayTestableNode,
+  isRetryableDelayError,
   getVisibleGroups,
   resolvePrimaryNode,
   resolveProxyChain,
@@ -231,6 +232,26 @@ describe('classifyDelayError', () => {
     ['generic transport failure', 'unknown'],
   ] as const)('classifies %s as %s', (message, category) => {
     expect(classifyDelayError(message)).toBe(category)
+  })
+
+  it.each([
+    ['timeout', true],
+    ['connection-reset', true],
+    ['network-unreachable', true],
+    ['dns', false],
+    ['authentication', false],
+    ['tls', false],
+    ['connection-refused', false],
+    ['unknown', false],
+  ] as const)('marks %s retryable as %s', (category, retryable) => {
+    expect(isRetryableDelayError(category)).toBe(retryable)
+  })
+
+  it('classifies unexpected EOF as a retryable connection reset', () => {
+    const category = classifyDelayError('unexpected EOF')
+
+    expect(category).toBe('connection-reset')
+    expect(isRetryableDelayError(category)).toBe(true)
   })
 })
 

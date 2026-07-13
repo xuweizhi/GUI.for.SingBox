@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onActivated } from 'vue'
+import { ref, computed, onActivated, onScopeDispose } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { getProxyDelay } from '@/api/kernel'
 import {
   ControllerCloseModeOptions,
   DefaultCardColumns,
@@ -14,18 +13,27 @@ import {
 import { ControllerCloseMode } from '@/enums/app'
 import { useBool } from '@/hooks'
 import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
-import {
-  ignoredError,
-  sleep,
-  handleUseProxy,
-  message,
-  createAsyncPool,
-  buildSmartRegExp,
-} from '@/utils'
+import { ignoredError, sleep, handleUseProxy, message, buildSmartRegExp } from '@/utils'
 import { getDelayTestableNodeNames, isDelayTestableNode } from '@/views/HomeView/nodeController'
+import { nodeLatencyScheduler } from '@/views/HomeView/nodeLatencyScheduler'
+
+import type {
+  LatencyResult,
+  LatencyTaskHandle,
+  LatencyTaskSummary,
+} from '@/views/HomeView/nodeLatencyScheduler'
 
 const expandedSet = ref<Set<string>>(new Set())
 const loadingSet = ref<Set<string>>(new Set())
+const resultCache = new Map<
+  string,
+  { result?: LatencyResult; owners: Set<symbol> }
+>()
+const handles = new Set<LatencyTaskHandle>()
+const destroyTimers = new Set<ReturnType<typeof setTimeout>>()
+let refreshQueue = Promise.resolve()
+let pendingRefreshes = 0
+let disposed = false
 const filterKeywordsMap = ref<Record<string, string>>({})
 
 const loading = ref(false)
@@ -109,85 +117,158 @@ const isExpanded = (group: string) => expandedSet.value.has(group)
 
 const isLoading = (group: string) => loadingSet.value.has(group)
 
+const retainLoading = (names: string[], owner: symbol) =>
+  names.forEach((name) => {
+    const cached = resultCache.get(name) || { owners: new Set<symbol>() }
+    cached.owners.add(owner)
+    resultCache.set(name, cached)
+    loadingSet.value.add(name)
+  })
+
+const releaseLoading = (names: string[], owner: symbol) =>
+  names.forEach((name) => {
+    const cached = resultCache.get(name)
+    cached?.owners.delete(owner)
+    if (!cached?.owners.size && !pendingRefreshes) {
+      resultCache.delete(name)
+      loadingSet.value.delete(name)
+    } else if (!cached?.owners.size) {
+      loadingSet.value.delete(name)
+    }
+  })
+
+const applyResult = (result: LatencyResult, owner?: symbol) => {
+  if (disposed) return
+  const cached = resultCache.get(result.name)
+  if (owner && cached?.owners.has(owner)) cached.result = result
+  const proxy = kernelApiStore.proxies[result.name]
+  if (!proxy) return
+  proxy.history ||= []
+  const delay = result.ok ? result.delay : 0
+  if (proxy.history[proxy.history.length - 1]?.delay !== delay) proxy.history.push({ delay })
+}
+
+const taskOptions = (nodes: string[]) => ({
+  nodes,
+  url: appSettings.app.kernel.testUrl || DefaultTestURL,
+  timeout: appSettings.app.kernel.testTimeout || DefaultTestTimeout,
+  concurrency: appSettings.app.kernel.concurrencyLimit || DefaultConcurrencyLimit,
+})
+
+const enqueueRefresh = () => {
+  pendingRefreshes++
+  refreshQueue = refreshQueue.then(async () => {
+    try {
+      if (disposed) return
+      await ignoredError(kernelApiStore.refreshProviderProxies)
+      if (disposed) return
+      resultCache.forEach(({ result }) => result && applyResult(result))
+    } finally {
+      pendingRefreshes--
+    }
+  })
+  return refreshQueue
+}
+
+const finishTask = async (handle: LatencyTaskHandle, owned: string[], owner: symbol) => {
+  try {
+    const summary = await handle.done
+    await enqueueRefresh()
+    return summary
+  } finally {
+    handles.delete(handle)
+    if (!disposed) {
+      releaseLoading(owned, owner)
+      if (!pendingRefreshes) {
+        resultCache.forEach(({ owners }, name) => !owners.size && resultCache.delete(name))
+      }
+    }
+  }
+}
+
 const isFiltered = (group: string) => filterKeywordsMap.value[group]
 
-const handleGroupDelay = async (group: string) => {
+const handleGroupDelay = (group: string) => {
   const _group = kernelApiStore.proxies[group]
   if (_group) {
-    const names = getDelayTestableNodeNames(_group, kernelApiStore.proxies)
-    let index = 0
+    if (isLoading(group)) return
+    const names = getDelayTestableNodeNames(_group, kernelApiStore.proxies).filter(
+      (name) => !isLoading(name),
+    )
+    if (!names.length) return
+    const owned = [group, ...names]
+    const owner = Symbol(group)
+    retainLoading(owned, owner)
+    let completed = 0
     let success = 0
     let failure = 0
-
-    const delayTest = async (proxy: string) => {
-      index += 1
-      update(`Testing... ${index} / ${names.length}, success: ${success} failure: ${failure}`)
-      const _proxy = kernelApiStore.proxies[proxy]
-      try {
-        loadingSet.value.add(proxy)
-        const { delay = 0 } = await getProxyDelay(
-          encodeURIComponent(proxy),
-          appSettings.app.kernel.testUrl || DefaultTestURL,
-          appSettings.app.kernel.testTimeout || DefaultTestTimeout,
-        )
-        success += 1
-        _proxy && _proxy.history.push({ delay })
-      } catch {
-        failure += 1
-        _proxy && _proxy.history.push({ delay: 0 })
-      }
-      update(`Testing... ${index} / ${names.length}, success: ${success} failure: ${failure}`)
-      loadingSet.value.delete(proxy)
-    }
-
-    loadingSet.value.add(group)
-    const { run, controller } = createAsyncPool(
-      appSettings.app.kernel.concurrencyLimit || DefaultConcurrencyLimit,
-      names,
-      delayTest,
-    )
     const {
       update,
       destroy,
       success: msgSuccess,
     } = message.info('Testing...', 99999, () => {
-      controller.cancel()
+      handle.cancel()
       message.warn('common.canceled')
     })
-    await run()
-    loadingSet.value.delete(group)
-    msgSuccess(
-      `Completed. ${index} / ${names.length}, success: ${success} failure: ${failure}`,
-    )
-    await sleep(3000)
-    destroy()
+    const handle = nodeLatencyScheduler.submit({
+      ...taskOptions(names),
+      onState: (_name, phase) => {
+        if (disposed || !['queued', 'testing', 'retry-queued'].includes(phase)) return
+        update(`Testing... ${completed} / ${names.length}, success: ${success} failure: ${failure}`)
+      },
+      onResult: (result) => {
+        if (disposed) return
+        applyResult(result, owner)
+        completed++
+        if (result.ok) success++
+        else failure++
+        update(`Testing... ${completed} / ${names.length}, success: ${success} failure: ${failure}`)
+      },
+    })
+    handles.add(handle)
+    void finishTask(handle, owned, owner).then((summary: LatencyTaskSummary) => {
+      if (disposed) return
+      if (summary.cancelled) {
+        destroy()
+        return
+      }
+      msgSuccess(
+        `Completed. ${summary.completed} / ${summary.total}, success: ${summary.success} failure: ${summary.failure}`,
+      )
+      const timer = setTimeout(() => {
+        destroyTimers.delete(timer)
+        destroy()
+      }, 3000)
+      destroyTimers.add(timer)
+    })
   }
 }
 
-const handleProxyDelay = async (proxy: string) => {
+const handleProxyDelay = (proxy: string) => {
   const target = kernelApiStore.proxies[proxy]
   if (!isDelayTestableNode(proxy, target)) {
     message.warn('home.nodes.notDelayTestable')
     return
   }
-  loadingSet.value.add(proxy)
-  try {
-    const { delay = 0 } = await getProxyDelay(
-      encodeURIComponent(proxy),
-      appSettings.app.kernel.testUrl || DefaultTestURL,
-      appSettings.app.kernel.testTimeout || DefaultTestTimeout,
-    )
-    target && target.history.push({ delay })
-  } catch (error: any) {
-    message.error(error + ': ' + proxy)
-  }
-  loadingSet.value.delete(proxy)
+  if (isLoading(proxy)) return
+  const owner = Symbol(proxy)
+  retainLoading([proxy], owner)
+  const handle = nodeLatencyScheduler.submit({
+    ...taskOptions([proxy]),
+    onResult: (result) => {
+      if (disposed) return
+      applyResult(result, owner)
+      if (!result.ok) message.error(`${result.message}: ${result.name}`)
+    },
+  })
+  handles.add(handle)
+  void finishTask(handle, [proxy], owner)
 }
 
 const handleRefresh = async () => {
   loading.value = true
   await ignoredError(kernelApiStore.refreshConfig)
-  await ignoredError(kernelApiStore.refreshProviderProxies)
+  await enqueueRefresh()
   await sleep(100)
   loading.value = false
 }
@@ -220,7 +301,15 @@ const handleResetMoreSettings = () => {
 }
 
 onActivated(() => {
-  kernelApiStore.refreshProviderProxies()
+  void enqueueRefresh()
+})
+
+onScopeDispose(() => {
+  disposed = true
+  handles.forEach((handle) => handle.cancel())
+  handles.clear()
+  destroyTimers.forEach((timer) => clearTimeout(timer))
+  destroyTimers.clear()
 })
 </script>
 
@@ -289,6 +378,7 @@ onActivated(() => {
           </template>
         </Input>
         <Button
+          :data-test="`group-delay-${group.name}`"
           v-tips="'home.overview.delayTest'"
           :loading="isLoading(group.name)"
           icon="speedTest"
@@ -321,6 +411,7 @@ onActivated(() => {
             @click="useProxyWithCatchError(group, proxy)"
           >
             <Button
+              :data-test="`proxy-delay-${proxy.name}`"
               :style="{ color: delayColor(proxy.delay) }"
               :loading="isLoading(proxy.name)"
               type="text"

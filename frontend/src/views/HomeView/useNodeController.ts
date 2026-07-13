@@ -1,20 +1,24 @@
 import { computed, onScopeDispose, ref } from 'vue'
 
-import { getProxyDelay } from '@/api/kernel'
 import { DefaultConcurrencyLimit, DefaultTestTimeout, DefaultTestURL } from '@/constant/app'
 import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
 import { handleUseProxy } from '@/utils/helper'
-import { createAsyncPool, normalizeErrorMessage } from '@/utils/others'
+import { normalizeErrorMessage } from '@/utils/others'
 import {
-  classifyDelayError,
   filterAndSortNodes,
   getDelayTestableNodeNames,
   isDelayTestableNode,
   getVisibleGroups,
   resolvePrimaryNode,
 } from '@/views/HomeView/nodeController'
+import { nodeLatencyScheduler } from '@/views/HomeView/nodeLatencyScheduler'
 
 import type { NodeDelayError, NodeMode } from '@/views/HomeView/nodeController'
+import type {
+  LatencyNodePhase,
+  LatencyResult,
+  LatencyTaskHandle,
+} from '@/views/HomeView/nodeLatencyScheduler'
 
 export type NodeOperationResult = { ok: true } | { ok: false; error: string }
 
@@ -28,9 +32,6 @@ export interface BatchTestState {
 }
 
 const POLL_INTERVAL = 5_000
-export const MAX_DELAY_ATTEMPTS = 3
-export const DELAY_RETRY_INTERVAL = 300
-
 const emptyBatch = (): BatchTestState => ({
   running: false,
   cancelled: false,
@@ -52,6 +53,7 @@ export const useNodeController = () => {
   const localDelays = ref(new Map<string, number>())
   const nodeAttempts = ref(new Map<string, number>())
   const testingNodes = ref(new Set<string>())
+  const nodePhases = ref(new Map<string, LatencyNodePhase>())
   const switchingNode = ref('')
   const batch = ref<BatchTestState>(emptyBatch())
   const stale = ref(false)
@@ -88,8 +90,32 @@ export const useNodeController = () => {
   let disposed = false
   let pollTimer: number | undefined
   let refreshPromise: Promise<void> | undefined
-  let poolController: { cancel: () => void } | undefined
+  let groupHandle: LatencyTaskHandle | undefined
+  const activeHandles = new Set<LatencyTaskHandle>()
   const protectedLocalResults = new Set<string>()
+  const nodeOwners = new Map<string, Set<symbol>>()
+
+  const acquireNodes = (names: string[]) => {
+    const token = Symbol('latency-task')
+    names.forEach((name) => {
+      const owners = nodeOwners.get(name) || new Set<symbol>()
+      owners.add(token)
+      nodeOwners.set(name, owners)
+      testingNodes.value.add(name)
+      protectedLocalResults.add(name)
+    })
+    return () => {
+      names.forEach((name) => {
+        const owners = nodeOwners.get(name)
+        owners?.delete(token)
+        if (owners?.size) return
+        nodeOwners.delete(name)
+        testingNodes.value.delete(name)
+        protectedLocalResults.delete(name)
+        if (nodePhases.value.get(name) === 'cancelled') nodePhases.value.delete(name)
+      })
+    }
+  }
 
   const refresh = () => {
     if (!kernelApiStore.running) return Promise.resolve()
@@ -112,6 +138,10 @@ export const useNodeController = () => {
               localDelays.value.delete(name)
               nodeAttempts.value.delete(name)
             }
+          })
+          nodePhases.value.forEach((_phase, name) => {
+            if (!kernelApiStore.proxies[name] && !nodeOwners.has(name))
+              nodePhases.value.delete(name)
           })
           stale.value = false
           refreshError.value = ''
@@ -187,77 +217,70 @@ export const useNodeController = () => {
     }
   }
 
-  const runNodeTest = async (
-    name: string,
-    options: { cancelled?: () => boolean; maxAttempts?: number } = {},
-  ): Promise<NodeOperationResult> => {
-    const proxy = kernelApiStore.proxies[name]
-    if (!proxy) {
-      return { ok: false, error: 'home.nodes.nodeMissing' }
-    }
-    if (!isDelayTestableNode(name, proxy)) {
-      return { ok: false, error: 'home.nodes.notDelayTestable' }
-    }
+  const applyState = (name: string, phase: LatencyNodePhase) => {
+    if (disposed) return
+    nodePhases.value.set(name, phase)
+  }
 
-    const maxAttempts = options.maxAttempts ?? MAX_DELAY_ATTEMPTS
-    let lastError = 'home.nodes.unavailable'
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        const { delay = 0 } = await getProxyDelay(
-          encodeURIComponent(name),
-          appSettingsStore.app.kernel.testUrl || DefaultTestURL,
-          appSettingsStore.app.kernel.testTimeout || DefaultTestTimeout,
-        )
-        if (delay <= 0) throw new Error('home.nodes.unavailable')
-        if (disposed || options.cancelled?.()) return { ok: false, error: 'common.canceled' }
-
-        proxy.history ||= []
-        proxy.history.push({ delay })
-        localDelays.value.set(name, delay)
-        nodeAttempts.value.set(name, attempt)
-        nodeErrors.value.delete(name)
-        protectedLocalResults.add(name)
-        return { ok: true }
-      } catch (error) {
-        lastError = normalizeErrorMessage(error)
-      }
-
-      if (disposed || options.cancelled?.()) return { ok: false, error: 'common.canceled' }
-      if (attempt < maxAttempts) {
-        await new Promise<void>((resolve) => window.setTimeout(resolve, DELAY_RETRY_INTERVAL))
-        if (disposed || options.cancelled?.()) return { ok: false, error: 'common.canceled' }
-      }
-    }
-
+  const applyResult = (result: LatencyResult) => {
+    if (disposed) return
+    const proxy = kernelApiStore.proxies[result.name]
+    if (!proxy) return
     proxy.history ||= []
-    proxy.history.push({ delay: 0 })
-    localDelays.value.set(name, 0)
-    nodeAttempts.value.delete(name)
-    nodeErrors.value.set(name, {
-      category: classifyDelayError(lastError),
-      message: lastError,
-      attempts: maxAttempts,
-      maxAttempts,
+    proxy.history.push({ delay: result.ok ? result.delay : 0 })
+    localDelays.value.set(result.name, result.ok ? result.delay : 0)
+    if (result.ok) {
+      nodeAttempts.value.set(result.name, result.attempts)
+      nodeErrors.value.delete(result.name)
+    } else {
+      nodeAttempts.value.delete(result.name)
+      nodeErrors.value.set(result.name, {
+        category: result.category,
+        message: result.message,
+        attempts: result.attempts,
+        maxAttempts: result.maxAttempts,
+      })
+    }
+  }
+
+  const submit = (names: string[], onResult: (result: LatencyResult) => void = applyResult) => {
+    const release = acquireNodes(names)
+    const handle = nodeLatencyScheduler.submit({
+      nodes: names,
+      url: appSettingsStore.app.kernel.testUrl || DefaultTestURL,
+      timeout: appSettingsStore.app.kernel.testTimeout || DefaultTestTimeout,
+      concurrency: appSettingsStore.app.kernel.concurrencyLimit || DefaultConcurrencyLimit,
+      onState: applyState,
+      onResult,
     })
-    protectedLocalResults.add(name)
-    return { ok: false, error: lastError }
+    activeHandles.add(handle)
+    void handle.done.finally(() => activeHandles.delete(handle))
+    return { handle, release }
   }
 
   const testNode = async (name: string): Promise<NodeOperationResult> => {
     if (testingNodes.value.has(name)) {
       return { ok: false, error: 'home.nodes.alreadyTesting' }
     }
-    testingNodes.value.add(name)
+    const proxy = kernelApiStore.proxies[name]
+    if (!proxy) return { ok: false, error: 'home.nodes.nodeMissing' }
+    if (!isDelayTestableNode(name, proxy))
+      return { ok: false, error: 'home.nodes.notDelayTestable' }
+    let result: LatencyResult | undefined
+    const { handle, release } = submit([name], (value) => {
+      result = value
+      applyResult(value)
+    })
     try {
-      const result = await runNodeTest(name)
-      if (!result.ok && result.error === 'home.nodes.notDelayTestable') {
-        return result
-      }
-      await refresh().catch(() => undefined)
-      return result
+      const summary = await handle.done
+      if (!disposed) await refresh().catch(() => undefined)
+      if (disposed || summary.cancelled) return { ok: false, error: 'common.canceled' }
+      return result?.ok
+        ? { ok: true }
+        : { ok: false, error: result?.message || 'home.nodes.unavailable' }
     } finally {
-      protectedLocalResults.delete(name)
-      testingNodes.value.delete(name)
+      activeHandles.delete(handle)
+      release()
     }
   }
 
@@ -267,8 +290,6 @@ export const useNodeController = () => {
     const names = [
       ...new Set(getDelayTestableNodeNames(selectedGroup.value, kernelApiStore.proxies)),
     ].filter((name) => !testingNodes.value.has(name))
-    const completedNames = new Set<string>()
-    const busyNames = new Set<string>()
     batch.value = {
       running: true,
       cancelled: false,
@@ -277,46 +298,38 @@ export const useNodeController = () => {
       success: 0,
       failure: 0,
     }
+    if (!names.length) {
+      batch.value.running = false
+      return
+    }
 
-    const { run, controller } = createAsyncPool(
-      appSettingsStore.app.kernel.concurrencyLimit || DefaultConcurrencyLimit,
-      names,
-      async (name) => {
-        if (testingNodes.value.has(name)) {
-          return { ok: false, error: 'home.nodes.alreadyTesting' } satisfies NodeOperationResult
-        }
-        testingNodes.value.add(name)
-        busyNames.add(name)
-        const result = await runNodeTest(name, {
-          cancelled: () => batch.value.cancelled,
-          maxAttempts: 1,
-        })
-        if (!disposed && (result.ok || result.error !== 'common.canceled')) {
-          completedNames.add(name)
-          batch.value.completed += 1
-          result.ok ? (batch.value.success += 1) : (batch.value.failure += 1)
-        }
-        return result
-      },
-    )
-    poolController = controller
+    const { handle, release } = submit(names)
+    groupHandle = handle
 
     try {
-      await run()
+      const summary = await handle.done
+      if (!disposed)
+        batch.value = {
+          running: false,
+          cancelled: summary.cancelled,
+          total: summary.total,
+          completed: summary.completed,
+          success: summary.success,
+          failure: summary.failure,
+        }
     } finally {
-      poolController = undefined
+      groupHandle = undefined
       if (!disposed) {
         batch.value.running = false
         await refresh().catch(() => undefined)
       }
-      busyNames.forEach((name) => testingNodes.value.delete(name))
-      completedNames.forEach((name) => protectedLocalResults.delete(name))
+      release()
     }
   }
 
   const cancelGroupTest = () => {
     batch.value.cancelled = true
-    poolController?.cancel()
+    groupHandle?.cancel()
   }
 
   const stopPolling = () => {
@@ -341,7 +354,7 @@ export const useNodeController = () => {
 
   onScopeDispose(() => {
     disposed = true
-    poolController?.cancel()
+    activeHandles.forEach((handle) => handle.cancel())
     stopPolling()
   })
 
@@ -351,6 +364,7 @@ export const useNodeController = () => {
     sortByDelay,
     nodeErrors,
     nodeAttempts,
+    nodePhases,
     testingNodes,
     switchingNode,
     batch,

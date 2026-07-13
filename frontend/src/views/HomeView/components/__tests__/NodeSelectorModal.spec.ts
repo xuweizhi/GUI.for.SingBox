@@ -23,6 +23,9 @@ const createController = () => {
   const selectedGroupName = ref('Proxy')
   const query = ref('')
   const sortByDelay = ref(false)
+  const nodePhases = ref(
+    new Map<string, 'queued' | 'testing' | 'retry-queued' | 'success' | 'failed' | 'cancelled'>(),
+  )
   const nodes = ref([
     {
       name: 'HK 01',
@@ -91,6 +94,7 @@ const createController = () => {
     selectedGroupName,
     query,
     sortByDelay,
+    nodePhases,
     nodeErrors: ref(new Map()),
     testingNodes: ref(new Set<string>()),
     switchingNode: ref(''),
@@ -206,7 +210,10 @@ describe('NodeSelectorModal', () => {
   })
 
   it('shows localized successful, failed and untested delay results', () => {
-    const wrapper = mountModal()
+    const controller = createController()
+    controller.nodePhases.value.set('HK 01', 'success')
+    controller.nodePhases.value.set('US Timeout', 'failed')
+    const wrapper = mountModal(controller)
 
     const success = wrapper.get('[data-delay="HK 01"] .delay-success').text()
     expect(success).toContain('80 ms')
@@ -220,6 +227,19 @@ describe('NodeSelectorModal', () => {
     expect(wrapper.get('[data-delay="JP 01"]').text()).toContain('home.nodes.untested')
     expect(wrapper.find('[data-delay="JP 01"] .delay-success').exists()).toBe(false)
     expect(wrapper.find('[data-delay="JP 01"] .delay-failed').exists()).toBe(false)
+  })
+
+  it('shows queued phases while keeping testing as loading', () => {
+    const controller = createController()
+    controller.nodePhases.value.set('HK 01', 'queued')
+    controller.nodePhases.value.set('JP 01', 'retry-queued')
+    controller.nodePhases.value.set('US Timeout', 'testing')
+    controller.testingNodes.value.add('US Timeout')
+    const wrapper = mountModal(controller)
+
+    expect(wrapper.get('[data-delay="HK 01"]').text()).toContain('home.nodes.queued')
+    expect(wrapper.get('[data-delay="JP 01"]').text()).toContain('home.nodes.retryQueued')
+    expect(wrapper.get('[data-delay="US Timeout"]').attributes('loading')).toBe('true')
   })
 
   it('shows the actual attempt limit for a failed delay test', () => {

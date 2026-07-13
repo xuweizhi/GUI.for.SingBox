@@ -439,6 +439,8 @@ export default {
       testGroup: '整组测速',
       testProgress: '已完成 {0}/{1}，成功 {2}，失败 {3}',
       attempts: '次',
+      queued: '排队中',
+      retryQueued: '待补测',
       delayError: {
         dns: 'DNS 失败',
         authentication: '认证失败',

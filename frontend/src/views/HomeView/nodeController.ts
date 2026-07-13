@@ -67,6 +67,9 @@ export const classifyDelayError = (error: string): DelayErrorCategory => {
   return 'unknown'
 }
 
+export const isRetryableDelayError = (category: DelayErrorCategory): boolean =>
+  ['timeout', 'connection-reset', 'network-unreachable'].includes(category)
+
 const latestDelay = (proxy?: CoreApiProxy) => {
   const history = proxy?.history || []
   return history.length ? history[history.length - 1]!.delay : null
