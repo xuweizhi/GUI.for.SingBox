@@ -10,7 +10,7 @@ Type=simple
 User=gui-for-singbox
 Group=gui-for-singbox
 WorkingDirectory=/opt/GUI.for.SingBox
-Environment="WEBUI_LISTEN=127.0.0.1:18080"
+Environment="WEBUI_LISTEN=0.0.0.0:18083"
 Environment="WEBUI_TOKEN="
 EnvironmentFile=-/etc/default/gui.for.singbox-headless
 ExecStart=/opt/GUI.for.SingBox/GUI.for.SingBox --headless --webui-listen=${WEBUI_LISTEN} --webui-token=${WEBUI_TOKEN}
