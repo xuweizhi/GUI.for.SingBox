@@ -87,7 +87,7 @@ func TestExecBackgroundAppendsManagedLogFile(t *testing.T) {
 	Env.BasePath = tmp
 	t.Cleanup(func() { Env.BasePath = previousBasePath })
 
-	logPath := filepath.Join("logs", "core-2026-06-19.log")
+	logPath := filepath.Join("logs", "core-"+time.Now().Format("2006-01-02")+".log")
 	absLogPath := filepath.Join(tmp, logPath)
 	if err := os.MkdirAll(filepath.Dir(absLogPath), 0o755); err != nil {
 		t.Fatal(err)
