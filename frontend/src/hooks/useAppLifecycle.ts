@@ -52,7 +52,9 @@ export const useAppLifecycle = () => {
     if (event.key !== 'Escape') return
 
     const closeFn = appStore.modalStack.at(-1)
-    closeFn?.()
+    void Promise.resolve()
+      .then(() => closeFn?.())
+      .catch((error) => console.error(error))
   }
 
   window.addEventListener('keydown', handleKeydown)

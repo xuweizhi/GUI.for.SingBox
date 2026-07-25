@@ -1,26 +1,30 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const bridgeMocks = vi.hoisted(() => ({
+  ClearScheduledTaskWorkerLogs: vi.fn(),
+  Cron: vi.fn(function () {
+    return { stop: vi.fn() }
+  }),
+  EventsOn: vi.fn(),
   GetScheduledTaskWorkerLogs: vi.fn(),
+  GetScheduledTaskWorkerStatus: vi.fn(),
   RecordScheduledTaskLog: vi.fn(),
   RunScheduledTaskWorker: vi.fn(),
 }))
 
+vi.mock('croner', () => ({ Cron: bridgeMocks.Cron }))
+
 vi.mock('@/bridge', () => ({
-  EventsOn: vi.fn(),
+  EventsOn: bridgeMocks.EventsOn,
   ReadFile: vi.fn(),
   WriteFile: vi.fn(),
   Notify: vi.fn(),
   GetScheduledTaskWorkerLogs: bridgeMocks.GetScheduledTaskWorkerLogs,
-  GetScheduledTaskWorkerStatus: vi.fn().mockResolvedValue({
-    available: false,
-    nodePath: '',
-    supportedTypes: [],
-  }),
+  GetScheduledTaskWorkerStatus: bridgeMocks.GetScheduledTaskWorkerStatus,
   ReloadScheduledTaskWorker: vi.fn(),
   RunScheduledTaskWorker: bridgeMocks.RunScheduledTaskWorker,
-  ClearScheduledTaskWorkerLogs: vi.fn(),
+  ClearScheduledTaskWorkerLogs: bridgeMocks.ClearScheduledTaskWorkerLogs,
   RecordScheduledTaskLog: bridgeMocks.RecordScheduledTaskLog,
   ReadDir: vi.fn().mockResolvedValue([]),
   GetSystemProxyBypass: vi.fn(),
@@ -71,9 +75,74 @@ Object.defineProperty(window, 'matchMedia', {
 })
 
 import { ScheduledTasksType } from '@/enums/app'
-import { useScheduledTasksStore, useSubscribesStore } from '@/stores'
+import { useLogsStore, useScheduledTasksStore, useSubscribesStore } from '@/stores'
 
 describe('scheduledtasks store', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    bridgeMocks.GetScheduledTaskWorkerLogs.mockResolvedValue([])
+    bridgeMocks.GetScheduledTaskWorkerStatus.mockResolvedValue({
+      available: false,
+      nodePath: '',
+      supportedTypes: [],
+    })
+  })
+
+  it('does not create a frontend cron for a worker-managed task', async () => {
+    setActivePinia(createPinia())
+    bridgeMocks.GetScheduledTaskWorkerStatus.mockResolvedValue({
+      available: true,
+      nodePath: '/usr/bin/node',
+      supportedTypes: [ScheduledTasksType.UpdatePlugin],
+    })
+    const store = useScheduledTasksStore()
+    store.scheduledtasks.push(createTask(ScheduledTasksType.UpdatePlugin))
+
+    await store.setupScheduledTasks()
+
+    expect(bridgeMocks.Cron).not.toHaveBeenCalled()
+  })
+
+  it('creates a fallback frontend cron when the worker is unavailable', async () => {
+    setActivePinia(createPinia())
+    const store = useScheduledTasksStore()
+    store.scheduledtasks.push(createTask(ScheduledTasksType.UpdatePlugin))
+
+    await store.setupScheduledTasks()
+
+    expect(bridgeMocks.Cron).toHaveBeenCalledOnce()
+    expect(bridgeMocks.Cron).toHaveBeenCalledWith('* * * * * *', expect.any(Function))
+  })
+
+  it('hydrates worker logs and applies log events to task lastTime', async () => {
+    setActivePinia(createPinia())
+    const workerLog = createLog(100)
+    const eventLog = createLog(300)
+    bridgeMocks.GetScheduledTaskWorkerLogs.mockResolvedValue([workerLog])
+    const store = useScheduledTasksStore()
+    const logsStore = useLogsStore()
+    store.scheduledtasks.push(createTask(ScheduledTasksType.UpdatePlugin))
+
+    await store.setupScheduledTasks()
+    const eventHandler = bridgeMocks.EventsOn.mock.calls[0]?.[1]
+    eventHandler(eventLog)
+
+    expect(logsStore.scheduledtasksLogs).toEqual([eventLog, workerLog])
+    expect(store.scheduledtasks[0]?.lastTime).toBe(300)
+  })
+
+  it('clears frontend logs and the backend worker log store', async () => {
+    setActivePinia(createPinia())
+    const store = useScheduledTasksStore()
+    const logsStore = useLogsStore()
+    logsStore.scheduledtasksLogs.push(createLog(100))
+
+    await store.clearScheduledTaskLogs()
+
+    expect(logsStore.scheduledtasksLogs).toEqual([])
+    expect(bridgeMocks.ClearScheduledTaskWorkerLogs).toHaveBeenCalledOnce()
+  })
+
   it('updates all subscriptions before syncing outbound refs', async () => {
     setActivePinia(createPinia())
     const calls: string[] = []
@@ -181,4 +250,26 @@ describe('scheduledtasks store', () => {
 
     await expect(scheduledTasksStore.runScheduledTask('task-1')).resolves.toEqual(workerLog)
   })
+})
+
+const createTask = (type: App.ScheduledTask['type']): App.ScheduledTask => ({
+  id: 'task-1',
+  name: 'Task',
+  type,
+  subscriptions: [],
+  rulesets: [],
+  plugins: [],
+  script: '',
+  cron: '* * * * * *',
+  notification: false,
+  disabled: false,
+  lastTime: 0,
+})
+
+const createLog = (startTime: number) => ({
+  id: 'task-1',
+  name: 'Task',
+  startTime,
+  endTime: startTime + 10,
+  result: [{ ok: true, result: 'updated' }],
 })

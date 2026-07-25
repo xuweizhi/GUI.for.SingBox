@@ -2448,7 +2448,7 @@ func (w *scheduledTaskWorkerSupervisor) getSystemProxy() (string, error) {
 			"ProxyEnable",
 			"/t",
 			"REG_DWORD",
-		}, ExecOptions{Convert: true})
+		}, ExecOptions{})
 		if !enabled.Flag {
 			return "", nil
 		}
@@ -2462,7 +2462,7 @@ func (w *scheduledTaskWorkerSupervisor) getSystemProxy() (string, error) {
 			"ProxyServer",
 			"/t",
 			"REG_SZ",
-		}, ExecOptions{Convert: true})
+		}, ExecOptions{})
 		if !server.Flag {
 			return "", nil
 		}

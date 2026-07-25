@@ -5,9 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { ProcessMemory } from '@/bridge'
 import { ModeOptions } from '@/constant/kernel'
 import { useEnvStore, useAppStore, useKernelApiStore, useAppSettingsStore } from '@/stores'
-import { formatBytes, handleChangeMode, message } from '@/utils'
-
-import { useModal } from '@/components/Modal'
+import { formatBytes, handleChangeMode, message, modal } from '@/utils'
 
 import CommonController from './CommonController.vue'
 import ConnectionsController from './ConnectionsController.vue'
@@ -26,7 +24,6 @@ const statistics = ref({
 })
 
 const { t } = useI18n()
-const [Modal, modalApi] = useModal({})
 const appStore = useAppStore()
 const envStore = useEnvStore()
 const appSettings = useAppSettingsStore()
@@ -51,7 +48,7 @@ const handleStopKernel = async () => {
 }
 
 const handleShowApiLogs = () => {
-  modalApi.setProps({
+  const m = modal({
     title: 'Logs',
     cancelText: 'common.close',
     width: '90',
@@ -59,11 +56,11 @@ const handleShowApiLogs = () => {
     submit: false,
     maskClosable: true,
   })
-  modalApi.setContent(LogsController).open()
+  m.setContent(LogsController).open()
 }
 
 const handleShowApiConnections = () => {
-  modalApi.setProps({
+  const m = modal({
     title: 'home.overview.connections',
     cancelText: 'common.close',
     width: '90',
@@ -71,7 +68,7 @@ const handleShowApiConnections = () => {
     submit: false,
     maskClosable: true,
   })
-  modalApi.setContent(ConnectionsController).open()
+  m.setContent(ConnectionsController).open()
 }
 
 const handleToggleRealMemoryUsage = () => {
@@ -79,14 +76,14 @@ const handleToggleRealMemoryUsage = () => {
 }
 
 const handleShowSettings = () => {
-  modalApi.setProps({
+  const m = modal({
     title: 'home.overview.settings',
     cancelText: 'common.close',
     width: '90',
     submit: false,
     maskClosable: true,
   })
-  modalApi.setContent(CommonController).open()
+  m.setContent(CommonController).open()
 }
 
 const onTunSwitchChange = async (enable: boolean) => {
@@ -163,8 +160,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center rounded-8 px-8 py-4" style="background-color: var(--card-bg)">
+  <div class="home-overview">
+    <div
+      class="overview-toolbar flex items-center rounded-8 px-8 py-4"
+      style="background-color: var(--card-bg)"
+    >
       <Button type="text" size="small" icon="settings" @click="handleShowSettings" />
       <Switch
         v-model="envStore.systemProxy"
@@ -210,33 +210,41 @@ onUnmounted(() => {
         @click="handleStopKernel"
       />
     </div>
-    <div class="overview-cards grid mt-20 gap-12">
+    <div class="home-stats overview-cards grid mt-20 gap-12">
       <CurrentNodeCard />
-      <Card :title="t('home.overview.realtimeTraffic')">
-        <div class="py-8 text-12">
-          ↑ {{ formatBytes(statistics.upload) }}/s ↓ {{ formatBytes(statistics.download) }}/s
+      <Card
+        :title="t('home.overview.realtimeTraffic')"
+        class="home-stat-card home-stat-card--realtime flex-1"
+      >
+        <div class="home-stat-card__value flex gap-8 py-8 text-12">
+          <span class="metric metric--upload">↑ {{ formatBytes(statistics.upload) }}/s</span>
+          <span class="metric metric--download">↓ {{ formatBytes(statistics.download) }}/s</span>
         </div>
       </Card>
-      <Card :title="t('home.overview.totalTraffic')">
-        <div class="py-8 text-12">
-          ↑ {{ formatBytes(statistics.uploadTotal) }} ↓ {{ formatBytes(statistics.downloadTotal) }}
+      <Card
+        :title="t('home.overview.totalTraffic')"
+        class="home-stat-card home-stat-card--total flex-1"
+      >
+        <div class="home-stat-card__value flex gap-8 py-8 text-12">
+          <span class="metric metric--upload">↑ {{ formatBytes(statistics.uploadTotal) }}</span>
+          <span class="metric metric--download">↓ {{ formatBytes(statistics.downloadTotal) }}</span>
         </div>
       </Card>
       <Card
         :title="t('home.overview.connections')"
-        class="cursor-pointer"
+        class="home-stat-card home-stat-card--connections cursor-pointer"
         @click="handleShowApiConnections"
       >
-        <div class="py-8 text-12">
+        <div class="home-stat-card__value py-8 text-12">
           {{ statistics.connections.length }}
         </div>
       </Card>
       <Card
         :title="t('home.overview.memory')"
-        class="cursor-pointer"
+        class="home-stat-card home-stat-card--memory cursor-pointer"
         @click="handleToggleRealMemoryUsage"
       >
-        <div class="py-8 text-12">
+        <div class="home-stat-card__value py-8 text-12">
           {{ formatBytes(statistics.inuse) }}
           <span v-if="appSettings.app.kernel.realMemoryUsage">
             / ({{ formatBytes(statistics.memUsage) }})
@@ -244,9 +252,10 @@ onUnmounted(() => {
         </div>
       </Card>
     </div>
-    <div class="flex">
-      <div class="w-[60%]">
-        <div class="py-16 font-bold" style="color: var(--card-color)">
+    <div class="home-dashboard flex">
+      <div class="traffic-panel w-[60%]">
+        <div class="traffic-panel__art" aria-hidden="true"></div>
+        <div class="traffic-panel__title py-16 font-bold" style="color: var(--card-color)">
           {{ t('home.overview.traffic') }}
         </div>
         <TrafficChart
@@ -254,16 +263,17 @@ onUnmounted(() => {
           :legend="[t('home.overview.transmit'), t('home.overview.receive')]"
         />
       </div>
-      <div class="ml-12 flex-1">
-        <div class="py-16 font-bold" style="color: var(--card-color)">
+      <div class="mode-panel ml-12 flex-1">
+        <div class="mode-panel__title py-16 font-bold" style="color: var(--card-color)">
           {{ t('kernel.mode') }}
         </div>
-        <div class="flex flex-col gap-12">
+        <div class="mode-panel__list flex flex-col gap-12">
           <Card
             v-for="mode in ModeOptions"
             :key="mode.value"
             :selected="kernelApiStore.config.mode === mode.value"
             :title="t(mode.label)"
+            :class="['home-mode-card', `home-mode-card--${String(mode.value).toLowerCase()}`]"
             class="cursor-pointer"
             @click="handleChangeMode(mode.value as any)"
           >
@@ -273,8 +283,6 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
-
-  <Modal />
 </template>
 
 <style lang="less" scoped>

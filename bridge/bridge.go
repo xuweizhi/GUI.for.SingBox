@@ -30,7 +30,7 @@ var Env = &EnvResult{
 	WebviewPath:  "",
 	Args:         nil,
 	AppName:      "",
-	AppVersion:   "v1.25.4",
+	AppVersion:   "v1.26.1",
 	BasePath:     "",
 	OS:           sysruntime.GOOS,
 	ARCH:         sysruntime.GOARCH,

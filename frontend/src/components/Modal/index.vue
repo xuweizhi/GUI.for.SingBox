@@ -3,7 +3,7 @@ export const IS_IN_MODAL = 'IS_IN_MODAL'
 </script>
 
 <script setup lang="ts">
-import { computed, markRaw, provide, ref, watch } from 'vue'
+import { computed, markRaw, nextTick, provide, ref, watch } from 'vue'
 
 import { useBool } from '@/hooks'
 import { useAppStore } from '@/stores'
@@ -88,51 +88,158 @@ const appStore = useAppStore()
 const [isMaximize, toggleMaximize] = useBool(false)
 const [isMinimize, toggleMinimize] = useBool(false)
 
-let resolveAfterLeave: (() => void) | undefined
-let actionClosing = false
+interface CloseOptions {
+  isOk: boolean
+  runAction: boolean
+  waitForAnimation: boolean
+  destroy: boolean
+  restoreOnFailure: boolean
+}
 
-const handleAction = async (isOk: boolean, waitForAnimation = true, forceDestroy = false) => {
-  const loading = isOk ? submitLoading : cancelLoading
-  const action = isOk ? props.onOk : props.onCancel
+interface CloseContext {
+  promise: Promise<void>
+  resolve: () => void
+  reject: (error: unknown) => void
+  options: CloseOptions
+  minimizeRequested: boolean
+}
+
+type CloseState =
+  | { phase: 'idle' }
+  | { phase: 'running-hooks'; context: CloseContext }
+  | { phase: 'leaving'; context: CloseContext; resolveLeave?: () => void }
+
+let closeState: CloseState = { phase: 'idle' }
+
+const restoreOpen = () => {
+  if (!open.value) open.value = true
+}
+
+const finishLifecycle = (context: CloseContext) => {
+  closeState = { phase: 'idle' }
+  context.resolve()
+}
+
+const failLifecycle = (context: CloseContext, error: unknown) => {
+  closeState = { phase: 'idle' }
+  context.reject(error)
+}
+
+const minimizeNow = () => {
+  if (!appStore.modalMinimized.includes(minimizeModal)) {
+    appStore.modalMinimized.push(minimizeModal)
+  }
+  isMinimize.value = true
+  open.value = false
+}
+
+const runCloseLifecycle = async (context: CloseContext) => {
+  const { options } = context
+  const loading = options.isOk ? submitLoading : cancelLoading
+  const action = options.isOk ? props.onOk : props.onCancel
 
   loading.value = true
   try {
-    if (!((await action?.()) ?? true) || !((await props.beforeClose?.(isOk)) ?? true)) {
+    const actionAccepted = !options.runAction || ((await action?.()) ?? true)
+    const closeAccepted = actionAccepted && ((await props.beforeClose?.(options.isOk)) ?? true)
+    if (!closeAccepted) {
+      if (options.restoreOnFailure) restoreOpen()
+      finishLifecycle(context)
       return
     }
+  } catch (error) {
+    if (options.restoreOnFailure) restoreOpen()
+    failLifecycle(context, error)
+    return
   } finally {
     loading.value = false
   }
 
-  actionClosing = true
-  open.value = false
+  closeState = { phase: 'leaving', context }
 
-  if (waitForAnimation) {
-    await new Promise<void>((resolve) => {
-      resolveAfterLeave = resolve
+  if (context.minimizeRequested) {
+    minimizeNow()
+  } else if (options.waitForAnimation) {
+    const leave = new Promise<void>((resolve) => {
+      if (closeState.phase === 'leaving') closeState.resolveLeave = resolve
     })
+    open.value = false
+    await leave
+  } else {
+    open.value = false
+    await nextTick()
   }
 
-  props.afterClose?.(isOk)
+  let hasFinalizationError = false
+  let finalizationError: unknown
+  const recordFinalizationError = (error: unknown) => {
+    if (hasFinalizationError) return
+    hasFinalizationError = true
+    finalizationError = error
+  }
+  try {
+    props.afterClose?.(options.isOk)
+  } catch (error) {
+    recordFinalizationError(error)
+  }
 
-  if (props.destroyOnClose || forceDestroy) {
+  if (options.destroy) {
     isMinimize.value = false
-    props.afterDestroy?.()
-    removeMinimizedModal()
+    try {
+      props.afterDestroy?.()
+    } catch (error) {
+      recordFinalizationError(error)
+    } finally {
+      removeMinimizedModal()
+    }
   }
 
-  actionClosing = false
+  if (hasFinalizationError) {
+    failLifecycle(context, finalizationError)
+  } else {
+    finishLifecycle(context)
+  }
 }
+
+const requestClose = (options: CloseOptions): Promise<void> => {
+  if (closeState.phase !== 'idle') return closeState.context.promise
+
+  let resolve!: () => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  const context: CloseContext = {
+    promise,
+    resolve,
+    reject,
+    options,
+    minimizeRequested: false,
+  }
+  closeState = { phase: 'running-hooks', context }
+  void runCloseLifecycle(context)
+  return promise
+}
+
+const handleAction = (isOk: boolean, waitForAnimation = true, forceDestroy = false) =>
+  requestClose({
+    isOk,
+    runAction: true,
+    waitForAnimation,
+    destroy: forceDestroy || props.destroyOnClose,
+    restoreOnFailure: !isMinimize.value,
+  })
 
 const onAfterLeave = () => {
-  resolveAfterLeave?.()
-  resolveAfterLeave = undefined
+  if (closeState.phase === 'leaving') closeState.resolveLeave?.()
 }
 
-const handleSubmit = () => handleAction(true)
-const handleCancel = () => handleAction(false)
+const handleSubmit = () => handleAction(true, !isMinimize.value)
+const handleCancel = () => handleAction(false, !isMinimize.value)
+const handleDestroy = () => handleAction(false, !isMinimize.value, true)
 
-const onMaskClick = () => props.maskClosable && handleCancel()
+const onMaskClick = () => (props.maskClosable ? handleCancel() : Promise.resolve())
 
 const contentStyle = computed(() => ({
   maxHeight: props.maxHeight + '%',
@@ -159,25 +266,26 @@ const closeFn = () => {
     return
   }
   if (props.maskClosable) {
-    handleCancel()
-    return
+    return handleCancel()
   }
   const now = performance.now()
   if (now - lastEscTime < 1000) {
-    handleCancel()
     lastEscTime = 0
     closeMessage?.()
+    return handleCancel()
   } else {
     const { destroy } = message.info('common.pressAgainToClose', 1_000)
     closeMessage = destroy
     lastEscTime = now
   }
+  return Promise.resolve()
 }
 
 const minimizeModal = markRaw({
   id: sampleID(),
   title: () => props.title,
   openFn: () => {
+    if (closeState.phase !== 'idle') return
     modalZindex.value = ++appStore.modalZIndexCounter
     open.value = true
     removeMinimizedModal()
@@ -186,7 +294,7 @@ const minimizeModal = markRaw({
     handleMinimize()
   },
   closeFn: () => {
-    return handleAction(false, false, true)
+    return handleDestroy()
   },
 })
 
@@ -198,27 +306,44 @@ const removeMinimizedModal = () => {
 }
 
 const handleMinimize = () => {
-  const exists = appStore.modalMinimized.includes(minimizeModal)
-  if (!exists) {
-    appStore.modalMinimized.push(minimizeModal)
+  if (closeState.phase === 'running-hooks') {
+    closeState.context.minimizeRequested = true
+    return
   }
-  open.value = false
-  if (!isMinimize.value) {
-    toggleMinimize()
-  }
+  if (closeState.phase === 'leaving') return
+  minimizeNow()
 }
 
 watch(open, (v) => {
   if (v) {
+    if (closeState.phase === 'leaving') {
+      open.value = false
+      return
+    }
+    if (closeState.phase === 'running-hooks') return
     hasOpened.value = true
     isMinimize.value = false
     modalZindex.value = ++appStore.modalZIndexCounter
     appStore.modalStack.push(closeFn)
   } else {
-    if (!actionClosing && !props.destroyOnClose) {
+    if (closeState.phase === 'running-hooks') {
+      restoreOpen()
+      return
+    }
+    if (closeState.phase === 'idle' && isMinimize.value) {
+      // Standalone minimize is not an action-close lifecycle.
+    } else if (closeState.phase === 'idle' && !props.destroyOnClose) {
       handleMinimize()
-    } else if (!actionClosing) {
-      props.afterClose?.(false)
+    } else if (closeState.phase === 'idle') {
+      restoreOpen()
+      void requestClose({
+        isOk: false,
+        runAction: false,
+        waitForAnimation: false,
+        destroy: props.destroyOnClose,
+        restoreOnFailure: true,
+      }).catch((error) => console.error(error))
+      return
     }
     closeMessage?.()
     const idx = appStore.modalStack.findIndex((fn) => fn === closeFn)
@@ -232,7 +357,7 @@ provide('cancel', handleCancel)
 provide('submit', handleSubmit)
 provide(IS_IN_MODAL, true)
 
-defineExpose({ handleCancel })
+defineExpose({ handleCancel, handleDestroy })
 </script>
 
 <template>
@@ -265,7 +390,7 @@ defineExpose({ handleCancel })
               <slot name="toolbar"></slot>
               <Button
                 v-if="toolbar.minimize"
-                icon="minimize"
+                icon="minimize2"
                 type="text"
                 @click="handleMinimize"
               />

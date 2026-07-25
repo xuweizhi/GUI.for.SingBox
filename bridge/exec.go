@@ -43,12 +43,7 @@ func (a *App) Exec(path string, args []string, options ExecOptions) FlagResult {
 
 	out, err := cmd.CombinedOutput()
 
-	var output string
-	if options.Convert {
-		output = strings.TrimSpace(decodeGB18030(out))
-	} else {
-		output = strings.TrimSpace(string(out))
-	}
+	output := strings.TrimSpace(DecodeCommandOutput(out))
 
 	if err != nil {
 		if output == "" {
@@ -376,12 +371,7 @@ func scanAndEmitOutput(a *App, reader io.Reader, outEvent string, options ExecOp
 	stopOutput := false
 
 	for scanner.Scan() {
-		var text string
-		if options.Convert {
-			text = decodeGB18030(scanner.Bytes())
-		} else {
-			text = scanner.Text()
-		}
+		text := DecodeCommandOutput(scanner.Bytes())
 
 		if !stopOutput {
 			a.EventsEmit(outEvent, text)
@@ -404,9 +394,7 @@ func tailAndEmitLogFile(a *App, path string, outEvent string, options ExecOption
 	defer ticker.Stop()
 
 	emitLine := func(text string) bool {
-		if options.Convert {
-			text = decodeGB18030([]byte(text))
-		}
+		text = DecodeCommandOutput([]byte(text))
 		text = strings.TrimRight(text, "\r")
 
 		if text == "" {

@@ -2,9 +2,18 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
 import Button from '@/components/Button/index.vue'
+import Card from '@/components/Card/index.vue'
 import Dropdown from '@/components/Dropdown/index.vue'
 import Select from '@/components/Select/index.vue'
 import Switch from '@/components/Switch/index.vue'
+
+vi.mock('@wails/runtime/runtime', () => ({}))
+
+vi.mock('@/bridge', () => ({}))
+
+vi.mock('@/directives/tips', () => ({
+  default: {},
+}))
 
 vi.mock('@/lang', () => ({
   default: {
@@ -27,6 +36,19 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('interactive controls', () => {
+  it('renders Card titles verbatim', () => {
+    const wrapper = mount(Card, {
+      props: { title: 'common.save' },
+      global: {
+        mocks: { $t: (key: string) => `translated:${key}` },
+        directives: { tips: () => undefined },
+        stubs: { Icon: true },
+      },
+    })
+
+    expect(wrapper.get('.gui-card__title').text()).toBe('common.save')
+  })
+
   it('operates Button with Enter and exposes button semantics', async () => {
     const wrapper = mount(Button, {
       slots: { default: 'Run' },

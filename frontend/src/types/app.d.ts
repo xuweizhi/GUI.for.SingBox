@@ -5,11 +5,16 @@ declare global {
   type Theme = 'auto' | 'light' | 'dark'
   type Color = 'default' | 'green' | 'purple' | 'custom'
   type View = 'grid' | 'list'
-  type WindowStartState = 0 | 2
-  type WebviewGpuPolicy = 0 | 1 | 2
+  type WindowStartState =
+    | 0 // Normal
+    | 2 // Minimised
+  type WebviewGpuPolicy =
+    | 0 // Always
+    | 1 // OnDemand
+    | 2 // Never
+  type RequestProxyMode = 'global' | 'none' | 'system' | 'kernel' | 'custom'
   type Branch = 'main' | 'alpha'
   type ControllerCloseMode = 'all' | 'button'
-  type RequestProxyMode = 'global' | 'none' | 'system' | 'kernel' | 'custom'
   type PluginTrigger =
     | 'on::enabled'
     | 'on::disabled'
@@ -353,7 +358,7 @@ declare global {
     updating?: boolean
   }
 
-  interface RuleSetHub {
+  interface RulesetHub {
     geosite: string
     geoip: string
     list: { name: string; type: 'geosite' | 'geoip'; description: string; count: number }[]
@@ -558,7 +563,6 @@ declare global {
     mixin: Mixin
     script: Script
   }
-
   interface CustomActionApi {
     h: typeof import('vue').h
     ref: typeof import('vue').ref

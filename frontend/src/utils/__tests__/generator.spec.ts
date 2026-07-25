@@ -90,6 +90,23 @@ describe('generateConfig dns servers', () => {
     expect(remoteDns).not.toHaveProperty('domain_resolver')
   })
 
+  it('omits domain resolvers for IPv6 dns servers', async () => {
+    const profile = createProfile()
+    const remoteDns = profile.dns.servers.find((server) => server.tag === 'Remote-DNS')!
+    remoteDns.server = '2606:4700:4700::1111'
+
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    expect(config.dns.servers.find((server: { tag: string }) => server.tag === 'Remote-DNS')).not.toHaveProperty(
+      'domain_resolver',
+    )
+  })
+
   it('generates direct inbound configuration without users', async () => {
     const profile = createProfile()
     profile.inbounds = [
@@ -124,6 +141,28 @@ describe('generateConfig dns servers', () => {
         network: 'tcp',
       },
     ])
+  })
+
+  it('omits an empty network from direct inbound configuration', async () => {
+    const profile = createProfile()
+    profile.inbounds = [
+      {
+        id: 'direct-in',
+        type: Inbound.Direct,
+        tag: 'direct-in',
+        enable: true,
+        direct: DefaultInboundDirect(),
+      },
+    ]
+
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    expect(config.inbounds[0]).not.toHaveProperty('network')
   })
 
   it('restores direct inbound configuration', () => {

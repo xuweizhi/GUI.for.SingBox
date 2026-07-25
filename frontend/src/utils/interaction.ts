@@ -1,4 +1,4 @@
-import { render, h, type VNode, nextTick } from 'vue'
+import { render, h, type VNode } from 'vue'
 
 import i18n from '@/lang'
 import { APP_TITLE, bindAppContext, normalizeErrorMessage, sampleID } from '@/utils'
@@ -307,8 +307,12 @@ export const modal = (options: ModalProps = {}, slots: ModalSlots = {}) => {
   const cleanup = () => {
     if (cleaned) return
     cleaned = true
-    render(null, container)
-    container.remove()
+    try {
+      options.afterDestroy?.()
+    } finally {
+      render(null, container)
+      container.remove()
+    }
   }
 
   const [Modal, api] = useModal(
@@ -316,7 +320,6 @@ export const modal = (options: ModalProps = {}, slots: ModalSlots = {}) => {
       ...options,
       container: '#' + id,
       afterDestroy() {
-        options.afterDestroy?.()
         cleanup()
       },
     },
@@ -327,11 +330,16 @@ export const modal = (options: ModalProps = {}, slots: ModalSlots = {}) => {
 
   render(vnode, container)
 
+  let destroyPromise: Promise<void> | undefined
   const destroy = () => {
-    api.close()
-    nextTick(() => {
-      cleanup()
-    })
+    if (destroyPromise) return destroyPromise
+    if (cleaned) return Promise.resolve()
+    destroyPromise = api.destroy()
+    void destroyPromise.then(
+      () => (destroyPromise = undefined),
+      () => (destroyPromise = undefined),
+    )
+    return destroyPromise
   }
   const powerApi = { ...api, destroy }
   return powerApi

@@ -2,7 +2,7 @@
 import * as Stores from '@/stores'
 import { message } from '@/utils'
 
-import { AboutView, CommandView } from '@/components'
+import { CommandView } from '@/components'
 
 interface Props {
   loading: boolean
@@ -31,16 +31,6 @@ const minimizeAll = () => {
 </script>
 
 <template>
-  <Modal
-    v-model:open="appStore.showAbout"
-    :cancel="false"
-    :submit="false"
-    mask-closable
-    min-width="50"
-  >
-    <AboutView />
-  </Modal>
-
   <Menu
     v-model="appStore.menuShow"
     :position="appStore.menuPosition"
@@ -60,7 +50,7 @@ const minimizeAll = () => {
     class="fixed right-32 bottom-32 flex flex-col gap-8 z-9999"
   >
     <Dropdown v-if="appStore.modalMinimized.length" placement="top">
-      <Button icon="settings3" class="shadow" />
+      <Button icon="adjust" class="shadow" />
       <template #overlay>
         <Card title="common.modalList">
           <template #extra>

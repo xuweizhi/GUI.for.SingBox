@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
@@ -24,7 +24,10 @@ import {
   message,
   sampleID,
   sleep,
+  modal,
 } from '@/utils'
+
+import { AboutView } from '@/components'
 
 import { useEnvStore } from './env'
 
@@ -49,7 +52,7 @@ export const useAppStore = defineStore('app', () => {
   })
 
   /* Modal Stack */
-  const modalStack: (() => void)[] = []
+  const modalStack: (() => MaybePromise<void>)[] = []
   const modalZIndexCounter = 999
   const modalMinimized = ref<
     {
@@ -111,6 +114,7 @@ export const useAppStore = defineStore('app', () => {
 
   /* About Page */
   const showAbout = ref(false)
+  const lastCheckTime = ref(0)
   const checkForUpdatesLoading = ref(false)
   const restartable = ref(false)
   const downloading = ref(false)
@@ -206,8 +210,24 @@ export const useAppStore = defineStore('app', () => {
       console.error(error)
       message.error(error.message || error)
     }
+    lastCheckTime.value = Date.now()
     checkForUpdatesLoading.value = false
   }
+
+  watch(showAbout, (v) => {
+    if (v) {
+      const m = modal({
+        cancel: false,
+        submit: false,
+        maskClosable: true,
+        minWidth: '50',
+        afterDestroy() {
+          showAbout.value = false
+        },
+      })
+      m.setContent(AboutView).open()
+    }
+  })
 
   return {
     isAppExiting,
@@ -222,6 +242,7 @@ export const useAppStore = defineStore('app', () => {
     modalMinimized,
     modalZIndexCounter,
     showAbout,
+    lastCheckTime,
     checkForUpdatesLoading,
     restartable,
     downloading,
