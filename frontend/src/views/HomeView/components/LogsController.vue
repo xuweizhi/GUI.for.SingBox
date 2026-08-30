@@ -56,23 +56,31 @@ const menus: App.Menu[] = (
         message.error('Not Support')
         return
       }
-      const regex = /(\b((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3})(:\d+)?\b)/g
-      const matches = payload.match(regex)
-      if (!matches) {
+      const regex =
+        /\[([a-fA-F\d:.%]+)\](?::\d+)?|((?:[a-zA-Z\d-]+\.)+[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3})(?::\d+)?|((?:[a-fA-F\d]{1,4}:){2,}[a-fA-F\d:]*)/g
+      const addresses = [
+        ...new Set(
+          Array.from(String(payload).matchAll(regex), (match) => match[1] || match[2] || match[3]).filter(
+            (address): address is string =>
+              Boolean(address) &&
+              (isValidIPv4(address!) ||
+                isValidIPv6(address!) ||
+                /^(?:[a-zA-Z\d-]+\.)+[a-zA-Z]{2,}$/.test(address!)),
+          ),
+        ),
+      ]
+      if (!addresses.length) {
         message.error('Not Matched')
         return
       }
 
       const options: PickerItem<Record<string, any>[]>[] = []
 
-      matches.forEach((match: string) => {
-        // FIXME: IPv6
-        const address = match.split(':')[0]
-        if (!address) return
+      addresses.forEach((address) => {
         if (isValidIPv4(address) || isValidIPv6(address)) {
           options.push({
             label: t('kernel.rules.type.ip_cidr'),
-            value: { ip_cidr: address + '/32' } as any,
+            value: { ip_cidr: `${address}/${isValidIPv6(address) ? 128 : 32}` } as any,
             description: address,
           })
         } else {

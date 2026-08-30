@@ -231,49 +231,48 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         summary: 'netCheck.summary.proxySkipped',
       })
     } else {
-      const proxy = buildProxyUrl(await deps.getKernelProxyEndpoint())
-      if (!proxy) {
-        overviewItems.push({
-          id: 'proxy-http',
-          title: 'netCheck.results.proxyHttp',
-          status: 'failed',
-          summary: 'netCheck.summary.proxyMissing',
-        })
-      } else {
-        try {
-          const head = await measure(() =>
-            deps.httpHead(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
-          )
+      try {
+        const proxy = buildProxyUrl(await deps.getKernelProxyEndpoint())
+        if (!proxy) {
+          overviewItems.push({
+            id: 'proxy-http',
+            title: 'netCheck.results.proxyHttp',
+            status: 'failed',
+            summary: 'netCheck.summary.proxyMissing',
+          })
+        } else {
+          let method: 'HEAD' | 'GET' = 'HEAD'
+          let request
+          try {
+            request = await measure(() =>
+              deps.httpHead(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
+            )
+          } catch (error: any) {
+            const status = Number(error?.status || 0)
+            if (status !== 405 && status !== 501) throw error
+
+            method = 'GET'
+            request = await measure(() =>
+              deps.httpGet(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
+            )
+          }
+
           overviewItems.push({
             id: 'proxy-http',
             title: 'netCheck.results.proxyHttp',
             status: 'success',
-            summary: `HEAD ${target.requestUrl} -> ${head.value.status}`,
-            durationMs: head.durationMs,
+            summary: `${method} ${target.requestUrl} -> ${request.value.status}`,
+            durationMs: request.durationMs,
           })
-        } catch (error: any) {
-          const status = Number(error?.status || 0)
-          if (status === 405 || status === 501) {
-            const request = await measure(() =>
-              deps.httpGet(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
-            )
-            overviewItems.push({
-              id: 'proxy-http',
-              title: 'netCheck.results.proxyHttp',
-              status: 'success',
-              summary: `GET ${target.requestUrl} -> ${request.value.status}`,
-              durationMs: request.durationMs,
-            })
-          } else {
-            overviewItems.push({
-              id: 'proxy-http',
-              title: 'netCheck.results.proxyHttp',
-              status: 'failed',
-              summary: 'netCheck.summary.proxyFailed',
-              detail: normalizeErrorMessage(error),
-            })
-          }
         }
+      } catch (error) {
+        overviewItems.push({
+          id: 'proxy-http',
+          title: 'netCheck.results.proxyHttp',
+          status: 'failed',
+          summary: 'netCheck.summary.proxyFailed',
+          detail: normalizeErrorMessage(error),
+        })
       }
     }
     syncGroups()

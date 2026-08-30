@@ -19,7 +19,18 @@ export const CoreWorkingDirectory = 'data/sing-box'
 export const CorePidFilePath = CoreWorkingDirectory + '/pid.txt'
 export const CoreLogFilePath = CoreWorkingDirectory + '/sing-box.log'
 export const CoreConfigFilePath = CoreWorkingDirectory + '/config.json'
+export const CoreConfigStagedFilePath = CoreConfigFilePath + '.staged'
+export const CoreConfigBackupFilePath = CoreConfigFilePath + '.lkg'
 export const CoreCacheFilePath = CoreWorkingDirectory + '/cache.db'
+
+// Node endpoint domains must not depend on a public DNS provider that may
+// refuse or poison provider-owned domains. Keep a native resolver available
+// for sing-box's outbound/bootstrap lookups.
+export const SystemDnsResolverTag = 'System-DNS-Resolver'
+export const LegacyDefaultDomainResolverTags = ['Local-DNS', 'Local-DNS-Resolver'] as const
+// v2rayA uses mark 0x80 as the transparent-proxy bypass bit on Linux.
+// Applying it to sing-box's own dials prevents proxy loops between services.
+export const HeadlessDefaultRoutingMark = 0x80
 
 export const getCoreLogFilePath = (date = new Date()) => {
   const year = date.getFullYear()

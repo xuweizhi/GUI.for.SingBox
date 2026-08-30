@@ -1,7 +1,12 @@
 import { parse } from 'yaml'
 
 import { ReadFile, WriteFile } from '@/bridge'
-import { CoreConfigFilePath } from '@/constant/kernel'
+import {
+  CoreConfigFilePath,
+  HeadlessDefaultRoutingMark,
+  LegacyDefaultDomainResolverTags,
+  SystemDnsResolverTag,
+} from '@/constant/kernel'
 import { Branch } from '@/enums/app'
 import {
   DnsServer,
@@ -80,10 +85,13 @@ const generateInbounds = (inbounds: App.Inbound[]) => {
   return inbounds.flatMap((inbound) => {
     if (!inbound.enable) return []
     if (inbound.type !== Inbound.Tun && inbound.type !== Inbound.Direct) {
-      const users = inbound[inbound.type]!.users.map((user) => ({
-        username: user.split(':')[0],
-        password: user.split(':')[1],
-      }))
+      const users = inbound[inbound.type]!.users.map((user) => {
+        const separator = user.indexOf(':')
+        return {
+          username: separator === -1 ? user : user.slice(0, separator),
+          password: separator === -1 ? '' : user.slice(separator + 1),
+        }
+      })
       return {
         type: inbound.type,
         tag: inbound.tag,
@@ -115,11 +123,71 @@ const generateInbounds = (inbounds: App.Inbound[]) => {
 
 const generateOutbounds = async (outbounds: App.Outbound[]) => {
   const result: Recordable[] = []
-  const SubscriptionCache: Recordable<any[]> = {}
-  const proxiesSet = new Set<any>()
+  const subscriptionCache = new Map<string, { name: string; proxies: Recordable[] }>()
+  const proxiesByTag = new Map<string, Recordable>()
+  const runtimeTags = new WeakMap<Recordable, string>()
   const builtInProxiesSet = new Set<string>()
 
   const subscribesStore = useSubscribesStore()
+
+  const outboundTags = new Set<string>()
+  outbounds.forEach((outbound) => {
+    if (!outbound.tag) throw new Error('Outbound tag cannot be empty')
+    if (outboundTags.has(outbound.tag)) {
+      throw new Error(`Duplicate outbound tag: ${outbound.tag}`)
+    }
+    outboundTags.add(outbound.tag)
+  })
+  const usedRuntimeTags = new Set([...outboundTags, Outbound.Direct, Outbound.Block])
+
+  const getSubscriptionProxies = async (subscriptionId: string) => {
+    if (!subscriptionCache.has(subscriptionId)) {
+      const subscription = subscribesStore.getSubscribeById(subscriptionId)
+      if (!subscription) throw new Error(`Subscription not found: ${subscriptionId}`)
+
+      const parsed = JSON.parse(await ReadFile(subscription.path))
+      if (
+        !Array.isArray(parsed) ||
+        parsed.some(
+          (proxy) =>
+            !proxy ||
+            typeof proxy !== 'object' ||
+            typeof proxy.tag !== 'string' ||
+            !proxy.tag.trim(),
+        )
+      ) {
+        throw new Error(`Invalid subscription data: ${subscription.name || subscriptionId}`)
+      }
+      subscriptionCache.set(subscriptionId, {
+        name: subscription.name || subscriptionId,
+        proxies: parsed,
+      })
+    }
+    return subscriptionCache.get(subscriptionId)!
+  }
+
+  const registerProxy = (proxy: Recordable, subscriptionId: string, subscriptionName: string) => {
+    const registeredTag = runtimeTags.get(proxy)
+    if (registeredTag) return registeredTag
+
+    const tag = typeof proxy?.tag === 'string' ? proxy.tag.trim() : ''
+    if (!tag) throw new Error(`Proxy tag cannot be empty: ${subscriptionId}`)
+
+    let runtimeTag = tag
+    if (usedRuntimeTags.has(runtimeTag)) {
+      const suffix = subscriptionName.trim() || subscriptionId
+      runtimeTag = `${tag} [${suffix}]`
+      let sequence = 2
+      while (usedRuntimeTags.has(runtimeTag)) {
+        runtimeTag = `${tag} [${suffix} ${sequence++}]`
+      }
+    }
+    const runtimeProxy = runtimeTag === tag ? proxy : { ...proxy, tag: runtimeTag }
+    usedRuntimeTags.add(runtimeTag)
+    runtimeTags.set(proxy, runtimeTag)
+    proxiesByTag.set(runtimeTag, runtimeProxy)
+    return runtimeTag
+  }
 
   for (const outbound of outbounds) {
     const _outbound: Recordable = {
@@ -133,43 +201,40 @@ const generateOutbounds = async (outbounds: App.Outbound[]) => {
     }
     if (outbound.type === Outbound.Selector || outbound.type === Outbound.Urltest) {
       _outbound.interrupt_exist_connections = outbound.interrupt_exist_connections
-      _outbound.outbounds = []
+      const members = new Set<string>()
       const isTagMatching = createTextMatcher(outbound.include, outbound.exclude)
       for (const proxy of outbound.outbounds) {
         if (proxy.type === 'Built-in') {
           if ([Outbound.Direct, Outbound.Block].includes(proxy.id as Outbound)) {
             builtInProxiesSet.add(proxy.id)
           }
-          _outbound.outbounds.push(proxy.tag)
+          members.add(proxy.tag)
         } else {
           const subId = proxy.type === 'Subscription' ? proxy.id : proxy.type
-          if (!SubscriptionCache[subId]) {
-            const sub = subscribesStore.getSubscribeById(subId)
-            if (sub) {
-              const subStr = await ReadFile(sub.path)
-              const proxies = JSON.parse(subStr)
-              SubscriptionCache[subId] = proxies
-            }
-          }
+          const subscription = await getSubscriptionProxies(subId)
+          const subscriptionProxies = subscription.proxies
           if (proxy.type === 'Subscription') {
-            _outbound.outbounds.push(
-              ...SubscriptionCache[subId]!.map((v) => v.tag).filter((tag) => isTagMatching(tag)),
-            )
-            SubscriptionCache[subId]!.forEach((v) => proxiesSet.add(v))
+            subscriptionProxies.forEach((subscriptionProxy) => {
+              if (!isTagMatching(subscriptionProxy.tag)) return
+              members.add(registerProxy(subscriptionProxy, subId, subscription.name))
+            })
           } else {
-            const _proxy = SubscriptionCache[subId]!.find((v) => v.tag === proxy.tag)
+            const _proxy = subscriptionProxies.find((v) => v.tag === proxy.tag)
+            if (!_proxy) {
+              throw new Error(`Proxy "${proxy.tag}" not found in subscription ${subId}`)
+            }
             if (_proxy && isTagMatching(_proxy.tag)) {
-              _outbound.outbounds.push(_proxy.tag)
-              proxiesSet.add(_proxy)
+              members.add(registerProxy(_proxy, subId, subscription.name))
             }
           }
         }
       }
+      _outbound.outbounds = [...members]
     }
     result.push(_outbound)
   }
 
-  result.push(...proxiesSet)
+  result.push(...proxiesByTag.values())
   result.push(...Array.from(builtInProxiesSet).map((v) => ({ type: v, tag: v })))
 
   return result
@@ -183,6 +248,16 @@ const generateRoute = (
 ) => {
   const getOutbound = (id: string) => outbounds.find((v) => v.id === id)?.tag
   const getDnsServer = (id: string) => dns.servers.find((v) => v.id === id)?.tag
+  const configuredDefaultResolver = dns.servers.find(
+    (server) => server.id === route.default_domain_resolver.server,
+  )
+  const nativeResolverTag =
+    dns.servers.find((server) => server.type === DnsServer.Local)?.tag || SystemDnsResolverTag
+  const defaultDomainResolverTag =
+    configuredDefaultResolver &&
+    !LegacyDefaultDomainResolverTags.some((tag) => tag === configuredDefaultResolver.tag)
+      ? configuredDefaultResolver.tag
+      : nativeResolverTag
   const isInboundEnabled = (id: string) => inbounds.find((v) => v.id === id)?.enable
 
   const rulesetsStore = useRulesetsStore()
@@ -245,10 +320,12 @@ const generateRoute = (
       }
     }),
     auto_detect_interface: route.auto_detect_interface,
+    default_mark: HeadlessDefaultRoutingMark,
     find_process: route.find_process ? true : undefined,
     final: getOutbound(route.final),
     default_domain_resolver: {
-      server: getDnsServer(route.default_domain_resolver.server),
+      server: defaultDomainResolverTag,
+      client_subnet: route.default_domain_resolver.client_subnet || undefined,
     },
     ...extra,
   }
@@ -269,68 +346,73 @@ const generateDns = (
   if (dns.client_subnet) {
     extra.client_subnet = dns.client_subnet
   }
-  return {
-    servers: dns.servers.flatMap((server) => {
-      const extra: Recordable = {}
+  const servers = dns.servers.flatMap((server) => {
+    const extra: Recordable = {}
+    if (
+      [
+        DnsServer.Local,
+        DnsServer.Tcp,
+        DnsServer.Udp,
+        DnsServer.Tls,
+        DnsServer.Quic,
+        DnsServer.Https,
+        DnsServer.H3,
+        DnsServer.Dhcp,
+      ].includes(server.type as any)
+    ) {
+      if (server.detour) {
+        const outbound = getOutbound(server.detour)
+        if (outbound?.type !== Outbound.Direct) {
+          extra.detour = outbound?.tag
+        }
+      }
+      const needsDomainResolver =
+        server.domain_resolver &&
+        server.server &&
+        !isValidIPv4(server.server) &&
+        !isValidIPv6(server.server)
+      needsDomainResolver && (extra.domain_resolver = getDnsServer(server.domain_resolver))
       if (
         [
-          DnsServer.Local,
           DnsServer.Tcp,
           DnsServer.Udp,
           DnsServer.Tls,
           DnsServer.Quic,
           DnsServer.Https,
           DnsServer.H3,
-          DnsServer.Dhcp,
         ].includes(server.type as any)
       ) {
-        if (server.detour) {
-          const outbound = getOutbound(server.detour)
-          if (outbound?.type !== Outbound.Direct) {
-            extra.detour = outbound?.tag
-          }
-        }
-        const needsDomainResolver =
-          server.domain_resolver &&
-          server.server &&
-          !isValidIPv4(server.server) &&
-          !isValidIPv6(server.server)
-        needsDomainResolver && (extra.domain_resolver = getDnsServer(server.domain_resolver))
-        if (
-          [
-            DnsServer.Tcp,
-            DnsServer.Udp,
-            DnsServer.Tls,
-            DnsServer.Quic,
-            DnsServer.Https,
-            DnsServer.H3,
-          ].includes(server.type as any)
-        ) {
-          server.server_port && (extra.server_port = Number(server.server_port))
-          extra.server = server.server
-          if ([DnsServer.Https, DnsServer.H3].includes(server.type as any)) {
-            server.path && (extra.path = server.path)
-          }
+        server.server_port && (extra.server_port = Number(server.server_port))
+        extra.server = server.server
+        if ([DnsServer.Https, DnsServer.H3].includes(server.type as any)) {
+          server.path && (extra.path = server.path)
         }
       }
-      if (server.type === DnsServer.Hosts) {
-        extra.path = server.hosts_path.reduce((p, c) => p.concat(c.split(',')), [] as string[])
-        extra.predefined = Object.entries(server.predefined).reduce(
-          (p, [k, v]) => ({ ...p, [k]: v.split(',') }),
-          {},
-        )
-      } else if (server.type === DnsServer.Dhcp) {
-        server.interface && (extra.interface = server.interface)
-      } else if (server.type === DnsServer.FakeIP) {
-        server.inet4_range && (extra.inet4_range = server.inet4_range)
-        server.inet6_range && (extra.inet6_range = server.inet6_range)
-      }
-      return {
-        tag: server.tag,
-        type: server.type,
-        ...extra,
-      }
-    }),
+    }
+    if (server.type === DnsServer.Hosts) {
+      extra.path = server.hosts_path.reduce((p, c) => p.concat(c.split(',')), [] as string[])
+      extra.predefined = Object.entries(server.predefined).reduce(
+        (p, [k, v]) => ({ ...p, [k]: v.split(',') }),
+        {},
+      )
+    } else if (server.type === DnsServer.Dhcp) {
+      server.interface && (extra.interface = server.interface)
+    } else if (server.type === DnsServer.FakeIP) {
+      server.inet4_range && (extra.inet4_range = server.inet4_range)
+      server.inet6_range && (extra.inet6_range = server.inet6_range)
+    }
+    return {
+      tag: server.tag,
+      type: server.type,
+      ...extra,
+    }
+  })
+  if (!dns.servers.some((server) => server.type === DnsServer.Local)) {
+    servers.unshift({ tag: SystemDnsResolverTag, type: DnsServer.Local })
+  }
+
+  return {
+    servers,
     rules: dns.rules.flatMap((rule) => {
       if (rule.type === RuleType.InsertionPoint || !rule.enable) {
         return []
@@ -348,7 +430,7 @@ const generateDns = (
         if (rule.action === RuleAction.Route) {
           extra.server = getDnsServer(rule.server)
           if (rule.strategy !== Strategy.Default) {
-            // extra.strategy = rule.strategy
+            extra.strategy = rule.strategy
           }
         }
       }
@@ -370,11 +452,12 @@ const generateDns = (
 
 export const generateDnsServerURL = (dnsServer: App.DnsServerConfig) => {
   const { type, server_port, path, server, interface: _interface } = dnsServer
+  const formattedServer = isValidIPv6(server) && !server.startsWith('[') ? `[${server}]` : server
   let address = ''
   if (type == DnsServer.Https) {
-    address = `https://${server}${server_port ? ':' + server_port : ''}${path ? path : ''}`
+    address = `https://${formattedServer}${server_port ? ':' + server_port : ''}${path ? path : ''}`
   } else if (type == DnsServer.H3) {
-    address = `h3://${server}${server_port ? ':' + server_port : ''}${path ? path : ''}`
+    address = `h3://${formattedServer}${server_port ? ':' + server_port : ''}${path ? path : ''}`
   } else if (type == DnsServer.Dhcp) {
     address = `dhcp://${_interface}`
   } else if (type == DnsServer.FakeIP) {
@@ -387,7 +470,7 @@ export const generateDnsServerURL = (dnsServer: App.DnsServerConfig) => {
   } else if (type === DnsServer.Local) {
     address = 'local'
   } else {
-    address = `${type}://${server}${server_port ? ':' + server_port : ''}`
+    address = `${type}://${formattedServer}${server_port ? ':' + server_port : ''}`
   }
   return address
 }
@@ -473,6 +556,7 @@ export const generateConfig = async (
 export const generateConfigFile = async (
   profile: App.Profile,
   beforeWrite: (config: any) => Promise<any>,
+  outputPath = CoreConfigFilePath,
 ) => {
   const header = `DO NOT EDIT - Generated by ${APP_TITLE}`
 
@@ -481,5 +565,5 @@ export const generateConfigFile = async (
 
   config.experimental.cache_file.path = 'cache.db'
 
-  await WriteFile(CoreConfigFilePath, JSON.stringify({ $schema: header, ...config }, null, 2))
+  await WriteFile(outputPath, JSON.stringify({ $schema: header, ...config }, null, 2))
 }

@@ -182,7 +182,11 @@ export const DefaultTestURL = 'https://www.gstatic.com/generate_204'
 
 export const DefaultTestTimeout = 5000
 
-export const DefaultConcurrencyLimit = 20
+// Keep batch latency tests below the point where the browser/core connection pool
+// starts measuring its own queueing delay instead of the proxy latency.
+export const DefaultConcurrencyLimit = 6
+
+export const MaxConcurrencyLimit = 8
 
 export const DefaultCardColumns = 5
 

@@ -12,6 +12,7 @@ import {
   formatBytes,
   formatRelativeTime,
   getDomainSuffixes,
+  isValidIPv6,
   message,
   picker,
 } from '@/utils'
@@ -196,9 +197,10 @@ const menu: App.Menu[] = [
           })
         }
         if (record.metadata.destinationIP) {
+          const prefix = isValidIPv6(record.metadata.destinationIP) ? 128 : 32
           options.push({
             label: t('kernel.rules.type.ip_cidr'),
-            value: { ip_cidr: record.metadata.destinationIP + '/32' } as any,
+            value: { ip_cidr: `${record.metadata.destinationIP}/${prefix}` } as any,
             description: record.metadata.destinationIP,
           })
         }

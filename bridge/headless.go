@@ -145,15 +145,27 @@ func RunHeadless(ctx context.Context, assets embed.FS, app *App, options Headles
 		return err
 	case <-ctx.Done():
 		app.StopScheduledTaskWorker()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return server.Shutdown(shutdownCtx)
+		return shutdownHeadlessHTTPServer(server)
 	case <-app.Headless.shutdown:
 		app.StopScheduledTaskWorker()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return server.Shutdown(shutdownCtx)
+		return shutdownHeadlessHTTPServer(server)
 	}
+}
+
+func shutdownHeadlessHTTPServer(server *http.Server) error {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		closeErr := server.Close()
+		if closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+			return fmt.Errorf("shutdown timed out (%v), forced close failed: %w", err, closeErr)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
@@ -504,6 +516,14 @@ func (a *App) handleEventStream(w http.ResponseWriter, r *http.Request) {
 
 	ch, unsubscribe := a.eventHub().subscribe()
 	defer unsubscribe()
+	var appShutdown <-chan struct{}
+	if a.Ctx != nil {
+		appShutdown = a.Ctx.Done()
+	}
+	var headlessShutdown <-chan struct{}
+	if a.Headless != nil {
+		headlessShutdown = a.Headless.shutdown
+	}
 
 	_, _ = io.WriteString(w, ": connected\n\n")
 	flusher.Flush()
@@ -511,6 +531,10 @@ func (a *App) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-appShutdown:
+			return
+		case <-headlessShutdown:
 			return
 		case evt, ok := <-ch:
 			if !ok {

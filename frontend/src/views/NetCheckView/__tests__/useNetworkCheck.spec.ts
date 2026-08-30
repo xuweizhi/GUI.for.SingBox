@@ -184,4 +184,32 @@ describe('useNetworkCheck', () => {
     })
     scope.stop()
   })
+
+  it('records a failed GET fallback and continues the remaining checks', async () => {
+    mocks.probeApiAvailability.mockResolvedValue({ version: 'ok' })
+    mocks.getKernelProxyEndpoint.mockResolvedValue({
+      schema: 'http',
+      host: '127.0.0.1',
+      port: 7890,
+      username: '',
+      password: '',
+    })
+    mocks.httpHead.mockRejectedValue({ status: 405, message: 'Method Not Allowed' })
+    mocks.httpGet.mockRejectedValue(new Error('GET failed'))
+    mocks.tcpPing.mockResolvedValue(42)
+    mocks.getRulesetStates.mockResolvedValue([])
+
+    const scope = effectScope()
+    const vm = scope.run(() => useNetworkCheck(mocks))!
+
+    await vm.run('example.com')
+
+    expect(vm.results.value[1]).toMatchObject({
+      status: 'failed',
+      detail: 'GET failed',
+    })
+    expect(vm.results.value[2]).toMatchObject({ id: 'tcp', status: 'success' })
+    expect(vm.running.value).toBe(false)
+    scope.stop()
+  })
 })

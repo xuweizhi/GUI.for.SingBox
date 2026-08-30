@@ -48,6 +48,16 @@ const runtimeBridge: RuntimeBridge = {
   TcpPing: Bridge.TcpPing as RuntimeBridge['TcpPing'],
 }
 
+class RuntimeHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = 'RuntimeHttpError'
+  }
+}
+
 const requestWithoutBody = async (
   method: RequestMethod,
   url: string,
@@ -65,7 +75,9 @@ const requestWithoutBody = async (
     Stream: '',
   })
 
-  if (!result.flag) throw result.body
+  if (!result.flag) {
+    throw new RuntimeHttpError(result.body || `HTTP request failed with status ${result.status}`, result.status)
+  }
 
   return {
     status: result.status,

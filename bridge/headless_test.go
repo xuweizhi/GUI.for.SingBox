@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHeadlessAuthAuthorizeAcceptsCookieBeforeQueryToken(t *testing.T) {
@@ -146,6 +148,51 @@ func TestHeadlessAuthAuthorizeRejectsMismatchedToken(t *testing.T) {
 
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
+	}
+}
+
+func TestHeadlessEventStreamStopsDuringApplicationShutdown(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		shutdown func(cancel context.CancelFunc, runtime *HeadlessRuntime)
+	}{
+		{
+			name: "signal context",
+			shutdown: func(cancel context.CancelFunc, _ *HeadlessRuntime) {
+				cancel()
+			},
+		},
+		{
+			name: "runtime request",
+			shutdown: func(_ context.CancelFunc, runtime *HeadlessRuntime) {
+				close(runtime.shutdown)
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			runtime := &HeadlessRuntime{shutdown: make(chan struct{})}
+			app := NewApp()
+			app.Ctx = ctx
+			app.Headless = runtime
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				app.handleEventStream(
+					httptest.NewRecorder(),
+					httptest.NewRequest(http.MethodGet, webUISSEEndpoint, nil),
+				)
+			}()
+
+			test.shutdown(cancel, runtime)
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("event stream did not stop during application shutdown")
+			}
+		})
 	}
 }
 

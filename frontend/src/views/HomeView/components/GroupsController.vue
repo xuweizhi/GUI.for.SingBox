@@ -9,6 +9,7 @@ import {
   DefaultControllerSensitivity,
   DefaultTestTimeout,
   DefaultTestURL,
+  MaxConcurrencyLimit,
 } from '@/constant/app'
 import { ControllerCloseMode } from '@/enums/app'
 import { useBool } from '@/hooks'
@@ -468,6 +469,8 @@ onScopeDispose(() => {
       <Input
         v-model="appSettings.app.kernel.testTimeout"
         :placeholder="String(DefaultTestTimeout)"
+        :min="1000"
+        :max="60000"
         type="number"
         editable
         clearable
@@ -479,7 +482,7 @@ onScopeDispose(() => {
       <Input
         v-model="appSettings.app.kernel.concurrencyLimit"
         :min="1"
-        :max="50"
+        :max="MaxConcurrencyLimit"
         type="number"
         editable
         clearable

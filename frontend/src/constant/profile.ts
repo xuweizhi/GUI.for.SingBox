@@ -15,6 +15,7 @@ import i18n from '@/lang'
 import { generateSecureKey, sampleID } from '@/utils'
 
 import { DefaultTestURL } from './app'
+import { SystemDnsResolverTag } from './kernel'
 
 const { t } = i18n.global
 
@@ -42,6 +43,7 @@ const DefaultRulesetIds = {
 }
 
 const DefaultDnsServersIds = {
+  SystemDnsResolver: SystemDnsResolverTag,
   LocalDns: 'Local-DNS',
   RemoteDns: 'Remote-DNS',
   FakeIP: 'Fake-IP',
@@ -524,7 +526,7 @@ export const DefaultRoute = (): App.Route => ({
   final: DefaultOutboundIds.Fallback,
   find_process: false,
   default_domain_resolver: {
-    server: DefaultDnsServersIds.LocalDns,
+    server: DefaultDnsServersIds.SystemDnsResolver,
     client_subnet: '',
   },
 })
@@ -546,6 +548,21 @@ export const DefaultDnsServer = (): App.DnsServerConfig => ({
 })
 
 export const DefaultDnsServers = (): App.DnsServerConfig[] => [
+  {
+    id: DefaultDnsServersIds.SystemDnsResolver,
+    tag: DefaultDnsServersIds.SystemDnsResolver,
+    detour: '',
+    type: DnsServer.Local,
+    domain_resolver: '',
+    server: '',
+    server_port: '',
+    path: '',
+    interface: '',
+    inet4_range: '',
+    inet6_range: '',
+    hosts_path: [],
+    predefined: {},
+  },
   {
     id: DefaultDnsServersIds.FakeIP,
     tag: DefaultDnsServersIds.FakeIP,

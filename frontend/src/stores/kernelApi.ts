@@ -16,7 +16,11 @@ import {
 import {
   ProcessInfo,
   KillProcess,
+  Exec,
   ExecBackground,
+  AbsolutePath,
+  FileExists,
+  MoveFile,
   ReadFile,
   RemoveFile,
   WriteFile,
@@ -24,6 +28,8 @@ import {
 } from '@/bridge'
 import {
   CoreConfigFilePath,
+  CoreConfigBackupFilePath,
+  CoreConfigStagedFilePath,
   CorePidFilePath,
   CoreWorkingDirectory,
   getCoreLogFilePath,
@@ -53,6 +59,7 @@ import {
   getKernelRuntimeEnv,
   eventBus,
   sleep,
+  replaceFileWithRollback,
 } from '@/utils'
 
 import type { CoreApiConfig, CoreApiProxy } from '@/types/kernel'
@@ -402,10 +409,42 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
 
     starting.value = true
     try {
-      await generateConfigFile(profile, (config) =>
-        pluginsStore.onBeforeCoreStartTrigger(config, profile),
-      )
       const isAlpha = branch === Branch.Alpha
+      const coreFilePath = `${CoreWorkingDirectory}/${getKernelFileName(isAlpha)}`
+      await RemoveFile(CoreConfigStagedFilePath).catch(() => undefined)
+      await generateConfigFile(
+        profile,
+        (config) => pluginsStore.onBeforeCoreStartTrigger(config, profile),
+        CoreConfigStagedFilePath,
+      )
+      try {
+        await Exec(
+          coreFilePath,
+          [
+            'check',
+            '--disable-color',
+            '-c',
+            await AbsolutePath(CoreConfigStagedFilePath),
+            '-D',
+            await AbsolutePath(CoreWorkingDirectory),
+          ],
+          {
+            Env: getKernelRuntimeEnv(isAlpha),
+            WorkingDirectory: CoreWorkingDirectory,
+          },
+        )
+        await replaceFileWithRollback(
+          {
+            activePath: CoreConfigFilePath,
+            replacementPath: CoreConfigStagedFilePath,
+            backupPath: CoreConfigBackupFilePath,
+          },
+          { exists: FileExists, move: MoveFile, remove: RemoveFile },
+        )
+      } catch (error) {
+        await RemoveFile(CoreConfigStagedFilePath).catch(() => undefined)
+        throw error
+      }
       const pid = await runCoreProcess(isAlpha)
       pid && (await onCoreStarted(pid))
     } finally {

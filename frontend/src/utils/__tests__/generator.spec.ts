@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const mockGetSubscribeById = vi.fn()
+
 vi.mock('@/bridge', () => ({
   ReadFile: vi.fn(),
   WriteFile: vi.fn(),
@@ -25,7 +27,7 @@ vi.mock('@/stores', () => ({
     getRulesetById: vi.fn(),
   }),
   useSubscribesStore: () => ({
-    getSubscribeById: vi.fn(),
+    getSubscribeById: mockGetSubscribeById,
   }),
 }))
 
@@ -40,8 +42,10 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
+import { ReadFile } from '@/bridge'
 import {
   DefaultDns,
+  DefaultDnsServer,
   DefaultExperimental,
   DefaultInbounds,
   DefaultInboundDirect,
@@ -51,8 +55,8 @@ import {
   DefaultRoute,
   DefaultScript,
 } from '@/constant/profile'
-import { Inbound } from '@/enums/kernel'
-import { generateConfig } from '@/utils/generator'
+import { DnsServer, Inbound, Strategy } from '@/enums/kernel'
+import { generateConfig, generateDnsServerURL } from '@/utils/generator'
 import { restoreProfile } from '@/utils/restorer'
 
 const createProfile = (): IProfile => ({
@@ -71,6 +75,8 @@ const createProfile = (): IProfile => ({
 describe('generateConfig dns servers', () => {
   beforeEach(() => {
     mockAppSettingsStore.app.kernel.branch = 'main'
+    mockGetSubscribeById.mockReset()
+    vi.mocked(ReadFile).mockReset()
   })
 
   it('omits domain resolvers for IP-based dns servers', async () => {
@@ -81,7 +87,9 @@ describe('generateConfig dns servers', () => {
       enableScriptProcessing: false,
     })
 
-    const localDns = config.dns.servers.find((server: { tag: string }) => server.tag === 'Local-DNS')
+    const localDns = config.dns.servers.find(
+      (server: { tag: string }) => server.tag === 'Local-DNS',
+    )
     const remoteDns = config.dns.servers.find(
       (server: { tag: string }) => server.tag === 'Remote-DNS',
     )
@@ -102,9 +110,83 @@ describe('generateConfig dns servers', () => {
       enableScriptProcessing: false,
     })
 
-    expect(config.dns.servers.find((server: { tag: string }) => server.tag === 'Remote-DNS')).not.toHaveProperty(
-      'domain_resolver',
-    )
+    expect(
+      config.dns.servers.find((server: { tag: string }) => server.tag === 'Remote-DNS'),
+    ).not.toHaveProperty('domain_resolver')
+  })
+
+  it('keeps DNS rule strategy and default resolver client subnet', async () => {
+    const profile = createProfile()
+    profile.dns.rules[0]!.strategy = Strategy.PreferIPv4
+    profile.route.default_domain_resolver.client_subnet = '203.0.113.0/24'
+
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    expect(config.dns.rules[0]).toMatchObject({ strategy: 'prefer_ipv4' })
+    expect(config.route.default_domain_resolver).toMatchObject({
+      server: 'System-DNS-Resolver',
+      client_subnet: '203.0.113.0/24',
+    })
+    expect(config.route.default_mark).toBe(128)
+  })
+
+  it('migrates legacy public bootstrap resolvers to native DNS', async () => {
+    const profile = createProfile()
+    profile.dns.servers = profile.dns.servers.filter((server) => server.type !== DnsServer.Local)
+    profile.route.default_domain_resolver.server = 'Local-DNS-Resolver'
+
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    expect(config.dns.servers).toContainEqual({
+      tag: 'System-DNS-Resolver',
+      type: 'local',
+    })
+    expect(config.route.default_domain_resolver.server).toBe('System-DNS-Resolver')
+  })
+
+  it('preserves an explicitly selected custom default resolver', async () => {
+    const profile = createProfile()
+    const customResolver = {
+      ...DefaultDnsServer(),
+      id: 'custom-resolver',
+      tag: 'Custom-Resolver',
+      type: DnsServer.Udp,
+      server: '1.1.1.1',
+      server_port: '53',
+    }
+    profile.dns.servers.push(customResolver)
+    profile.route.default_domain_resolver.server = customResolver.id
+
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    expect(config.route.default_domain_resolver.server).toBe('Custom-Resolver')
+  })
+
+  it('formats IPv6 DNS server URLs with brackets', () => {
+    expect(
+      generateDnsServerURL({
+        ...DefaultDnsServer(),
+        type: DnsServer.Https,
+        server: '2606:4700:4700::1111',
+        server_port: '443',
+        path: '/dns-query',
+      }),
+    ).toBe('https://[2606:4700:4700::1111]:443/dns-query')
   })
 
   it('generates direct inbound configuration without users', async () => {
@@ -163,6 +245,58 @@ describe('generateConfig dns servers', () => {
     })
 
     expect(config.inbounds[0]).not.toHaveProperty('network')
+  })
+
+  it('preserves colons in inbound passwords', async () => {
+    const profile = createProfile()
+    profile.inbounds[0]!.mixed!.users = ['alice:p:a:ss']
+
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    expect(config.inbounds[0].users).toEqual([{ username: 'alice', password: 'p:a:ss' }])
+  })
+
+  it('reports a missing subscription instead of dereferencing an empty cache entry', async () => {
+    const profile = createProfile()
+    profile.outbounds[1]!.outbounds = [
+      { id: 'missing-subscription', type: 'Subscription', tag: 'missing-subscription' },
+    ]
+
+    await expect(
+      generateConfig(profile, {
+        enableStableConfigCompat: false,
+        enablePluginProcessing: false,
+        enableMixinProcessing: false,
+        enableScriptProcessing: false,
+      }),
+    ).rejects.toThrow('Subscription not found: missing-subscription')
+  })
+
+  it('disambiguates duplicate proxy tags from different subscriptions', async () => {
+    const profile = createProfile()
+    profile.outbounds[1]!.outbounds = [
+      { id: 'sub-a', type: 'Subscription', tag: 'sub-a' },
+      { id: 'sub-b', type: 'Subscription', tag: 'sub-b' },
+    ]
+    mockGetSubscribeById.mockImplementation((id: string) => ({ id, name: id, path: `${id}.json` }))
+    vi.mocked(ReadFile).mockResolvedValue(JSON.stringify([{ type: 'socks', tag: 'Same Node' }]))
+
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    expect(config.outbounds[1].outbounds).toEqual(['Same Node', 'Same Node [sub-b]'])
+    expect(config.outbounds.map((outbound: { tag: string }) => outbound.tag)).toEqual(
+      expect.arrayContaining(['Same Node', 'Same Node [sub-b]']),
+    )
   })
 
   it('restores direct inbound configuration', () => {

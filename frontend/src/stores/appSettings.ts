@@ -12,6 +12,7 @@ import {
   DefaultPluginHubSources,
   DefaultTestTimeout,
   DefaultTestURL,
+  MaxConcurrencyLimit,
   UserFilePath,
 } from '@/constant/app'
 import { DefaultConnections, DefaultCoreConfig } from '@/constant/kernel'
@@ -31,9 +32,57 @@ import { debounce, ignoredError, deepClone } from '@/utils'
 export const normalizeLogSettings = (settings: App.AppSettings['log'] | undefined) => {
   const retentionDays = Number(settings?.retentionDays)
   return {
-    retentionDays: Number.isFinite(retentionDays) && retentionDays > 0 ? retentionDays : 14,
+    retentionDays:
+      Number.isFinite(retentionDays) && retentionDays > 0
+        ? Math.min(3650, Math.trunc(retentionDays))
+        : 14,
   }
 }
+
+const boundedInteger = (value: unknown, fallback: number, min: number, max: number) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.trunc(parsed))) : fallback
+}
+
+const httpTestUrl = (value: unknown) => {
+  if (typeof value !== 'string' || !value.trim()) return DefaultTestURL
+  try {
+    const url = new URL(value.trim())
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : DefaultTestURL
+  } catch {
+    return DefaultTestURL
+  }
+}
+
+export const normalizeKernelSettings = (settings: App.AppSettings['kernel']) => ({
+  ...settings,
+  branch: String(settings.branch) === Branch.Alpha ? Branch.Alpha : Branch.Main,
+  profile: typeof settings.profile === 'string' ? settings.profile : '',
+  realMemoryUsage: typeof settings.realMemoryUsage === 'boolean' ? settings.realMemoryUsage : false,
+  autoClose: typeof settings.autoClose === 'boolean' ? settings.autoClose : true,
+  unAvailable: typeof settings.unAvailable === 'boolean' ? settings.unAvailable : true,
+  cardMode: typeof settings.cardMode === 'boolean' ? settings.cardMode : true,
+  sortByDelay: typeof settings.sortByDelay === 'boolean' ? settings.sortByDelay : false,
+  cardColumns: boundedInteger(settings.cardColumns, DefaultCardColumns, 1, 12),
+  testUrl: httpTestUrl(settings.testUrl),
+  testTimeout: boundedInteger(settings.testTimeout, DefaultTestTimeout, 1000, 60_000),
+  concurrencyLimit: boundedInteger(
+    settings.concurrencyLimit,
+    DefaultConcurrencyLimit,
+    1,
+    MaxConcurrencyLimit,
+  ),
+  controllerCloseMode:
+    String(settings.controllerCloseMode) === ControllerCloseMode.Button
+      ? ControllerCloseMode.Button
+      : ControllerCloseMode.All,
+  controllerSensitivity: boundedInteger(
+    settings.controllerSensitivity,
+    DefaultControllerSensitivity,
+    1,
+    10,
+  ),
+})
 
 export const mergeSettingsDefaults = <T>(defaults: T, input: unknown): T => {
   if (Array.isArray(defaults)) {
@@ -128,6 +177,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     await appStore.loadLocales(false, false)
 
     settings.log = normalizeLogSettings(settings.log)
+    settings.kernel = normalizeKernelSettings(settings.kernel)
 
     const legacyDesktopSettings = [
       'windowStartState',
