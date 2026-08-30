@@ -2,14 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { parse, stringify } from 'yaml'
 
-import {
-  GetSystemProxyBypass,
-  ReadFile,
-  WriteFile,
-  WindowSetSystemDefaultTheme,
-  WindowIsMaximised,
-  WindowIsMinimised,
-} from '@/bridge'
+import { ReadFile, WriteFile } from '@/bridge'
 import {
   Colors,
   DefaultCardColumns,
@@ -24,18 +17,16 @@ import {
 import { DefaultConnections, DefaultCoreConfig } from '@/constant/kernel'
 import {
   Theme,
-  WindowStartState,
   Lang,
   View,
   Color,
-  WebviewGpuPolicy,
   ControllerCloseMode,
   Branch,
   RequestProxyMode,
 } from '@/enums/app'
 import i18n, { loadLocale } from '@/lang'
-import { useAppStore, useEnvStore } from '@/stores'
-import { debounce, updateTrayAndMenus, ignoredError, deepClone, message } from '@/utils'
+import { useAppStore } from '@/stores'
+import { debounce, ignoredError, deepClone } from '@/utils'
 
 export const normalizeLogSettings = (settings: App.AppSettings['log'] | undefined) => {
   const retentionDays = Number(settings?.retentionDays)
@@ -43,9 +34,27 @@ export const normalizeLogSettings = (settings: App.AppSettings['log'] | undefine
     retentionDays: Number.isFinite(retentionDays) && retentionDays > 0 ? retentionDays : 14,
   }
 }
+
+export const mergeSettingsDefaults = <T>(defaults: T, input: unknown): T => {
+  if (Array.isArray(defaults)) {
+    return (Array.isArray(input) ? deepClone(input) : deepClone(defaults)) as T
+  }
+  if (defaults && typeof defaults === 'object') {
+    const source =
+      input && typeof input === 'object' && !Array.isArray(input)
+        ? (input as Record<string, unknown>)
+        : {}
+    const result = deepClone(source)
+    Object.entries(defaults as Record<string, unknown>).forEach(([key, value]) => {
+      result[key] = key in source ? mergeSettingsDefaults(value, source[key]) : deepClone(value)
+    })
+    return result as T
+  }
+  return (input === undefined || input === null ? defaults : input) as T
+}
+
 export const useAppSettingsStore = defineStore('app-settings', () => {
   const appStore = useAppStore()
-  const envStore = useEnvStore()
 
   let latestUserSettings: string
 
@@ -61,25 +70,11 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     rulesetsView: View.Grid,
     pluginsView: View.Grid,
     scheduledtasksView: View.Grid,
-    windowStartState: WindowStartState.Normal,
-    webviewGpuPolicy: WebviewGpuPolicy.OnDemand,
-    contentProtection: false,
-    width: 0,
-    height: 0,
-    exitOnClose: true,
-    closeKernelOnExit: true,
-    autoSetSystemProxy: true,
-    autoSetSystemDNS: false,
     requestProxyMode: RequestProxyMode.System,
     customProxy: '',
-    proxyBypassList: '',
-    systemProxyServices: [],
-    systemProxyDNS: '',
-    systemDefaultDNS: '',
     autoStartKernel: false,
     autoRestartKernel: false,
     userAgent: '',
-    startupDelay: 30,
     connections: DefaultConnections(),
     log: {
       retentionDays: 14,
@@ -98,8 +93,8 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
       concurrencyLimit: DefaultConcurrencyLimit,
       controllerCloseMode: ControllerCloseMode.All,
       controllerSensitivity: DefaultControllerSensitivity,
-      main: undefined as any,
-      alpha: undefined as any,
+      main: DefaultCoreConfig(),
+      alpha: DefaultCoreConfig(),
     },
     plugins: {
       sources: DefaultPluginHubSources(),
@@ -108,88 +103,68 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     githubApiToken: '',
     githubDownloadAcceleration: false,
     githubDownloadMirror: '',
-    multipleInstance: false,
-    addPluginToMenu: false,
-    addGroupToMenu: false,
-    rollingRelease: true,
-    debugOutline: false,
-    debugNoAnimation: false,
-    debugNoRounded: false,
-    debugBorder: false,
-    debugUsePointer: false,
     pages: ['Overview', 'Profiles', 'Subscriptions', 'Plugins'],
   })
 
-  const saveAppSettings = debounce((config: string) => {
-    WriteFile(UserFilePath, config)
-  }, 500)
+  const saveAppSettings = debounce(async (config: string) => WriteFile(UserFilePath, config), 500)
 
   const setupAppSettings = async () => {
     const data = await ignoredError(ReadFile, UserFilePath)
-    let settings: App.AppSettings
+    let parsedSettings: unknown = {}
+    let originalSettings = ''
+    let shouldPersist = !data
     if (data) {
-      settings = parse(data)
-    } else {
-      settings = deepClone(app.value)
+      try {
+        parsedSettings = parse(data)
+        originalSettings = stringify(parsedSettings)
+      } catch (error) {
+        console.error('Invalid user settings, restoring defaults:', error)
+        await WriteFile(`${UserFilePath}.invalid-${Date.now()}`, data).catch(() => undefined)
+        shouldPersist = true
+      }
     }
+    const settings = mergeSettingsDefaults(deepClone(app.value), parsedSettings)
 
     await appStore.loadLocales(false, false)
 
-    if (!settings.kernel.main) {
-      settings.kernel.main = DefaultCoreConfig()
-      settings.kernel.alpha = DefaultCoreConfig()
-    }
     settings.log = normalizeLogSettings(settings.log)
-    if (!settings.proxyBypassList) {
-      settings.proxyBypassList = (await ignoredError(GetSystemProxyBypass)) || ''
-    }
-    if ('darwinSystemProxyServices' in settings) {
-      settings.systemProxyServices = settings.darwinSystemProxyServices as string[]
-      delete settings.darwinSystemProxyServices
-    }
-    const defaultSystemProxyServices = envStore.env.os === 'darwin' ? ['Ethernet', 'Wi-Fi'] : []
-    if (!data) {
-      settings.systemProxyServices = defaultSystemProxyServices
-    } else if (!settings.systemProxyServices) {
-      settings.systemProxyServices = defaultSystemProxyServices
-    } else if (
-      envStore.env.os === 'linux' &&
-      settings.systemProxyServices.join(',') === 'Ethernet,Wi-Fi'
-    ) {
-      settings.systemProxyServices = defaultSystemProxyServices
-    }
-    if (settings.autoSetSystemDNS === undefined) {
-      settings.autoSetSystemDNS = false
-    }
-    if (settings.systemProxyDNS === undefined) {
-      settings.systemProxyDNS = ''
-    }
-    if (settings.systemDefaultDNS === undefined) {
-      settings.systemDefaultDNS = ''
-    }
-    if (!settings.requestProxyMode) {
-      settings.requestProxyMode = RequestProxyMode.System
-    }
-    if (settings.customProxy === undefined) {
-      settings.customProxy = ''
-    }
-    if (settings.githubDownloadAcceleration === undefined) {
-      settings.githubDownloadAcceleration = false
-    }
-    if (settings.githubDownloadMirror === undefined) {
-      settings.githubDownloadMirror = ''
-    }
-    if (!settings.plugins) {
-      settings.plugins = {
-        sources: DefaultPluginHubSources(),
-      }
-    }
-    if (settings.debugUsePointer === undefined) {
-      settings.debugUsePointer = false
-    }
 
+    const legacyDesktopSettings = [
+      'windowStartState',
+      'webviewGpuPolicy',
+      'contentProtection',
+      'width',
+      'height',
+      'exitOnClose',
+      'startupDelay',
+      'multipleInstance',
+      'addPluginToMenu',
+      'addGroupToMenu',
+      'autoSetSystemProxy',
+      'autoSetSystemDNS',
+      'proxyBypassList',
+      'systemProxyServices',
+      'systemProxyDNS',
+      'systemDefaultDNS',
+      'darwinSystemProxyServices',
+      'closeKernelOnExit',
+      'rollingRelease',
+      'debugBorder',
+      'debugOutline',
+      'debugNoAnimation',
+      'debugNoRounded',
+      'debugUsePointer',
+    ]
+    const settingsRecord = settings as unknown as Record<string, unknown>
+    legacyDesktopSettings.forEach((key) => delete settingsRecord[key])
+
+    const normalizedSettings = stringify(settings)
+    shouldPersist ||= normalizedSettings !== originalSettings
     app.value = settings
-    latestUserSettings = stringify(app.value)
+    latestUserSettings = normalizedSettings
+    if (shouldPersist) {
+      await WriteFile(UserFilePath, normalizedSettings)
+    }
   }
 
   const applyAppSettings = {
@@ -214,35 +189,8 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
       document.documentElement.style.setProperty('--primary-color', primary)
       document.documentElement.style.setProperty('--secondary-color', secondary)
     },
-    feature(
-      outline: boolean,
-      noAnimation: boolean,
-      noRounded: boolean,
-      border: boolean,
-      usePointer: boolean,
-    ) {
-      document.body.setAttribute('feature-outline', String(outline))
-      document.body.setAttribute('feature-no-animation', String(noAnimation))
-      document.body.setAttribute('feature-no-rounded', String(noRounded))
-      document.body.setAttribute('feature-border', String(border))
-      document.body.setAttribute('feature-use-pointer', String(usePointer))
-    },
     fontFamily(fontFamily: string) {
       document.body.style.fontFamily = fontFamily
-    },
-    windowSize(width: number, height: number) {
-      app.value.width = width
-      app.value.height = height
-    },
-    systemProxyBypass() {
-      if (envStore.systemProxy) {
-        envStore.setSystemProxy().catch((err) => message.error(err))
-      }
-    },
-    systemDNS() {
-      if (app.value.autoSetSystemDNS) {
-        envStore.setSystemDNS(envStore.systemDNSSet).catch((err) => message.error(err))
-      }
     },
   }
 
@@ -252,18 +200,13 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     applyAppSettings.color(settings.color, settings.primaryColor, settings.secondaryColor)
     applyAppSettings.lang(settings.lang)
     applyAppSettings.fontFamily(settings.fontFamily)
-    applyAppSettings.feature(
-      settings.debugOutline,
-      settings.debugNoAnimation,
-      settings.debugNoRounded,
-      settings.debugBorder,
-      settings.debugUsePointer,
-    )
     const lastModifiedSettings = stringify(settings)
     if (latestUserSettings !== lastModifiedSettings) {
-      saveAppSettings(lastModifiedSettings).then(() => {
-        latestUserSettings = lastModifiedSettings
-      })
+      saveAppSettings(lastModifiedSettings)
+        .then(() => {
+          latestUserSettings = lastModifiedSettings
+        })
+        .catch((error) => console.error('Failed to save user settings:', error))
     } else {
       saveAppSettings.cancel()
     }
@@ -286,47 +229,8 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     } else {
       document.body.setAttribute('theme-mode', theme)
     }
-    WindowSetSystemDefaultTheme()
   }
   watch(themeMode, setAppTheme, { immediate: true })
-
-  /* Apply WindowSize */
-  const onWindowSizeChange = debounce(async () => {
-    const [isMinimised, isMaximised] = await Promise.all([WindowIsMinimised(), WindowIsMaximised()])
-    if (!isMinimised && !isMaximised) {
-      const w = document.documentElement.clientWidth
-      const h = document.documentElement.clientHeight
-      applyAppSettings.windowSize(w, h)
-    }
-  }, 1000)
-  window.addEventListener('resize', onWindowSizeChange)
-
-  /* Apply TrayAndMenus */
-  watch(
-    [
-      themeMode,
-      appStore.locales,
-      () => app.value.color,
-      () => app.value.lang,
-      () => app.value.addPluginToMenu,
-    ],
-    updateTrayAndMenus,
-  )
-
-  /* Apply SystemProxyBypass */
-  const setSystemProxyBypass = debounce(() => {
-    applyAppSettings.systemProxyBypass()
-  }, 3000)
-  watch(() => [app.value.proxyBypassList, app.value.systemProxyServices], setSystemProxyBypass)
-
-  /* Apply SystemDNS */
-  const setSystemDNS = debounce(() => {
-    applyAppSettings.systemDNS()
-  }, 3000)
-  watch(
-    () => [app.value.systemProxyServices, app.value.systemProxyDNS, app.value.systemDefaultDNS],
-    setSystemDNS,
-  )
 
   return { setupAppSettings, app, themeMode }
 })

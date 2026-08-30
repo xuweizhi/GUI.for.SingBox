@@ -1,8 +1,7 @@
-import { ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
 import fs from 'node:fs'
 import path from 'node:path'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
 
 const captured = vi.fn()
 const mockDnsQuery = vi.fn()
@@ -261,11 +260,7 @@ describe('useRuntimeNetworkCheck', () => {
       profilesStore.currentProfile,
       kernelApiStore.proxies,
     )
-    expect(mockGetProxyDelay).toHaveBeenCalledWith(
-      'HK%2001',
-      'https://probe.example',
-      7000,
-    )
+    expect(mockGetProxyDelay).toHaveBeenCalledWith('HK%2001', 'https://probe.example', 7000)
   })
 
   it('falls back to default test url and timeout when app settings are empty', async () => {
@@ -350,14 +345,13 @@ describe('useRuntimeNetworkCheck', () => {
     expect(mockGetProxyDelay).not.toHaveBeenCalled()
   })
 
-  it('keeps dynamic bridge imports for desktop-only bridge code', () => {
+  it('uses only the browser bridge', () => {
     const source = fs.readFileSync(
       path.resolve('src/views/NetCheckView/useRuntimeNetworkCheck.ts'),
       'utf8',
     )
 
-    expect(source).not.toContain("import * as Bridge from '@/bridge/wailsjs/go/bridge/App'")
-    expect(source).toContain("import('@/bridge/browser/go/bridge/App')")
-    expect(source).toContain("import('@/bridge/wailsjs/go/bridge/App')")
+    expect(source).toContain("import * as Bridge from '@/bridge/browser/go/bridge/App'")
+    expect(source).not.toContain('wailsjs')
   })
 })

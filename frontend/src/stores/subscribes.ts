@@ -7,7 +7,6 @@ import { DefaultSubscribeScript, SubscribesFilePath } from '@/constant/app'
 import { DefaultExcludeProtocols } from '@/constant/kernel'
 import { PluginTriggerEvent, RequestMethod, RequestProxyMode } from '@/enums/app'
 import { useAppSettingsStore, usePluginsStore, useProfilesStore } from '@/stores'
-import { isWebui } from '@/utils/env'
 import {
   sampleID,
   isValidSubJson,
@@ -55,7 +54,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       requestProxyMode === RequestProxyMode.Global ? undefined : requestProxyMode,
       requestProxyMode === RequestProxyMode.Global ? undefined : customProxy,
     )
-    if (proxy || explicitRequestProxyMode || !isWebui) return proxy
+    if (proxy || explicitRequestProxyMode) return proxy
 
     const appSettingsStore = useAppSettingsStore()
     if (

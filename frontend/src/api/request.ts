@@ -65,7 +65,7 @@ export class Request {
 
     const res = await fetch(url, init)
 
-    if (res.status === 401) {
+    if (res.status === 401 && res.headers.get('X-GFS-WebUI-Auth') === 'required') {
       await this.onUnauthorized()
       throw 'auth.invalidToken'
     }

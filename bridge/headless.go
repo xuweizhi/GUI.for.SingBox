@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -12,10 +13,13 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	neturl "net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -24,21 +28,23 @@ import (
 )
 
 const (
-	webUIRPCEndpoint    = "/__webui/api/rpc"
-	webUIEmitEndpoint   = "/__webui/api/emit"
-	webUISSEEndpoint    = "/__webui/api/events"
-	webUICoreEndpoint   = "/__webui/core/"
-	webUICoreWSEndpoint = "/__webui/core/ws/"
-	webUITokenCookie    = "gfs_webui_token"
+	webUIRPCEndpoint     = "/__webui/api/rpc"
+	webUIEmitEndpoint    = "/__webui/api/emit"
+	webUISSEEndpoint     = "/__webui/api/events"
+	webUISessionEndpoint = "/__webui/api/session"
+	webUICoreEndpoint    = "/__webui/core/"
+	webUICoreWSEndpoint  = "/__webui/core/ws/"
+	webUITokenCookie     = "gfs_webui_token"
+	webUIAuthHeader      = "X-GFS-WebUI-Auth"
+	webUITokenFile       = "data/webui-token"
+	webUIMaxRPCBody      = 16 << 20
+	webUIMaxEmitBody     = 1 << 20
 )
 
 type HeadlessRuntime struct {
-	Hub          *eventHub
 	shutdown     chan struct{}
 	shutdownOnce sync.Once
-	server       *http.Server
 	listenAddr   string
-	token        string
 }
 
 type HeadlessOptions struct {
@@ -56,23 +62,23 @@ type clientEmitRequest struct {
 	Data []any  `json:"data"`
 }
 
+type sessionRequest struct {
+	Token string `json:"token"`
+}
+
 type headlessAuth struct {
 	token string
 }
 
-func RunHeadless(assets embed.FS, app *App, options HeadlessOptions) error {
+func RunHeadless(ctx context.Context, assets embed.FS, app *App, options HeadlessOptions) error {
 	listen := strings.TrimSpace(options.Listen)
 	if listen == "" {
 		listen = "127.0.0.1:18080"
 	}
 
-	token := strings.TrimSpace(options.Token)
-	if token == "" && !isLoopbackListen(listen) {
-		generated, err := generateHeadlessToken()
-		if err != nil {
-			return err
-		}
-		token = generated
+	token, tokenPath, err := resolveHeadlessToken(options.Token)
+	if err != nil {
+		return err
 	}
 
 	webuiFS, err := fs.Sub(assets, "frontend/dist/webui")
@@ -80,24 +86,11 @@ func RunHeadless(assets embed.FS, app *App, options HeadlessOptions) error {
 		return fmt.Errorf("headless webui assets are missing: %w", err)
 	}
 
-	Env.RuntimeMode = RuntimeModeWebUI
-	app.Ctx = context.Background()
-	app.Headless = &HeadlessRuntime{
-		Hub:      newEventHub(),
-		shutdown: make(chan struct{}),
-		token:    token,
-	}
-	if err := app.startHeadlessCoreIfNeeded(); err != nil {
-		log.Printf("Headless core startup skipped: %v", err)
-	}
-	if err := app.StartScheduledTaskWorker(); err != nil {
-		log.Printf("Scheduled task worker unavailable: %v", err)
-	}
-
 	auth := &headlessAuth{token: token}
 	mux := http.NewServeMux()
-	mux.Handle(webUIRPCEndpoint, auth.wrap(http.HandlerFunc(app.handleRPCCall)))
-	mux.Handle(webUIEmitEndpoint, auth.wrap(http.HandlerFunc(app.handleClientEmit)))
+	mux.Handle(webUISessionEndpoint, sameOriginOnly(http.HandlerFunc(auth.handleSession)))
+	mux.Handle(webUIRPCEndpoint, sameOriginOnly(auth.wrap(http.HandlerFunc(app.handleRPCCall))))
+	mux.Handle(webUIEmitEndpoint, sameOriginOnly(auth.wrap(http.HandlerFunc(app.handleClientEmit))))
 	mux.Handle(webUISSEEndpoint, auth.wrap(http.HandlerFunc(app.handleEventStream)))
 	mux.Handle(webUICoreWSEndpoint, auth.wrap(http.HandlerFunc(app.handleCoreWebSocketProxy)))
 	mux.Handle(webUICoreEndpoint, auth.wrap(http.HandlerFunc(app.handleCoreProxy)))
@@ -106,23 +99,36 @@ func RunHeadless(assets embed.FS, app *App, options HeadlessOptions) error {
 	}))
 
 	server := &http.Server{
-		Addr:    listen,
-		Handler: mux,
+		Addr:              listen,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
 	}
-	app.Headless.server = server
 
 	listener, err := net.Listen("tcp", listen)
 	if err != nil {
 		return err
 	}
-	app.Headless.listenAddr = listener.Addr().String()
+
+	app.Ctx = ctx
+	app.Headless = &HeadlessRuntime{
+		shutdown:   make(chan struct{}),
+		listenAddr: listener.Addr().String(),
+	}
+	if err := app.startHeadlessCoreIfNeeded(); err != nil {
+		log.Printf("Headless core startup skipped: %v", err)
+	}
+	if err := app.StartScheduledTaskWorker(); err != nil {
+		log.Printf("Scheduled task worker unavailable: %v", err)
+	}
 
 	log.Printf("Headless WebUI listening on %s", app.Headless.listenAddr)
-	if accessURL := buildLocalAccessURL(app.Headless.listenAddr, token); accessURL != "" {
+	if accessURL := buildLocalAccessURL(app.Headless.listenAddr); accessURL != "" {
 		log.Printf("Open locally: %s", accessURL)
 	}
-	if token != "" {
-		log.Printf("WebUI token: %s", token)
+	if tokenPath != "" {
+		log.Printf("WebUI token file: %s", tokenPath)
 	}
 
 	serverErr := make(chan error, 1)
@@ -132,14 +138,21 @@ func RunHeadless(assets embed.FS, app *App, options HeadlessOptions) error {
 
 	select {
 	case err := <-serverErr:
+		app.StopScheduledTaskWorker()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
-	case <-app.Headless.shutdown:
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	case <-ctx.Done():
+		app.StopScheduledTaskWorker()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return server.Shutdown(ctx)
+		return server.Shutdown(shutdownCtx)
+	case <-app.Headless.shutdown:
+		app.StopScheduledTaskWorker()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return server.Shutdown(shutdownCtx)
 	}
 }
 
@@ -148,450 +161,25 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !hasJSONContentType(r) {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, webUIMaxRPCBody)
 	var req rpcRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	var (
-		result any
-		err    error
-	)
-
-	switch req.Method {
-	case "AbsolutePath":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.AbsolutePath(arg)
-	case "CloseMMDB":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		idArg, decodeErr := decodeRPCArg[string](req.Args, 1)
-		err = decodeErr
-		result = a.CloseMMDB(pathArg, idArg)
-	case "CopyFile":
-		source, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		target, decodeErr := decodeRPCArg[string](req.Args, 1)
-		err = decodeErr
-		result = a.CopyFile(source, target)
-	case "Download":
-		method, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		urlArg, decodeErr := decodeRPCArg[string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 2)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		headers, decodeErr := decodeRPCArg[map[string]string](req.Args, 3)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		event, decodeErr := decodeRPCArg[string](req.Args, 4)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[RequestOptions](req.Args, 5)
-		err = decodeErr
-		result = a.Download(method, urlArg, pathArg, headers, event, optionsArg)
-	case "Exec":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		argsArg, decodeErr := decodeRPCArg[[]string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[ExecOptions](req.Args, 2)
-		err = decodeErr
-		result = a.Exec(pathArg, argsArg, optionsArg)
-	case "ExecBackground":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		argsArg, decodeErr := decodeRPCArg[[]string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		outEvent, decodeErr := decodeRPCArg[string](req.Args, 2)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		endEvent, decodeErr := decodeRPCArg[string](req.Args, 3)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[ExecOptions](req.Args, 4)
-		err = decodeErr
-		result = a.ExecBackground(pathArg, argsArg, outEvent, endEvent, optionsArg)
-	case "ExitApp":
-		a.ExitApp()
-		result = nil
-	case "FileExists":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.FileExists(arg)
-	case "FileSHA256":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.FileSHA256(arg)
-	case "FindListeningProcess":
-		arg, decodeErr := decodeRPCArg[uint32](req.Args, 0)
-		err = decodeErr
-		result = a.FindListeningProcess(arg)
-	case "GetEnv":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.GetEnv(arg)
-	case "GetInterfaces":
-		result = a.GetInterfaces()
-	case "GetScheduledTaskWorkerLogs":
-		result = a.GetScheduledTaskWorkerLogs()
-	case "RecordScheduledTaskLog":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		result = a.RecordScheduledTaskLog(arg)
-	case "GetScheduledTaskWorkerStatus":
-		result = a.GetScheduledTaskWorkerStatus()
-	case "GetSystemProxy":
-		result = a.GetSystemProxy()
-	case "GetSystemProxyBypass":
-		result = a.GetSystemProxyBypass()
-	case "IsStartup":
-		result = a.IsStartup()
-	case "KillProcess":
-		pid, decodeErr := decodeRPCArg[int](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		timeout, decodeErr := decodeRPCArg[int](req.Args, 1)
-		err = decodeErr
-		result = a.KillProcess(pid, timeout)
-	case "ListServer":
-		result = a.ListServer()
-	case "MakeDir":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.MakeDir(arg)
-	case "MoveFile":
-		source, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		target, decodeErr := decodeRPCArg[string](req.Args, 1)
-		err = decodeErr
-		result = a.MoveFile(source, target)
-	case "OpenDir":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.OpenDir(arg)
-	case "OpenMMDB":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		idArg, decodeErr := decodeRPCArg[string](req.Args, 1)
-		err = decodeErr
-		result = a.OpenMMDB(pathArg, idArg)
-	case "OpenURI":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.OpenURI(arg)
-	case "ProcessInfo":
-		arg, decodeErr := decodeRPCArg[int32](req.Args, 0)
-		err = decodeErr
-		result = a.ProcessInfo(arg)
-	case "ProcessMemory":
-		arg, decodeErr := decodeRPCArg[int32](req.Args, 0)
-		err = decodeErr
-		result = a.ProcessMemory(arg)
-	case "QueryMMDB":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		ipArg, decodeErr := decodeRPCArg[string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		typeArg, decodeErr := decodeRPCArg[string](req.Args, 2)
-		err = decodeErr
-		result = a.QueryMMDB(pathArg, ipArg, typeArg)
-	case "ReadDir":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.ReadDir(arg)
-	case "ReadFile":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[IOOptions](req.Args, 1)
-		err = decodeErr
-		result = a.ReadFile(pathArg, optionsArg)
-	case "ReloadScheduledTaskWorker":
-		result = a.ReloadScheduledTaskWorker()
-	case "RemoveFile":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.RemoveFile(arg)
-	case "Requests":
-		method, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		urlArg, decodeErr := decodeRPCArg[string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		headers, decodeErr := decodeRPCArg[map[string]string](req.Args, 2)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		bodyArg, decodeErr := decodeRPCArg[string](req.Args, 3)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[RequestOptions](req.Args, 4)
-		err = decodeErr
-		result = a.Requests(method, urlArg, headers, bodyArg, optionsArg)
-	case "RestartApp":
-		result = a.RestartApp()
-	case "ShowMainWindow":
-		a.ShowMainWindow()
-		result = nil
-	case "StartServer":
-		address, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		serverID, decodeErr := decodeRPCArg[string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[ServerOptions](req.Args, 2)
-		err = decodeErr
-		result = a.StartServer(address, serverID, optionsArg)
-	case "StopServer":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.StopServer(arg)
-	case "RunScheduledTaskWorker":
-		arg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		err = decodeErr
-		result = a.RunScheduledTaskWorker(arg)
-	case "SetSystemDNS":
-		servers, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		services, decodeErr := decodeRPCArg[[]string](req.Args, 1)
-		err = decodeErr
-		result = a.SetSystemDNS(servers, services)
-	case "SetSystemProxy":
-		enable, decodeErr := decodeRPCArg[bool](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		server, decodeErr := decodeRPCArg[string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		proxyType, decodeErr := decodeRPCArg[string](req.Args, 2)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		bypass, decodeErr := decodeRPCArg[string](req.Args, 3)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		darwinServices, decodeErr := decodeRPCArg[[]string](req.Args, 4)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		result = a.SetSystemProxy(enable, server, proxyType, bypass, darwinServices)
-	case "TcpPing":
-		address, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[NetOptions](req.Args, 1)
-		err = decodeErr
-		result = a.TcpPing(address, optionsArg)
-	case "TcpRequest":
-		address, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		payload, decodeErr := decodeRPCArg[string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[NetOptions](req.Args, 2)
-		err = decodeErr
-		result = a.TcpRequest(address, payload, optionsArg)
-	case "UdpRequest":
-		address, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		payload, decodeErr := decodeRPCArg[string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[NetOptions](req.Args, 2)
-		err = decodeErr
-		result = a.UdpRequest(address, payload, optionsArg)
-	case "UnzipGZFile":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		output, decodeErr := decodeRPCArg[string](req.Args, 1)
-		err = decodeErr
-		result = a.UnzipGZFile(pathArg, output)
-	case "UnzipTarGZFile":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		output, decodeErr := decodeRPCArg[string](req.Args, 1)
-		err = decodeErr
-		result = a.UnzipTarGZFile(pathArg, output)
-	case "UnzipZIPFile":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		output, decodeErr := decodeRPCArg[string](req.Args, 1)
-		err = decodeErr
-		result = a.UnzipZIPFile(pathArg, output)
-	case "UpdateTray":
-		trayArg, decodeErr := decodeRPCArg[TrayContent](req.Args, 0)
-		err = decodeErr
-		a.UpdateTray(trayArg)
-		result = nil
-	case "UpdateTrayAndMenus":
-		trayArg, decodeErr := decodeRPCArg[TrayContent](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		menuArg, decodeErr := decodeRPCArg[[]MenuItem](req.Args, 1)
-		err = decodeErr
-		a.UpdateTrayAndMenus(trayArg, menuArg)
-		result = nil
-	case "UpdateTrayMenus":
-		menuArg, decodeErr := decodeRPCArg[[]MenuItem](req.Args, 0)
-		err = decodeErr
-		a.UpdateTrayMenus(menuArg)
-		result = nil
-	case "ClearScheduledTaskWorkerLogs":
-		result = a.ClearScheduledTaskWorkerLogs()
-	case "Upload":
-		method, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		urlArg, decodeErr := decodeRPCArg[string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 2)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		headers, decodeErr := decodeRPCArg[map[string]string](req.Args, 3)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		event, decodeErr := decodeRPCArg[string](req.Args, 4)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[RequestOptions](req.Args, 5)
-		err = decodeErr
-		result = a.Upload(method, urlArg, pathArg, headers, event, optionsArg)
-	case "WriteFile":
-		pathArg, decodeErr := decodeRPCArg[string](req.Args, 0)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		content, decodeErr := decodeRPCArg[string](req.Args, 1)
-		if decodeErr != nil {
-			err = decodeErr
-			break
-		}
-		optionsArg, decodeErr := decodeRPCArg[IOOptions](req.Args, 2)
-		err = decodeErr
-		result = a.WriteFile(pathArg, content, optionsArg)
-	default:
-		http.Error(w, "Unknown RPC method", http.StatusNotFound)
-		return
-	}
-
+	result, err := a.dispatchRPCCall(req)
 	if err != nil {
+		if errors.Is(err, errUnknownRPCMethod) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -599,12 +187,289 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 	writeHeadlessJSON(w, result)
 }
 
+var errUnknownRPCMethod = errors.New("unknown RPC method")
+
+func (a *App) dispatchRPCCall(req rpcRequest) (any, error) {
+	switch req.Method {
+	case "AbsolutePath":
+		var value string
+		if err := decodeRPCArgs(req.Args, &value); err != nil {
+			return nil, err
+		}
+		return a.AbsolutePath(value), nil
+	case "CloseMMDB":
+		var filePath, id string
+		if err := decodeRPCArgs(req.Args, &filePath, &id); err != nil {
+			return nil, err
+		}
+		return a.CloseMMDB(filePath, id), nil
+	case "CopyFile":
+		var source, target string
+		if err := decodeRPCArgs(req.Args, &source, &target); err != nil {
+			return nil, err
+		}
+		return a.CopyFile(source, target), nil
+	case "Download":
+		var method, urlArg, filePath, event string
+		var headers map[string]string
+		var options RequestOptions
+		if err := decodeRPCArgs(req.Args, &method, &urlArg, &filePath, &headers, &event, &options); err != nil {
+			return nil, err
+		}
+		return a.Download(method, urlArg, filePath, headers, event, options), nil
+	case "Exec":
+		var executable string
+		var args []string
+		var options ExecOptions
+		if err := decodeRPCArgs(req.Args, &executable, &args, &options); err != nil {
+			return nil, err
+		}
+		return a.Exec(executable, args, options), nil
+	case "ExecBackground":
+		var executable, outEvent, endEvent string
+		var args []string
+		var options ExecOptions
+		if err := decodeRPCArgs(req.Args, &executable, &args, &outEvent, &endEvent, &options); err != nil {
+			return nil, err
+		}
+		return a.ExecBackground(executable, args, outEvent, endEvent, options), nil
+	case "FileExists":
+		var value string
+		if err := decodeRPCArgs(req.Args, &value); err != nil {
+			return nil, err
+		}
+		return a.FileExists(value), nil
+	case "FileSHA256":
+		var value string
+		if err := decodeRPCArgs(req.Args, &value); err != nil {
+			return nil, err
+		}
+		return a.FileSHA256(value), nil
+	case "FindListeningProcess":
+		var port uint32
+		if err := decodeRPCArgs(req.Args, &port); err != nil {
+			return nil, err
+		}
+		return a.FindListeningProcess(port), nil
+	case "GetEnv":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.GetEnv(), nil
+	case "GetInterfaces":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.GetInterfaces(), nil
+	case "GetScheduledTaskWorkerLogs":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.GetScheduledTaskWorkerLogs(), nil
+	case "RecordScheduledTaskLog":
+		var value string
+		if err := decodeRPCArgs(req.Args, &value); err != nil {
+			return nil, err
+		}
+		return a.RecordScheduledTaskLog(value), nil
+	case "GetScheduledTaskWorkerStatus":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.GetScheduledTaskWorkerStatus(), nil
+	case "GetSystemProxy":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.GetSystemProxy(), nil
+	case "GetSystemProxyBypass":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.GetSystemProxyBypass(), nil
+	case "IsStartup":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.IsStartup(), nil
+	case "KillProcess":
+		var pid, timeout int
+		if err := decodeRPCArgs(req.Args, &pid, &timeout); err != nil {
+			return nil, err
+		}
+		return a.KillProcess(pid, timeout), nil
+	case "ListServer":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.ListServer(), nil
+	case "MakeDir":
+		var value string
+		if err := decodeRPCArgs(req.Args, &value); err != nil {
+			return nil, err
+		}
+		return a.MakeDir(value), nil
+	case "MoveFile":
+		var source, target string
+		if err := decodeRPCArgs(req.Args, &source, &target); err != nil {
+			return nil, err
+		}
+		return a.MoveFile(source, target), nil
+	case "OpenMMDB":
+		var filePath, id string
+		if err := decodeRPCArgs(req.Args, &filePath, &id); err != nil {
+			return nil, err
+		}
+		return a.OpenMMDB(filePath, id), nil
+	case "ProcessInfo":
+		var pid int32
+		if err := decodeRPCArgs(req.Args, &pid); err != nil {
+			return nil, err
+		}
+		return a.ProcessInfo(pid), nil
+	case "ProcessMemory":
+		var pid int32
+		if err := decodeRPCArgs(req.Args, &pid); err != nil {
+			return nil, err
+		}
+		return a.ProcessMemory(pid), nil
+	case "QueryMMDB":
+		var filePath, ip, queryType string
+		if err := decodeRPCArgs(req.Args, &filePath, &ip, &queryType); err != nil {
+			return nil, err
+		}
+		return a.QueryMMDB(filePath, ip, queryType), nil
+	case "ReadDir":
+		var value string
+		if err := decodeRPCArgs(req.Args, &value); err != nil {
+			return nil, err
+		}
+		return a.ReadDir(value), nil
+	case "ReadFile":
+		var filePath string
+		var options IOOptions
+		if err := decodeRPCArgs(req.Args, &filePath, &options); err != nil {
+			return nil, err
+		}
+		return a.ReadFile(filePath, options), nil
+	case "ReloadScheduledTaskWorker":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.ReloadScheduledTaskWorker(), nil
+	case "RemoveFile":
+		var value string
+		if err := decodeRPCArgs(req.Args, &value); err != nil {
+			return nil, err
+		}
+		return a.RemoveFile(value), nil
+	case "Requests":
+		var method, urlArg, body string
+		var headers map[string]string
+		var options RequestOptions
+		if err := decodeRPCArgs(req.Args, &method, &urlArg, &headers, &body, &options); err != nil {
+			return nil, err
+		}
+		return a.Requests(method, urlArg, headers, body, options), nil
+	case "RestartApp":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.RestartApp(), nil
+	case "StartServer":
+		var address, serverID string
+		var options ServerOptions
+		if err := decodeRPCArgs(req.Args, &address, &serverID, &options); err != nil {
+			return nil, err
+		}
+		return a.StartServer(address, serverID, options), nil
+	case "StopServer":
+		var value string
+		if err := decodeRPCArgs(req.Args, &value); err != nil {
+			return nil, err
+		}
+		return a.StopServer(value), nil
+	case "RunScheduledTaskWorker":
+		var value string
+		if err := decodeRPCArgs(req.Args, &value); err != nil {
+			return nil, err
+		}
+		return a.RunScheduledTaskWorker(value), nil
+	case "TcpPing":
+		var address string
+		var options NetOptions
+		if err := decodeRPCArgs(req.Args, &address, &options); err != nil {
+			return nil, err
+		}
+		return a.TcpPing(address, options), nil
+	case "TcpRequest":
+		var address, payload string
+		var options NetOptions
+		if err := decodeRPCArgs(req.Args, &address, &payload, &options); err != nil {
+			return nil, err
+		}
+		return a.TcpRequest(address, payload, options), nil
+	case "UdpRequest":
+		var address, payload string
+		var options NetOptions
+		if err := decodeRPCArgs(req.Args, &address, &payload, &options); err != nil {
+			return nil, err
+		}
+		return a.UdpRequest(address, payload, options), nil
+	case "UnzipGZFile":
+		var filePath, output string
+		if err := decodeRPCArgs(req.Args, &filePath, &output); err != nil {
+			return nil, err
+		}
+		return a.UnzipGZFile(filePath, output), nil
+	case "UnzipTarGZFile":
+		var filePath, output string
+		if err := decodeRPCArgs(req.Args, &filePath, &output); err != nil {
+			return nil, err
+		}
+		return a.UnzipTarGZFile(filePath, output), nil
+	case "UnzipZIPFile":
+		var filePath, output string
+		if err := decodeRPCArgs(req.Args, &filePath, &output); err != nil {
+			return nil, err
+		}
+		return a.UnzipZIPFile(filePath, output), nil
+	case "ClearScheduledTaskWorkerLogs":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.ClearScheduledTaskWorkerLogs(), nil
+	case "Upload":
+		var method, urlArg, filePath, event string
+		var headers map[string]string
+		var options RequestOptions
+		if err := decodeRPCArgs(req.Args, &method, &urlArg, &filePath, &headers, &event, &options); err != nil {
+			return nil, err
+		}
+		return a.Upload(method, urlArg, filePath, headers, event, options), nil
+	case "WriteFile":
+		var filePath, content string
+		var options IOOptions
+		if err := decodeRPCArgs(req.Args, &filePath, &content, &options); err != nil {
+			return nil, err
+		}
+		return a.WriteFile(filePath, content, options), nil
+	default:
+		return nil, fmt.Errorf("%w: %s", errUnknownRPCMethod, req.Method)
+	}
+}
+
 func (a *App) handleClientEmit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !hasJSONContentType(r) {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, webUIMaxEmitBody)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -637,7 +502,7 @@ func (a *App) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ch, unsubscribe := a.Headless.Hub.subscribe()
+	ch, unsubscribe := a.eventHub().subscribe()
 	defer unsubscribe()
 
 	_, _ = io.WriteString(w, ": connected\n\n")
@@ -716,7 +581,7 @@ func (a *App) handleCoreWebSocketProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin: isSameOriginRequest,
 	}
 
 	clientConn, err := upgrader.Upgrade(w, r, nil)
@@ -755,10 +620,6 @@ func (a *headlessAuth) wrap(next http.Handler) http.Handler {
 }
 
 func (a *headlessAuth) authorize(w http.ResponseWriter, r *http.Request) bool {
-	if a.token == "" {
-		return true
-	}
-
 	matched := false
 	if cookie, err := r.Cookie(webUITokenCookie); err == nil && cookie.Value == a.token {
 		matched = true
@@ -766,24 +627,103 @@ func (a *headlessAuth) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if !matched && strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) == a.token {
 		matched = true
 	}
-	if !matched && r.URL.Query().Get("token") == a.token {
-		matched = true
-	}
 
 	if !matched {
+		w.Header().Set(webUIAuthHeader, "required")
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return false
 	}
 
+	a.setSessionCookie(w, r)
+	return true
+}
+
+func (a *headlessAuth) handleSession(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if !a.authorize(w, r) {
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodPost:
+		if !hasJSONContentType(r) {
+			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+		var request sessionRequest
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		candidate := strings.TrimSpace(request.Token)
+		if subtle.ConstantTimeCompare([]byte(candidate), []byte(a.token)) != 1 {
+			w.Header().Set(webUIAuthHeader, "required")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		a.setSessionCookie(w, r)
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodDelete:
+		http.SetCookie(w, &http.Cookie{
+			Name:     webUITokenCookie,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			Expires:  time.Unix(1, 0),
+			HttpOnly: true,
+			Secure:   requestIsHTTPS(r),
+			SameSite: http.SameSiteStrictMode,
+		})
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", "GET, POST, DELETE")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *headlessAuth) setSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     webUITokenCookie,
 		Value:    a.token,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   requestIsHTTPS(r),
+		SameSite: http.SameSiteStrictMode,
 	})
+}
 
-	return true
+func sameOriginOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isSameOriginRequest(r) {
+			http.Error(w, "Cross-origin request rejected", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isSameOriginRequest(r *http.Request) bool {
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	parsed, err := neturl.Parse(origin)
+	return err == nil && parsed.Host != "" && strings.EqualFold(parsed.Host, r.Host)
+}
+
+func requestIsHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
+func hasJSONContentType(r *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && mediaType == "application/json"
 }
 
 func serveHeadlessAssets(webuiFS fs.FS, w http.ResponseWriter, r *http.Request) {
@@ -816,13 +756,16 @@ func serveHeadlessAssets(webuiFS fs.FS, w http.ResponseWriter, r *http.Request) 
 	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(indexHTML))
 }
 
-func decodeRPCArg[T any](args []json.RawMessage, index int) (T, error) {
-	var value T
-	if index >= len(args) {
-		return value, fmt.Errorf("missing argument %d", index)
+func decodeRPCArgs(args []json.RawMessage, targets ...any) error {
+	if len(args) != len(targets) {
+		return fmt.Errorf("expected %d arguments, got %d", len(targets), len(args))
 	}
-	err := json.Unmarshal(args[index], &value)
-	return value, err
+	for index, target := range targets {
+		if err := json.Unmarshal(args[index], target); err != nil {
+			return fmt.Errorf("invalid argument %d: %w", index, err)
+		}
+	}
+	return nil
 }
 
 func writeHeadlessJSON(w http.ResponseWriter, value any) {
@@ -842,24 +785,6 @@ func writeHeadlessJSON(w http.ResponseWriter, value any) {
 	_, _ = w.Write(payload.Bytes())
 }
 
-func isLoopbackListen(address string) bool {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return false
-	}
-
-	host = strings.Trim(host, "[]")
-	switch host {
-	case "127.0.0.1", "::1", "localhost":
-		return true
-	case "":
-		return false
-	}
-
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
 func generateHeadlessToken() (string, error) {
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
@@ -868,7 +793,39 @@ func generateHeadlessToken() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func buildLocalAccessURL(listenAddr string, token string) string {
+func resolveHeadlessToken(configured string) (token string, generatedPath string, err error) {
+	if token = strings.TrimSpace(configured); token != "" {
+		return token, "", nil
+	}
+
+	tokenPath := resolvePath(webUITokenFile)
+	if content, readErr := os.ReadFile(tokenPath); readErr == nil {
+		token = strings.TrimSpace(string(content))
+		if token == "" {
+			return "", "", fmt.Errorf("stored WebUI token is empty: %s", tokenPath)
+		}
+		if chmodErr := os.Chmod(tokenPath, 0o600); chmodErr != nil {
+			return "", "", fmt.Errorf("secure WebUI token file: %w", chmodErr)
+		}
+		return token, tokenPath, nil
+	} else if !os.IsNotExist(readErr) {
+		return "", "", fmt.Errorf("read WebUI token file: %w", readErr)
+	}
+
+	token, err = generateHeadlessToken()
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o700); err != nil {
+		return "", "", fmt.Errorf("create WebUI token directory: %w", err)
+	}
+	if err := atomicWriteFile(tokenPath, []byte(token), 0o600); err != nil {
+		return "", "", fmt.Errorf("store WebUI token: %w", err)
+	}
+	return token, tokenPath, nil
+}
+
+func buildLocalAccessURL(listenAddr string) string {
 	host, port, err := net.SplitHostPort(listenAddr)
 	if err != nil {
 		return ""
@@ -884,11 +841,7 @@ func buildLocalAccessURL(listenAddr string, token string) string {
 		host = "[" + host + "]"
 	}
 
-	url := fmt.Sprintf("http://%s:%s/", host, port)
-	if token != "" {
-		url += "?token=" + neturl.QueryEscape(token)
-	}
-	return url
+	return fmt.Sprintf("http://%s:%s/", host, port)
 }
 
 func parseCoreProxyTarget(requestPath string, prefix string) (controller string, targetPath string, err error) {

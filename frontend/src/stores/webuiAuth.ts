@@ -2,7 +2,6 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import router from '@/router'
-import { isWebui } from '@/utils/env'
 import {
   WEBUI_TOKEN_STORAGE_KEY,
   buildLoginRedirect,
@@ -10,11 +9,7 @@ import {
 } from '@/utils/webuiAuth'
 
 type AuthStatus = 'idle' | 'checking' | 'authenticated'
-const WEBUI_AUTH_PROBE_ENDPOINT = '/__webui/api/rpc'
-const WEBUI_AUTH_PROBE_BODY = JSON.stringify({
-  method: 'GetEnv',
-  args: [''],
-})
+const WEBUI_SESSION_ENDPOINT = '/__webui/api/session'
 
 export const useWebuiAuthStore = defineStore('webui-auth', () => {
   const token = ref('')
@@ -24,7 +19,7 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
   const lastError = ref('')
 
   const hydrate = () => {
-    if (!isWebui || hydrated.value) return
+    if (hydrated.value) return
 
     token.value = localStorage.getItem(WEBUI_TOKEN_STORAGE_KEY) || ''
     hydrated.value = true
@@ -47,23 +42,17 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
 
   const verifyToken = async (candidate = token.value) => {
     const nextToken = candidate.trim()
-    if (!nextToken) {
-      clearToken()
-      status.value = 'idle'
-      return false
-    }
-
     status.value = 'checking'
 
     const response = await fetch(
-      `${WEBUI_AUTH_PROBE_ENDPOINT}?token=${encodeURIComponent(nextToken)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: WEBUI_AUTH_PROBE_BODY,
-      },
+      WEBUI_SESSION_ENDPOINT,
+      nextToken
+        ? {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: nextToken }),
+          }
+        : { method: 'GET' },
     )
 
     if (!response.ok) {
@@ -84,8 +73,6 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
 
   const ensureAuthenticated = async () => {
     hydrate()
-    if (!isWebui) return true
-    if (!token.value) return false
     if (status.value === 'authenticated') return true
     return verifyToken(token.value)
   }
@@ -97,15 +84,21 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
     lastError.value = 'auth.invalidToken'
 
     const currentPath = router.currentRoute.value.fullPath
-    await router.replace(currentPath.startsWith('/login') ? '/login' : buildLoginRedirect(currentPath))
+    await router.replace(
+      currentPath.startsWith('/login') ? '/login' : buildLoginRedirect(currentPath),
+    )
   }
 
   const logout = async () => {
-    clearToken()
-    status.value = 'idle'
-    bootstrapped.value = false
-    lastError.value = ''
-    await router.replace('/login')
+    try {
+      await fetch(WEBUI_SESSION_ENDPOINT, { method: 'DELETE' })
+    } finally {
+      clearToken()
+      status.value = 'idle'
+      bootstrapped.value = false
+      lastError.value = ''
+      await router.replace('/login')
+    }
   }
 
   return {

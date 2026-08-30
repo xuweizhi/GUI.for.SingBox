@@ -1,9 +1,23 @@
-import { invokeBridge } from "../../shared/webui";
+import { invokeBridge } from '../../shared/webui'
 
-export const AbsolutePath = (arg1: string) => invokeBridge("AbsolutePath", [arg1]);
-export const CloseMMDB = (arg1: string, arg2: string) => invokeBridge("CloseMMDB", [arg1, arg2]);
-export const CopyFile = (arg1: string, arg2: string) => invokeBridge("CopyFile", [arg1, arg2]);
-export const ClearScheduledTaskWorkerLogs = () => invokeBridge("ClearScheduledTaskWorkerLogs");
+type FlagResult = {
+  flag: boolean
+  data: string
+}
+
+type HTTPResult = {
+  flag: boolean
+  status: number
+  headers: Record<string, string[]>
+  body: string
+}
+
+const flagResult = (method: string, args: unknown[] = []) => invokeBridge<FlagResult>(method, args)
+
+export const AbsolutePath = (arg1: string) => flagResult('AbsolutePath', [arg1])
+export const CloseMMDB = (arg1: string, arg2: string) => flagResult('CloseMMDB', [arg1, arg2])
+export const CopyFile = (arg1: string, arg2: string) => flagResult('CopyFile', [arg1, arg2])
+export const ClearScheduledTaskWorkerLogs = () => flagResult('ClearScheduledTaskWorkerLogs')
 export const Download = (
   arg1: string,
   arg2: string,
@@ -11,85 +25,63 @@ export const Download = (
   arg4: Record<string, string>,
   arg5: string,
   arg6: Record<string, any>,
-) => invokeBridge("Download", [arg1, arg2, arg3, arg4, arg5, arg6]);
+) => invokeBridge<HTTPResult>('Download', [arg1, arg2, arg3, arg4, arg5, arg6])
 export const Exec = (arg1: string, arg2: string[], arg3: Record<string, any>) =>
-  invokeBridge("Exec", [arg1, arg2, arg3]);
+  flagResult('Exec', [arg1, arg2, arg3])
 export const ExecBackground = (
   arg1: string,
   arg2: string[],
   arg3: string,
   arg4: string,
   arg5: Record<string, any>,
-) => invokeBridge("ExecBackground", [arg1, arg2, arg3, arg4, arg5]);
-export const ExitApp = () => invokeBridge<void>("ExitApp");
-export const FileExists = (arg1: string) => invokeBridge("FileExists", [arg1]);
-export const FileSHA256 = (arg1: string) => invokeBridge("FileSHA256", [arg1]);
-export const FindListeningProcess = (arg1: number) => invokeBridge("FindListeningProcess", [arg1]);
-export const GetEnv = (arg1: string) => invokeBridge("GetEnv", [arg1]);
-export const GetInterfaces = () => invokeBridge("GetInterfaces");
-export const GetScheduledTaskWorkerLogs = () => invokeBridge("GetScheduledTaskWorkerLogs");
-export const GetScheduledTaskWorkerStatus = () => invokeBridge("GetScheduledTaskWorkerStatus");
-export const GetSystemProxy = () => invokeBridge("GetSystemProxy");
-export const GetSystemProxyBypass = () => invokeBridge("GetSystemProxyBypass");
-export const IsStartup = () => invokeBridge<boolean>("IsStartup");
-export const KillProcess = (arg1: number, arg2: number) =>
-  invokeBridge("KillProcess", [arg1, arg2]);
-export const ListServer = () => invokeBridge("ListServer");
-export const MakeDir = (arg1: string) => invokeBridge("MakeDir", [arg1]);
-export const MoveFile = (arg1: string, arg2: string) => invokeBridge("MoveFile", [arg1, arg2]);
-export const OpenDir = (arg1: string) => invokeBridge("OpenDir", [arg1]);
-export const OpenMMDB = (arg1: string, arg2: string) => invokeBridge("OpenMMDB", [arg1, arg2]);
-export const OpenURI = (arg1: string) => invokeBridge("OpenURI", [arg1]);
-export const ProcessInfo = (arg1: number) => invokeBridge("ProcessInfo", [arg1]);
-export const ProcessMemory = (arg1: number) => invokeBridge("ProcessMemory", [arg1]);
+) => flagResult('ExecBackground', [arg1, arg2, arg3, arg4, arg5])
+export const FileExists = (arg1: string) => flagResult('FileExists', [arg1])
+export const FileSHA256 = (arg1: string) => flagResult('FileSHA256', [arg1])
+export const FindListeningProcess = (arg1: number) => flagResult('FindListeningProcess', [arg1])
+export const GetEnv = () => invokeBridge<any>('GetEnv')
+export const GetInterfaces = () => flagResult('GetInterfaces')
+export const GetScheduledTaskWorkerLogs = () => flagResult('GetScheduledTaskWorkerLogs')
+export const GetScheduledTaskWorkerStatus = () => flagResult('GetScheduledTaskWorkerStatus')
+export const GetSystemProxy = () => flagResult('GetSystemProxy')
+export const GetSystemProxyBypass = () => flagResult('GetSystemProxyBypass')
+export const IsStartup = () => invokeBridge<boolean>('IsStartup')
+export const KillProcess = (arg1: number, arg2: number) => flagResult('KillProcess', [arg1, arg2])
+export const ListServer = () => flagResult('ListServer')
+export const MakeDir = (arg1: string) => flagResult('MakeDir', [arg1])
+export const MoveFile = (arg1: string, arg2: string) => flagResult('MoveFile', [arg1, arg2])
+export const OpenMMDB = (arg1: string, arg2: string) => flagResult('OpenMMDB', [arg1, arg2])
+export const ProcessInfo = (arg1: number) => flagResult('ProcessInfo', [arg1])
+export const ProcessMemory = (arg1: number) => flagResult('ProcessMemory', [arg1])
 export const QueryMMDB = (arg1: string, arg2: string, arg3: string) =>
-  invokeBridge("QueryMMDB", [arg1, arg2, arg3]);
-export const ReadDir = (arg1: string) => invokeBridge("ReadDir", [arg1]);
+  flagResult('QueryMMDB', [arg1, arg2, arg3])
+export const ReadDir = (arg1: string) => flagResult('ReadDir', [arg1])
 export const ReadFile = (arg1: string, arg2: Record<string, any>) =>
-  invokeBridge("ReadFile", [arg1, arg2]);
-export const RecordScheduledTaskLog = (arg1: string) => invokeBridge("RecordScheduledTaskLog", [arg1]);
-export const ReloadScheduledTaskWorker = () => invokeBridge("ReloadScheduledTaskWorker");
-export const RemoveFile = (arg1: string) => invokeBridge("RemoveFile", [arg1]);
+  flagResult('ReadFile', [arg1, arg2])
+export const RecordScheduledTaskLog = (arg1: string) => flagResult('RecordScheduledTaskLog', [arg1])
+export const ReloadScheduledTaskWorker = () => flagResult('ReloadScheduledTaskWorker')
+export const RemoveFile = (arg1: string) => flagResult('RemoveFile', [arg1])
 export const Requests = (
   arg1: string,
   arg2: string,
   arg3: Record<string, string>,
   arg4: string,
   arg5: Record<string, any>,
-) => invokeBridge("Requests", [arg1, arg2, arg3, arg4, arg5]);
-export const RestartApp = () => invokeBridge("RestartApp");
-export const RunScheduledTaskWorker = (arg1: string) =>
-  invokeBridge("RunScheduledTaskWorker", [arg1]);
-export const SetSystemDNS = (arg1: string, arg2: string[]) =>
-  invokeBridge("SetSystemDNS", [arg1, arg2]);
-export const SetSystemProxy = (
-  arg1: boolean,
-  arg2: string,
-  arg3: string,
-  arg4: string,
-  arg5: string[],
-) => invokeBridge("SetSystemProxy", [arg1, arg2, arg3, arg4, arg5]);
-export const ShowMainWindow = () => invokeBridge<void>("ShowMainWindow");
+) => invokeBridge<HTTPResult>('Requests', [arg1, arg2, arg3, arg4, arg5])
+export const RestartApp = () => flagResult('RestartApp')
+export const RunScheduledTaskWorker = (arg1: string) => flagResult('RunScheduledTaskWorker', [arg1])
 export const StartServer = (arg1: string, arg2: string, arg3: Record<string, any>) =>
-  invokeBridge("StartServer", [arg1, arg2, arg3]);
-export const StopServer = (arg1: string) => invokeBridge("StopServer", [arg1]);
+  flagResult('StartServer', [arg1, arg2, arg3])
+export const StopServer = (arg1: string) => flagResult('StopServer', [arg1])
 export const TcpPing = (arg1: string, arg2: Record<string, any>) =>
-  invokeBridge("TcpPing", [arg1, arg2]);
+  flagResult('TcpPing', [arg1, arg2])
 export const TcpRequest = (arg1: string, arg2: string, arg3: Record<string, any>) =>
-  invokeBridge("TcpRequest", [arg1, arg2, arg3]);
+  flagResult('TcpRequest', [arg1, arg2, arg3])
 export const UdpRequest = (arg1: string, arg2: string, arg3: Record<string, any>) =>
-  invokeBridge("UdpRequest", [arg1, arg2, arg3]);
-export const UnzipGZFile = (arg1: string, arg2: string) =>
-  invokeBridge("UnzipGZFile", [arg1, arg2]);
+  flagResult('UdpRequest', [arg1, arg2, arg3])
+export const UnzipGZFile = (arg1: string, arg2: string) => flagResult('UnzipGZFile', [arg1, arg2])
 export const UnzipTarGZFile = (arg1: string, arg2: string) =>
-  invokeBridge("UnzipTarGZFile", [arg1, arg2]);
-export const UnzipZIPFile = (arg1: string, arg2: string) =>
-  invokeBridge("UnzipZIPFile", [arg1, arg2]);
-export const UpdateTray = (arg1: Record<string, any>) => invokeBridge<void>("UpdateTray", [arg1]);
-export const UpdateTrayAndMenus = (arg1: Record<string, any>, arg2: Record<string, any>[]) =>
-  invokeBridge<void>("UpdateTrayAndMenus", [arg1, arg2]);
-export const UpdateTrayMenus = (arg1: Record<string, any>[]) =>
-  invokeBridge<void>("UpdateTrayMenus", [arg1]);
+  flagResult('UnzipTarGZFile', [arg1, arg2])
+export const UnzipZIPFile = (arg1: string, arg2: string) => flagResult('UnzipZIPFile', [arg1, arg2])
 export const Upload = (
   arg1: string,
   arg2: string,
@@ -97,6 +89,6 @@ export const Upload = (
   arg4: Record<string, string>,
   arg5: string,
   arg6: Record<string, any>,
-) => invokeBridge("Upload", [arg1, arg2, arg3, arg4, arg5, arg6]);
+) => invokeBridge<HTTPResult>('Upload', [arg1, arg2, arg3, arg4, arg5, arg6])
 export const WriteFile = (arg1: string, arg2: string, arg3: Record<string, any>) =>
-  invokeBridge("WriteFile", [arg1, arg2, arg3]);
+  flagResult('WriteFile', [arg1, arg2, arg3])

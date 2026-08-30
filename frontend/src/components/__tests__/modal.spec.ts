@@ -1,6 +1,7 @@
+/* eslint-disable vue/one-component-per-file */
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h, nextTick, onUnmounted } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, h, nextTick, onUnmounted } from 'vue'
 
 const appStoreMock = vi.hoisted(() => ({
   modalMinimized: [] as {
@@ -25,7 +26,7 @@ vi.mock('@/stores/index', () => ({
   useAppStore: () => appStoreMock,
 }))
 
-vi.mock('@wails/runtime/runtime', () => ({}))
+vi.mock('@/bridge/browser/runtime/runtime', () => ({}))
 
 vi.mock('@/bridge', () => ({}))
 
@@ -97,11 +98,7 @@ describe('Modal', () => {
             props: { loading: Boolean },
             setup(props, { attrs, slots }) {
               return () =>
-                h(
-                  'button',
-                  { ...attrs, 'data-loading': String(props.loading) },
-                  slots.default?.(),
-                )
+                h('button', { ...attrs, 'data-loading': String(props.loading) }, slots.default?.())
             },
           }),
           Icon: true,
@@ -124,7 +121,9 @@ describe('Modal', () => {
         await nextTick()
       },
       finishLeave: () =>
-        (modal.vm.$ as unknown as { setupState: { onAfterLeave: () => void } }).setupState.onAfterLeave(),
+        (
+          modal.vm.$ as unknown as { setupState: { onAfterLeave: () => void } }
+        ).setupState.onAfterLeave(),
     }
   }
 
@@ -163,12 +162,13 @@ describe('Modal', () => {
 
   it('shares the close lifecycle with a synchronous reentrant close', async () => {
     let reentrantClose: Promise<void> | undefined
-    let modal!: Awaited<ReturnType<typeof mountRealModal>>['modal']
+    const state = {} as { modal: Awaited<ReturnType<typeof mountRealModal>>['modal'] }
     const onCancel = vi.fn(() => {
-      reentrantClose = modal.vm.handleCancel()
+      reentrantClose = state.modal.vm.handleCancel()
     })
     const mounted = await mountRealModal({ onCancel })
-    modal = mounted.modal
+    const modal = mounted.modal
+    state.modal = modal
 
     const firstClose = modal.vm.handleCancel()
     await flushPromises()
@@ -181,9 +181,7 @@ describe('Modal', () => {
 
   it('shares one lifecycle across mask, Escape, and internal cancel', async () => {
     let releaseCancel!: () => void
-    const onCancel = vi.fn(
-      () => new Promise<void>((resolve) => (releaseCancel = resolve)),
-    )
+    const onCancel = vi.fn(() => new Promise<void>((resolve) => (releaseCancel = resolve)))
     const { modal, finishLeave } = await mountRealModal({ maskClosable: true, onCancel })
 
     await modal.get('.gui-modal-mask').trigger('click')
@@ -222,9 +220,7 @@ describe('Modal', () => {
 
   it('keeps the modal open when the model closes while hooks are pending', async () => {
     let releaseCancel!: () => void
-    const onCancel = vi.fn(
-      () => new Promise<void>((resolve) => (releaseCancel = resolve)),
-    )
+    const onCancel = vi.fn(() => new Promise<void>((resolve) => (releaseCancel = resolve)))
     const afterClose = vi.fn()
     const { api, externalClose, finishLeave, modal } = await mountRealModal({
       onCancel,
@@ -252,9 +248,7 @@ describe('Modal', () => {
 
   it('delays minimize until pending close hooks finish', async () => {
     let releaseCancel!: () => void
-    const onCancel = vi.fn(
-      () => new Promise<void>((resolve) => (releaseCancel = resolve)),
-    )
+    const onCancel = vi.fn(() => new Promise<void>((resolve) => (releaseCancel = resolve)))
     const { api, modal } = await mountRealModal({
       title: 'Persistent',
       destroyOnClose: false,
@@ -428,9 +422,7 @@ describe('Modal', () => {
 
   it('ignores openAll during an accepted minimized destroy and still cleans up', async () => {
     let releaseCancel!: () => void
-    const onCancel = vi.fn(
-      () => new Promise<void>((resolve) => (releaseCancel = resolve)),
-    )
+    const onCancel = vi.fn(() => new Promise<void>((resolve) => (releaseCancel = resolve)))
     const afterDestroy = vi.fn()
     const { modal } = await mountRealModal({
       title: 'Persistent',
@@ -563,9 +555,7 @@ describe('Modal', () => {
 
   it('waits for hooks before the public destroy lifecycle completes', async () => {
     let releaseCancel!: () => void
-    const onCancel = vi.fn(
-      () => new Promise<void>((resolve) => (releaseCancel = resolve)),
-    )
+    const onCancel = vi.fn(() => new Promise<void>((resolve) => (releaseCancel = resolve)))
     const afterDestroy = vi.fn()
     const { api, finishLeave, modal } = await mountRealModal({ onCancel, afterDestroy })
 

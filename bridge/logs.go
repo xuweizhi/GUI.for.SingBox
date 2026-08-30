@@ -99,11 +99,18 @@ func (w *dailyLogWriter) Write(p []byte) (int, error) {
 
 func appendManagedLog(category string, line string) error {
 	path := logFilePath(category, time.Now())
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		return err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
 		return err
 	}
 	defer file.Close()
@@ -117,11 +124,18 @@ func (w *dailyLogWriter) rotate(path string, now time.Time) error {
 	if w.file != nil {
 		_ = w.file.Close()
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		return err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
 		return err
 	}
 	w.file = file
@@ -129,7 +143,33 @@ func (w *dailyLogWriter) rotate(path string, now time.Time) error {
 	return cleanupExpiredLogs(w.retentionDays, now)
 }
 
+func secureManagedLogs() error {
+	directory := resolvePath(logsDirectory)
+	entries, err := os.ReadDir(directory)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Chmod(directory, 0o700); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !managedLogPattern.MatchString(entry.Name()) {
+			continue
+		}
+		if err := os.Chmod(filepath.Join(directory, entry.Name()), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func configureAppLogging() {
+	if err := secureManagedLogs(); err != nil {
+		log.Printf("Failed to secure existing logs: %v", err)
+	}
 	retentionDays := normalizeLogRetentionDays(Config.Log.RetentionDays)
 	writer := newDailyLogWriter("app", retentionDays)
 	log.SetOutput(io.MultiWriter(os.Stderr, writer))

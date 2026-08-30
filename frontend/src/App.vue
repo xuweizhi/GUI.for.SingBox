@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { useAppBootstrap, useAppLifecycle } from '@/hooks'
 import { useWebuiAuthStore } from '@/stores'
-import { isWebui } from '@/utils/env'
 
 import { SplashView, AppShell, GlobalOverlays } from '@/components'
 
@@ -14,15 +13,10 @@ const { loading, percent, hasError, initialized, initialize } = useAppBootstrap(
 
 useAppLifecycle()
 
-const readyForShell = computed(() => !isWebui || authStore.status === 'authenticated')
-
 const startBootstrap = async () => {
   if (initialized.value || loading.value) return
 
-  await initialize()
-  if (isWebui) {
-    authStore.bootstrapped = true
-  }
+  authStore.bootstrapped = await initialize()
 }
 
 onMounted(() => {
@@ -32,11 +26,6 @@ onMounted(() => {
 watch(
   [() => route.fullPath, () => authStore.status],
   async () => {
-    if (!isWebui) {
-      await startBootstrap()
-      return
-    }
-
     if (route.meta.public || authStore.status !== 'authenticated') return
 
     await startBootstrap()
@@ -54,7 +43,13 @@ watch(
       type="circle"
     />
   </SplashView>
-  <RouterView v-else-if="isWebui && !readyForShell" />
+  <RouterView v-else-if="authStore.status !== 'authenticated'" />
+  <SplashView v-else-if="!initialized">
+    <div class="flex flex-col items-center gap-12">
+      <div>{{ $t('common.bootstrapFailed') }}</div>
+      <Button @click="startBootstrap">{{ $t('common.retry') }}</Button>
+    </div>
+  </SplashView>
   <AppShell v-else />
   <GlobalOverlays :loading="loading" />
 </template>

@@ -131,6 +131,15 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
             const task = getScheduledTaskById(record.id)
             if (task) {
               task.lastTime = record.startTime
+              if (task.notification) {
+                const successes = record.result.filter((item) => item.ok).length
+                const failures = record.result.length - successes
+                const details = record.result.map((item) => String(item.result)).join('\n')
+                const content = `Successes: ${successes}; Failures: ${failures}.\n\n${details}`
+                void Notify(task.name, content).catch((error) => {
+                  console.warn('Failed to show scheduled task notification:', error)
+                })
+              }
             }
           }
         })
@@ -176,14 +185,6 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
 
       await RecordScheduledTaskLog(log)
       recorded = true
-
-      if (task.notification) {
-        const successes = result.filter((v) => v.ok).length
-        const failures = result.length - successes
-        const details = result.flatMap((v) => v.result).join('\n')
-        const content = `Successes: ${successes}; Failures: ${failures}. \n\n${details}`
-        await Notify(task.name, content)
-      }
 
       return log
     } catch (error) {

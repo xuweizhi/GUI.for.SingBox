@@ -95,8 +95,11 @@ func (a *App) StartServer(address string, serverID string, options ServerOptions
 	mux.HandleFunc("/", handleHttpRequest(a, serverID))
 
 	server := &http.Server{
-		Addr:    address,
-		Handler: mux,
+		Addr:              address,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
 	}
 	entry.server = server
 

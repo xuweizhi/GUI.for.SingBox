@@ -5,10 +5,6 @@ const { replace } = vi.hoisted(() => ({
   replace: vi.fn(),
 }))
 
-vi.mock('@/utils/env', () => ({
-  isWebui: true,
-}))
-
 vi.mock('@/router', () => ({
   default: {
     currentRoute: {
@@ -42,6 +38,7 @@ const createStorageMock = () => {
 
 describe('webui auth store', () => {
   beforeEach(() => {
+    vi.unstubAllGlobals()
     setActivePinia(createPinia())
     vi.stubGlobal('localStorage', createStorageMock())
     localStorage.clear()
@@ -70,16 +67,32 @@ describe('webui auth store', () => {
     const store = useWebuiAuthStore()
     const passed = await store.verifyToken('next-token')
 
-    expect(fetchMock).toHaveBeenCalledWith('/__webui/api/rpc?token=next-token', {
+    expect(fetchMock).toHaveBeenCalledWith('/__webui/api/session', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: '{"method":"GetEnv","args":[""]}',
+      body: '{"token":"next-token"}',
     })
     expect(passed).toBe(true)
     expect(store.status).toBe('authenticated')
     expect(localStorage.getItem('gfs.webui.token')).toBe('next-token')
+  })
+
+  it('authenticates an existing cookie session without resubmitting a token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const store = useWebuiAuthStore()
+    const passed = await store.ensureAuthenticated()
+
+    expect(fetchMock).toHaveBeenCalledWith('/__webui/api/session', { method: 'GET' })
+    expect(passed).toBe(true)
+    expect(store.status).toBe('authenticated')
+    expect(store.token).toBe('')
   })
 
   it('rejects an unauthorized token during verification', async () => {
@@ -115,6 +128,8 @@ describe('webui auth store', () => {
   })
 
   it('clears token and jumps to login on logout', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 })
+    vi.stubGlobal('fetch', fetchMock)
     const store = useWebuiAuthStore()
     store.setToken('logout-token')
 
@@ -123,6 +138,7 @@ describe('webui auth store', () => {
     expect(store.token).toBe('')
     expect(store.status).toBe('idle')
     expect(store.lastError).toBe('')
+    expect(fetchMock).toHaveBeenCalledWith('/__webui/api/session', { method: 'DELETE' })
     expect(replace).toHaveBeenCalledWith('/login')
   })
 })

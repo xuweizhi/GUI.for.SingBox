@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -31,13 +33,105 @@ func TestHeadlessAuthAuthorizeAcceptsCookieBeforeQueryToken(t *testing.T) {
 	}
 }
 
-func TestHeadlessAuthAuthorizeAcceptsQueryTokenWithoutCookie(t *testing.T) {
+func TestHandleRPCCallRejectsMissingRemoveArgumentWithoutDeletingBase(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() { Env.BasePath = previousBasePath })
+
+	marker := filepath.Join(Env.BasePath, "keep.txt")
+	if err := os.WriteFile(marker, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, webUIRPCEndpoint, strings.NewReader(`{"method":"RemoveFile","args":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	(&App{}).handleRPCCall(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("missing RPC argument removed application data: %v", err)
+	}
+}
+
+func TestHeadlessSessionLoginIgnoresExistingCookieWhenTokenIsWrong(t *testing.T) {
+	auth := &headlessAuth{token: "correct-token"}
+	req := httptest.NewRequest(http.MethodPost, webUISessionEndpoint, strings.NewReader(`{"token":"wrong-token"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: webUITokenCookie, Value: "correct-token"})
+	recorder := httptest.NewRecorder()
+
+	auth.handleSession(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
+	}
+}
+
+func TestHeadlessSessionLogoutExpiresCookie(t *testing.T) {
+	auth := &headlessAuth{token: "correct-token"}
+	req := httptest.NewRequest(http.MethodDelete, webUISessionEndpoint, nil)
+	recorder := httptest.NewRecorder()
+
+	auth.handleSession(recorder, req)
+
+	cookies := recorder.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != webUITokenCookie || cookies[0].MaxAge >= 0 {
+		t.Fatalf("expected an expired WebUI session cookie, got %+v", cookies)
+	}
+}
+
+func TestSameOriginOnlyRejectsCrossSiteRequests(t *testing.T) {
+	called := false
+	handler := sameOriginOnly(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18080/__webui/api/rpc", nil)
+	req.Header.Set("Origin", "https://attacker.example")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusForbidden || called {
+		t.Fatalf("expected cross-site request to be rejected, status=%d called=%v", recorder.Code, called)
+	}
+}
+
+func TestResolveHeadlessTokenPersistsGeneratedTokenSecurely(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() { Env.BasePath = previousBasePath })
+
+	first, tokenPath, err := resolveHeadlessToken("")
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+	second, secondPath, err := resolveHeadlessToken("")
+	if err != nil {
+		t.Fatalf("reload token: %v", err)
+	}
+	if first == "" || first != second || tokenPath != secondPath {
+		t.Fatalf("token was not persisted consistently")
+	}
+	info, err := os.Stat(tokenPath)
+	if err != nil {
+		t.Fatalf("stat token: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("token mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestHeadlessAuthAuthorizeRejectsQueryTokenWithoutSession(t *testing.T) {
 	auth := &headlessAuth{token: "webui-token"}
 	req := httptest.NewRequest(http.MethodGet, "/__webui/api/rpc?token=webui-token", nil)
 
 	recorder := httptest.NewRecorder()
-	if ok := auth.authorize(recorder, req); !ok {
-		t.Fatal("expected request with matching query token to be authorized")
+	if ok := auth.authorize(recorder, req); ok {
+		t.Fatal("expected query-string token to be rejected")
+	}
+	if recorder.Header().Get(webUIAuthHeader) != "required" {
+		t.Fatal("expected WebUI auth challenge header")
 	}
 }
 
@@ -89,16 +183,13 @@ func TestHandleRPCCallSupportsSystemProxyMethods(t *testing.T) {
 			name: "get system proxy bypass",
 			body: `{"method":"GetSystemProxyBypass","args":[]}`,
 		},
-		{
-			name: "set system proxy",
-			body: `{"method":"SetSystemProxy","args":[true,"127.0.0.1:1080","mixed","localhost",["Wi-Fi"]]}`,
-		},
 	}
 
 	app := &App{}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, webUIRPCEndpoint, strings.NewReader(test.body))
+			req.Header.Set("Content-Type", "application/json")
 			recorder := httptest.NewRecorder()
 
 			app.handleRPCCall(recorder, req)

@@ -1,10 +1,11 @@
+import * as Bridge from '@/bridge/browser/go/bridge/App'
+
+import { getConnections, dnsQuery, getProxyDelay } from '@/api/kernel'
 import { DefaultTestTimeout, DefaultTestURL } from '@/constant/app'
 import { useAppSettingsStore } from '@/stores/appSettings'
-import { getConnections, dnsQuery, getProxyDelay } from '@/api/kernel'
 import { useKernelApiStore } from '@/stores/kernelApi'
 import { useProfilesStore } from '@/stores/profiles'
 import { useRulesetsStore } from '@/stores/rulesets'
-import { isWebui } from '@/utils/env'
 import { resolvePrimaryNode } from '@/views/HomeView/nodeController'
 import {
   buildRulesetCheckItems,
@@ -42,23 +43,18 @@ type RuntimeBridge = {
   TcpPing: (address: string, options: Record<string, unknown>) => Promise<BridgeTcpResult>
 }
 
-let bridgePromise: Promise<RuntimeBridge> | undefined
-
-const loadBridge = (): Promise<RuntimeBridge> => {
-  bridgePromise ||= (
-    isWebui
-      ? import('@/bridge/browser/go/bridge/App')
-      : import('@/bridge/wailsjs/go/bridge/App')
-  ).then((module) => ({
-    Requests: module.Requests as RuntimeBridge['Requests'],
-    TcpPing: module.TcpPing as RuntimeBridge['TcpPing'],
-  }))
-  return bridgePromise
+const runtimeBridge: RuntimeBridge = {
+  Requests: Bridge.Requests as RuntimeBridge['Requests'],
+  TcpPing: Bridge.TcpPing as RuntimeBridge['TcpPing'],
 }
 
-const requestWithoutBody = async (method: RequestMethod, url: string, options: RequestOptions = {}) => {
-  const bridge = await loadBridge()
-  const result = await bridge.Requests(method, url, {}, '', {
+const requestWithoutBody = async (
+  method: RequestMethod,
+  url: string,
+  headers: Record<string, string> = {},
+  options: RequestOptions = {},
+) => {
+  const result = await runtimeBridge.Requests(method, url, headers, '', {
     Proxy: options.Proxy || '',
     Insecure: false,
     Redirect: true,
@@ -74,23 +70,25 @@ const requestWithoutBody = async (method: RequestMethod, url: string, options: R
   return {
     status: result.status,
     headers: Object.fromEntries(
-      Object.entries(result.headers).map(([key, value]) => [key, value.length > 1 ? value : (value[0] ?? '')]),
+      Object.entries(result.headers).map(([key, value]) => [
+        key,
+        value.length > 1 ? value : (value[0] ?? ''),
+      ]),
     ),
     body: result.body,
   }
 }
 
-const httpHead = (url: string, _headers = {}, options: RequestOptions = {}) => {
-  return requestWithoutBody('HEAD', url, options)
+const httpHead = (url: string, headers = {}, options: RequestOptions = {}) => {
+  return requestWithoutBody('HEAD', url, headers, options)
 }
 
-const httpGet = (url: string, _headers = {}, options: RequestOptions = {}) => {
-  return requestWithoutBody('GET', url, options)
+const httpGet = (url: string, headers = {}, options: RequestOptions = {}) => {
+  return requestWithoutBody('GET', url, headers, options)
 }
 
 const tcpPing = async (address: string, options: { Timeout?: number } = {}) => {
-  const bridge = await loadBridge()
-  const result = await bridge.TcpPing(address, {
+  const result = await runtimeBridge.TcpPing(address, {
     Mode: 'Text',
     Timeout: options.Timeout ?? 15,
   })

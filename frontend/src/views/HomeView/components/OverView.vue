@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 
 import { ProcessMemory } from '@/bridge'
 import { ModeOptions } from '@/constant/kernel'
-import { useEnvStore, useAppStore, useKernelApiStore, useAppSettingsStore } from '@/stores'
+import { useAppStore, useKernelApiStore, useAppSettingsStore } from '@/stores'
 import { formatBytes, handleChangeMode, message, modal } from '@/utils'
 
 import CommonController from './CommonController.vue'
@@ -25,7 +25,6 @@ const statistics = ref({
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const envStore = useEnvStore()
 const appSettings = useAppSettingsStore()
 const kernelApiStore = useKernelApiStore()
 
@@ -96,16 +95,6 @@ const onTunSwitchChange = async (enable: boolean) => {
   }
 }
 
-const onSystemProxySwitchChange = async (enable: boolean) => {
-  try {
-    await envStore.switchSystemProxy(enable)
-  } catch (error: any) {
-    console.error(error)
-    message.error(error)
-    envStore.systemProxy = !envStore.systemProxy
-  }
-}
-
 let latestCoreMemoryUsageTime: number
 const getCoreMemoryUsage = async (fallback: number) => {
   if (latestCoreMemoryUsageTime && Date.now() - latestCoreMemoryUsageTime < 30_000) {
@@ -167,19 +156,10 @@ onUnmounted(() => {
     >
       <Button type="text" size="small" icon="settings" @click="handleShowSettings" />
       <Switch
-        v-model="envStore.systemProxy"
-        size="small"
-        border="square"
-        class="ml-4"
-        @change="onSystemProxySwitchChange"
-      >
-        {{ t('home.overview.systemProxy') }}
-      </Switch>
-      <Switch
         v-model="kernelApiStore.config.tun.enable"
         size="small"
         border="square"
-        class="ml-8"
+        class="ml-4"
         @change="onTunSwitchChange"
       >
         {{ t('home.overview.tunMode') }}

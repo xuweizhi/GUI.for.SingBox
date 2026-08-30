@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 
 import {
   getProxies,
@@ -35,24 +35,20 @@ import {
   useAppSettingsStore,
   useProfilesStore,
   useLogsStore,
-  useEnvStore,
   usePluginsStore,
   useSubscribesStore,
   useRulesetsStore,
 } from '@/stores'
-import { resolveCoreStopPid } from '@/stores/kernelProcess'
 import {
   getProxyProfileOptionsFromRuntime,
   resolveRuntimeInboundState,
 } from '@/stores/kernelApiRuntime'
+import { resolveCoreStopPid } from '@/stores/kernelProcess'
 import {
   generateConfigFile,
-  updateTrayAndMenus,
   getKernelFileName,
-  normalizeProxyHost,
   restoreProfile,
   deepClone,
-  message,
   getKernelRuntimeArgs,
   getKernelRuntimeEnv,
   eventBus,
@@ -60,6 +56,8 @@ import {
 } from '@/utils'
 
 import type { CoreApiConfig, CoreApiProxy } from '@/types/kernel'
+
+const CORE_START_TIMEOUT = 30_000
 
 export type ProxyType = 'mixed' | 'http' | 'socks'
 export type ProxyEndpoint = {
@@ -72,7 +70,6 @@ export type ProxyEndpoint = {
 }
 
 export const useKernelApiStore = defineStore('kernelApi', () => {
-  const envStore = useEnvStore()
   const logsStore = useLogsStore()
   const pluginsStore = usePluginsStore()
   const profilesStore = useProfilesStore()
@@ -239,7 +236,6 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     fieldHandlerMap[field]?.()
 
     await restartCore(undefined, true)
-    await envStore.updateSystemProxyStatus()
   }
 
   const refreshProviderProxies = async () => {
@@ -301,7 +297,6 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
 
     initWebsocket()
     await Promise.all([refreshConfig(), refreshProviderProxies()])
-    await envStore.updateSystemProxyStatus()
 
     return true
   }
@@ -318,7 +313,6 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     if (running.value) {
       initWebsocket()
       await Promise.all([refreshConfig(), refreshProviderProxies()])
-      await envStore.updateSystemProxyStatus()
     } else if (await syncExistingCoreState()) {
       return
     } else if (appSettingsStore.app.autoStartKernel) {
@@ -347,10 +341,15 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
         Env: getKernelRuntimeEnv(isAlpha),
       },
     )
+    const deadline = Date.now() + CORE_START_TIMEOUT
     while (!stopped) {
       const ok = await probeApiAvailability().catch(() => false)
       if (ok) break
       if (stopped) throw 'Startup failed. Check logs for details.'
+      if (Date.now() >= deadline) {
+        await KillProcess(pid, 3).catch(() => undefined)
+        throw 'Core startup timed out after 30 seconds. Check logs for details.'
+      }
       await sleep(500)
     }
     return pid
@@ -366,14 +365,6 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     initWebsocket()
     await Promise.all([refreshConfig(), refreshProviderProxies()])
 
-    if (appSettingsStore.app.autoSetSystemProxy) {
-      await envStore.setSystemProxy().catch((err) => message.error(err))
-    }
-    if (appSettingsStore.app.autoSetSystemDNS) {
-      await envStore.setSystemDNS(true).catch((err) => message.error(err))
-    }
-    await envStore.updateSystemProxyStatus()
-
     await pluginsStore.onCoreStartedTrigger()
   }
 
@@ -387,14 +378,6 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     needRestart.value = false
 
     destroyWebsocket()
-
-    await envStore.updateSystemProxyStatus()
-    if (envStore.systemProxy) {
-      await envStore.clearSystemProxy()
-    }
-    if (appSettingsStore.app.autoSetSystemDNS || envStore.systemDNSSet) {
-      await envStore.setSystemDNS(false).catch((err) => message.error(err))
-    }
 
     resetConfig()
 
@@ -562,22 +545,6 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       restartCore()
     }
   })
-
-  const watchSources = computed(() => {
-    const source = [config.value.mode, config.value.tun.enable]
-    if (!appSettingsStore.app.addGroupToMenu) return source.join('')
-
-    const { unAvailable, sortByDelay } = appSettingsStore.app.kernel
-
-    const proxySignature = Object.values(proxies.value)
-      .map((group) => group.name + group.now)
-      .sort()
-      .join()
-
-    return source.concat([proxySignature, unAvailable, sortByDelay]).join('')
-  })
-
-  watch([watchSources, running], updateTrayAndMenus)
 
   return {
     startCore,

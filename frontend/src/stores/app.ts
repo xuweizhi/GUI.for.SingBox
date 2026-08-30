@@ -6,14 +6,13 @@ import {
   Download,
   HttpGet,
   MoveFile,
-  UnzipZIPFile,
+  UnzipTarGZFile,
   RemoveFile,
   HttpCancel,
   ReadDir,
-  Exec,
+  FileExists,
 } from '@/bridge'
-import { LanguageOptions, LocalesFilePath, RollingReleaseDirectory } from '@/constant/app'
-import { OS } from '@/enums/app'
+import { LanguageOptions, LocalesFilePath } from '@/constant/app'
 import { loadLocale } from '@/lang'
 import {
   APP_TITLE,
@@ -32,7 +31,6 @@ import { AboutView } from '@/components'
 import { useEnvStore } from './env'
 
 export const useAppStore = defineStore('app', () => {
-  const isAppExiting = ref(false)
   const isAppReloading = ref(false)
 
   /* Global Menu */
@@ -126,7 +124,12 @@ export const useAppStore = defineStore('app', () => {
   const downloadApp = async () => {
     downloading.value = true
     try {
-      const downloadCacheFile = 'data/.cache/gui.zip'
+      const { appName, os, arch } = envStore.env
+      const archiveName = `${APP_TITLE}-${os}-${arch}.tar.gz`
+      const downloadCacheFile = `data/.cache/${archiveName}`
+      const extractedDirectory = `data/.cache/${APP_TITLE}-${os}-${arch}`
+      const extractedBinary = `${extractedDirectory}/${APP_TITLE}`
+      const backupBinary = `${appName}.bak`
 
       const { update, destroy } = message.info('common.downloading', 10 * 60 * 1_000, () => {
         HttpCancel(downloadCacheFile)
@@ -146,25 +149,22 @@ export const useAppStore = defineStore('app', () => {
         },
       ).finally(destroy)
 
-      const { appName, os, appPath } = envStore.env
-
-      if (os === OS.Darwin) {
-        const cur_pkg_bak = appPath + '.bak'
-        await UnzipZIPFile(downloadCacheFile, 'data/.cache')
-        await RemoveFile(downloadCacheFile)
-        await MoveFile(appPath, cur_pkg_bak)
-        await MoveFile(`${cur_pkg_bak}/Contents/MacOS/data/.cache/${APP_TITLE}.app`, appPath)
-        await Exec('xattr', ['-rd', 'com.apple.quarantine', appPath])
-        await RemoveFile(`${cur_pkg_bak}/Contents/MacOS/${RollingReleaseDirectory}`)
-        await RemoveFile(cur_pkg_bak)
-      } else {
-        const suffix = { [OS.Windows]: '.exe', [OS.Linux]: '' }[os]
-        await MoveFile(appName, appName + '.bak')
-        await UnzipZIPFile(downloadCacheFile, '.')
-        await MoveFile(APP_TITLE + suffix, appName)
-        await RemoveFile(downloadCacheFile)
-        await RemoveFile(RollingReleaseDirectory)
+      await RemoveFile(extractedDirectory).catch(() => undefined)
+      await UnzipTarGZFile(downloadCacheFile, 'data/.cache')
+      if (!(await FileExists(extractedBinary))) {
+        throw new Error(`Release archive does not contain ${extractedBinary}`)
       }
+
+      await RemoveFile(backupBinary).catch(() => undefined)
+      await MoveFile(appName, backupBinary)
+      try {
+        await MoveFile(extractedBinary, appName)
+      } catch (error) {
+        await MoveFile(backupBinary, appName).catch(() => undefined)
+        throw error
+      }
+      await RemoveFile(downloadCacheFile)
+      await RemoveFile(extractedDirectory)
       message.success('about.updateSuccessfulRestart')
       restartable.value = true
     } catch (error: any) {
@@ -188,7 +188,7 @@ export const useAppStore = defineStore('app', () => {
       const { tag_name, assets } = body
 
       const { os, arch } = envStore.env
-      const assetName = `${APP_TITLE}-${os}-${arch}.zip`
+      const assetName = `${APP_TITLE}-${os}-${arch}.tar.gz`
 
       const asset = assets.find((v: any) => v.name === assetName)
       if (!asset) throw 'Asset Not Found:' + assetName
@@ -230,7 +230,6 @@ export const useAppStore = defineStore('app', () => {
   })
 
   return {
-    isAppExiting,
     isAppReloading,
     menuShow,
     menuPosition,

@@ -1,4 +1,4 @@
-import * as Bridge from '@wails/go/bridge/App'
+import * as Bridge from '@/bridge/browser/go/bridge/App'
 
 type QueryType =
   | 'ASN'

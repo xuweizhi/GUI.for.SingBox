@@ -1,18 +1,7 @@
 import { deleteConnection, getConnections, useProxy } from '@/api/kernel'
-import {
-  AbsolutePath,
-  Exec,
-  ExitApp,
-  FileExists,
-  GetEnv,
-  GetSystemProxy,
-  ReadFile,
-  RemoveFile,
-  WindowReloadApp,
-  WriteFile,
-} from '@/bridge'
+import { GetSystemProxy, ReadFile, RestartApp, WindowReloadApp, WriteFile } from '@/bridge'
 import { CoreWorkingDirectory } from '@/constant/kernel'
-import { OS, RequestProxyMode } from '@/enums/app'
+import { RequestProxyMode } from '@/enums/app'
 import { RulesetFormat } from '@/enums/kernel'
 import i18n from '@/lang'
 import {
@@ -23,117 +12,7 @@ import {
   usePluginsStore,
   useRulesetsStore,
 } from '@/stores'
-import {
-  formatProxyHost,
-  ignoredError,
-  normalizeRequestProxy,
-  message,
-  confirm,
-  APP_TITLE,
-  getAutoStartConfiguration,
-} from '@/utils'
-
-// Permissions Helper
-export const SwitchPermissions = async (enable: boolean) => {
-  const { appPath } = useEnvStore().env
-  const args = enable
-    ? [
-        'add',
-        'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers',
-        '/v',
-        appPath,
-        '/t',
-        'REG_SZ',
-        '/d',
-        'RunAsAdmin',
-        '/f',
-      ]
-    : [
-        'delete',
-        'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers',
-        '/v',
-        appPath,
-        '/f',
-      ]
-  await Exec('reg', args)
-}
-
-export const CheckPermissions = async () => {
-  const { appPath } = useEnvStore().env
-  try {
-    const out = await Exec('reg', [
-      'query',
-      'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers',
-      '/v',
-      appPath,
-      '/t',
-      'REG_SZ',
-    ])
-    return out.includes('RunAsAdmin')
-  } catch {
-    return false
-  }
-}
-
-export const GrantTUNPermission = async (path: string) => {
-  const { os } = useEnvStore().env
-  const absPath = await AbsolutePath(path)
-  if (os === OS.Darwin) {
-    const command = `chown root:admin "${absPath}"; chmod +sx "${absPath}"`
-    await RunWithOsaScript(command, [], { admin: true, wait: true })
-  } else if (os === OS.Linux) {
-    await Exec('pkexec', [
-      'setcap',
-      'cap_net_bind_service,cap_net_admin,cap_dac_override=+ep',
-      absPath,
-    ])
-  }
-}
-
-export const RunWithOsaScript = async (
-  path: string,
-  args: string[] = [],
-  options: { admin?: boolean; wait?: boolean } = {},
-) => {
-  const { admin = false, wait = true, ...others } = options
-  const escapedArgs = args.map((arg) => `'${arg.replace(/'/g, "'\\''")}'`).join(' ')
-  let shellCmd = `${path} ${escapedArgs}`.trim()
-  if (!wait) {
-    shellCmd += ' > /dev/null 2>&1 &'
-  }
-  const escapedShellCmd = shellCmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-  let appleScript = `do shell script "${escapedShellCmd}"`
-  if (admin) {
-    appleScript += ' with administrator privileges'
-  }
-  const osaArgs = ['-e', appleScript]
-  return await Exec('osascript', osaArgs, others)
-}
-
-export const RunWithPowerShell = async (
-  path: string,
-  args: string[] = [],
-  options: { admin?: boolean; hidden?: boolean; wait?: boolean } = {},
-) => {
-  const { admin = false, hidden = false, wait = true, ...others } = options
-  const psArgs: string[] = []
-  let command = `Start-Process -FilePath "${path}"`
-  if (args.length > 0) {
-    const argList = args.map((a) => `"${a.replace(/"/g, '""')}"`).join(',')
-    command += ` -ArgumentList ${argList}`
-  }
-  if (admin) {
-    command += ' -Verb RunAs'
-  }
-  if (hidden) {
-    command += ' -WindowStyle Hidden'
-  }
-  if (wait) {
-    command += ' -Wait'
-  }
-  psArgs.push('-NoProfile', '-Command', command)
-  return await Exec('powershell', psArgs, others)
-}
+import { formatProxyHost, ignoredError, normalizeRequestProxy, message, confirm } from '@/utils'
 
 const requestProxyCache: { proxyPromise: Promise<string> | null; lastAccessTime: number } = {
   proxyPromise: null,
@@ -174,68 +53,10 @@ export const GetRequestProxy = async (mode?: App.RequestProxyMode, customProxy?:
   return requestProxyCache.proxyPromise
 }
 
-// Auto-start
-const getPlistPath = async () => {
-  const home = await GetEnv('HOME')
-  return `${home}/Library/LaunchAgents/${APP_TITLE}.plist`
-}
-
-const getDesktopPath = async () => {
-  const home = await GetEnv('HOME')
-  return `${home}/.config/autostart/${APP_TITLE}.desktop`
-}
-
-export const IsAutoStartEnabled = async () => {
-  const { os } = useEnvStore().env
-  let isAutoStart = false
-  if (os === OS.Windows) {
-    isAutoStart = await Exec('Schtasks', ['/Query', '/TN', APP_TITLE, '/XML'])
-      .then(() => true)
-      .catch(() => false)
-  } else if (os === OS.Darwin) {
-    const plistPath = await getPlistPath()
-    isAutoStart = await FileExists(plistPath)
-  } else if (os === OS.Linux) {
-    const desktopPath = await getDesktopPath()
-    isAutoStart = await FileExists(desktopPath)
-  }
-  return isAutoStart
-}
-
-export const EnableAutoStart = async (delay = 10) => {
-  const { os, appPath, isPrivileged } = useEnvStore().env
-  const configuration = getAutoStartConfiguration(os, appPath, delay)
-  if (os === OS.Windows) {
-    const xmlPath = await AbsolutePath('data/.cache/tasksch.xml')
-    await WriteFile(xmlPath, configuration)
-    const fn = isPrivileged ? Exec : RunWithPowerShell
-    await fn('SchTasks', ['/Create', '/F', '/TN', APP_TITLE, '/XML', xmlPath], {
-      admin: true,
-      hidden: true,
-    })
-  } else if (os === OS.Darwin) {
-    const plistPath = await getPlistPath()
-    await WriteFile(plistPath, configuration)
-    await Exec('launchctl', ['load', plistPath])
-  } else if (os === OS.Linux) {
-    const desktopPath = await getDesktopPath()
-    await WriteFile(desktopPath, configuration)
-  }
-}
-
-export const DisableAutoStart = async () => {
-  const { os, isPrivileged } = useEnvStore().env
-  if (os === OS.Windows) {
-    const fn = isPrivileged ? Exec : RunWithPowerShell
-    await fn('SchTasks', ['/Delete', '/F', '/TN', APP_TITLE], { admin: true, hidden: true })
-  } else if (os === OS.Darwin) {
-    const plistPath = await getPlistPath()
-    await Exec('launchctl', ['unload', plistPath])
-    await RemoveFile(plistPath)
-  } else if (os === OS.Linux) {
-    const desktopPath = await getDesktopPath()
-    await RemoveFile(desktopPath)
-  }
+export const restartApp = async () => {
+  await RestartApp()
+  await new Promise((resolve) => setTimeout(resolve, 1500))
+  WindowReloadApp()
 }
 
 // Others
@@ -349,47 +170,6 @@ export const reloadApp = async () => {
   }
 
   appStore.isAppReloading = false
-  destroy()
-}
-
-export const exitApp = async () => {
-  const { t } = i18n.global
-  const appStore = useAppStore()
-  const envStore = useEnvStore()
-  const pluginsStore = usePluginsStore()
-  const appSettings = useAppSettingsStore()
-  const kernelApiStore = useKernelApiStore()
-
-  appStore.isAppExiting = true
-
-  let timedout = false
-  const { destroy } = message.info('titlebar.exitPending', 10 * 60 * 1000)
-
-  const timeoutId = setTimeout(async () => {
-    timedout = true
-    appStore.isAppExiting = false
-    destroy()
-    confirm('Warning', t('titlebar.exitTimeout')).then(ExitApp)
-  }, 10_000)
-
-  try {
-    if (kernelApiStore.running && appSettings.app.closeKernelOnExit) {
-      await kernelApiStore.stopCore()
-      if (appSettings.app.autoSetSystemProxy) {
-        await envStore.clearSystemProxy()
-      }
-    }
-    await pluginsStore.onShutdownTrigger()
-    if (!timedout) {
-      clearTimeout(timeoutId)
-      ExitApp()
-    }
-  } catch (err: any) {
-    clearTimeout(timeoutId)
-    confirm('Error', t('titlebar.exitError', { reason: err })).then(ExitApp)
-  }
-
-  appStore.isAppExiting = false
   destroy()
 }
 

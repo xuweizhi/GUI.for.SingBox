@@ -14,13 +14,14 @@ Environment="HOME=/opt/GUI.for.SingBox"
 Environment="WEBUI_LISTEN=127.0.0.1:18080"
 Environment="WEBUI_TOKEN="
 EnvironmentFile=-/etc/default/gui.for.singbox-headless
-ExecStart=/opt/GUI.for.SingBox/GUI.for.SingBox --headless --webui-listen=${WEBUI_LISTEN} --webui-token=${WEBUI_TOKEN}
+ExecStart=/opt/GUI.for.SingBox/GUI.for.SingBox
 Restart=on-failure
 RestartSec=5
+UMask=0077
 
 # Keep the service usable for TUN / privileged ports and raw socket DNS/bootstrap when needed.
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_DAC_OVERRIDE CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_DAC_OVERRIDE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 
 [Install]
 WantedBy=multi-user.target

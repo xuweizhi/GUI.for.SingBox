@@ -3,30 +3,25 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
-  const isWebui = mode === 'webui'
-
+export default defineConfig(() => {
   return {
     base: './',
     plugins: [vue()],
     server: {
       watch: {
-        ignored: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/src/bridge/wailsjs/**'],
+        ignored: ['**/node_modules/**', '**/.git/**', '**/dist/**'],
       },
     },
     resolve: {
       extensions: ['.ts', '.js'],
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
-        '@wails': fileURLToPath(
-          new URL(isWebui ? './src/bridge/browser' : './src/bridge/wailsjs', import.meta.url),
-        ),
         vue: 'vue/dist/vue.esm-bundler.js',
       },
     },
     build: {
-      outDir: isWebui ? 'dist/webui' : 'dist',
-      emptyOutDir: !isWebui,
+      outDir: 'dist/webui',
+      emptyOutDir: true,
       cssCodeSplit: false,
       chunkSizeWarningLimit: 4096, // 4MB
       rolldownOptions: {

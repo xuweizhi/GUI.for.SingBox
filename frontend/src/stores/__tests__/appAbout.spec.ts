@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 
 const modalMock = vi.hoisted(() => vi.fn())
 const setContentMock = vi.hoisted(() => vi.fn())
@@ -14,24 +14,22 @@ vi.mock('@/bridge', () => ({
   Download: vi.fn(),
   HttpGet: vi.fn(),
   MoveFile: vi.fn(),
-  UnzipZIPFile: vi.fn(),
+  UnzipTarGZFile: vi.fn(),
   RemoveFile: vi.fn(),
   HttpCancel: vi.fn(),
   ReadDir: vi.fn().mockResolvedValue([]),
-  Exec: vi.fn(),
+  FileExists: vi.fn(),
 }))
 
 vi.mock('@/constant/app', () => ({
   LanguageOptions: [],
   LocalesFilePath: '',
-  RollingReleaseDirectory: '',
 }))
 
-vi.mock('@/enums/app', () => ({ OS: { Darwin: 'darwin', Windows: 'windows', Linux: 'linux' } }))
 vi.mock('@/lang', () => ({ loadLocale: vi.fn() }))
 vi.mock('@/components', () => ({ AboutView: {} }))
 vi.mock('@/stores/env', () => ({
-  useEnvStore: () => ({ env: { appName: '', os: 'linux', arch: '', appPath: '' } }),
+  useEnvStore: () => ({ env: { appName: '', os: 'linux', arch: '' } }),
 }))
 vi.mock('@/utils', () => ({
   APP_TITLE: 'GUI.for.SingBox',

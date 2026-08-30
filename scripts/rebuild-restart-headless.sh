@@ -7,25 +7,6 @@ SKIP_INSTALL=0
 STATUS_ONLY=0
 RESTART_ONLY=0
 
-resolve_wails() {
-  if command -v wails >/dev/null 2>&1; then
-    command -v wails
-    return 0
-  fi
-
-  if command -v go >/dev/null 2>&1; then
-    local gopath
-    gopath="$(go env GOPATH 2>/dev/null || true)"
-    if [[ -n "$gopath" && -x "$gopath/bin/wails" ]]; then
-      printf '%s\n' "$gopath/bin/wails"
-      return 0
-    fi
-  fi
-
-  printf 'wails command not found. Install Wails CLI or add it to PATH.\n' >&2
-  return 1
-}
-
 usage() {
   cat <<'EOF'
 Usage: ./scripts/rebuild-restart-headless.sh [--no-install] [--service <name>] [--status-only] [--restart-only]
@@ -86,13 +67,21 @@ if [[ "$RESTART_ONLY" -eq 1 ]]; then
 fi
 
 cd "$ROOT_DIR/frontend"
+APP_VERSION="$(git -C "$ROOT_DIR" describe --tags --always --dirty 2>/dev/null || printf 'dev')"
 if [[ "$SKIP_INSTALL" -eq 0 ]]; then
   pnpm install --frozen-lockfile
 fi
-pnpm build
+if [[ -x ./node_modules/.bin/vue-tsc && -x ./node_modules/.bin/vite ]]; then
+  ./node_modules/.bin/vue-tsc --build
+  VITE_APP_VERSION="$APP_VERSION" ./node_modules/.bin/vite build
+else
+  VITE_APP_VERSION="$APP_VERSION" pnpm build
+fi
 
 cd "$ROOT_DIR"
-"$(resolve_wails)" build
+mkdir -p build/bin
+go build -trimpath -ldflags="-s -w -X guiforcores/bridge.AppVersion=$APP_VERSION" -o build/bin/GUI.for.SingBox .
 
+sudo systemctl daemon-reload
 sudo systemctl restart "$SERVICE_NAME"
 systemctl status "$SERVICE_NAME" --no-pager

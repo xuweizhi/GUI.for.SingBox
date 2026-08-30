@@ -21,7 +21,6 @@ const kernelApiStore = useKernelApiStore()
 const {
   restartable,
   updatable,
-  grantable,
   rollbackable,
   versionDetail,
   localVersion,
@@ -36,9 +35,7 @@ const {
   downloadCore,
   restartCore,
   rollbackCore,
-  grantCorePermission,
   openReleasePage,
-  openFileLocation,
 } = useCoreBranch(props.isAlpha)
 
 const handleClearCoreCache = async () => {
@@ -77,26 +74,11 @@ const handleClearCoreCache = async () => {
       @click="handleClearCoreCache"
     />
     <Button
-      v-if="grantable"
-      v-tips="'settings.kernel.grant'"
-      type="text"
-      size="small"
-      icon="grant"
-      @click="grantCorePermission"
-    />
-    <Button
       v-tips="'settings.kernel.linkTip'"
       icon="link"
       type="text"
       size="small"
       @click="openReleasePage"
-    />
-    <Button
-      v-tips="'settings.kernel.openTip'"
-      icon="folder"
-      type="text"
-      size="small"
-      @click="openFileLocation"
     />
     <Button
       v-tips="'settings.kernel.config.name'"

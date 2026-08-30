@@ -86,7 +86,7 @@ const submitLoading = ref(false)
 const modalZindex = ref()
 const appStore = useAppStore()
 const [isMaximize, toggleMaximize] = useBool(false)
-const [isMinimize, toggleMinimize] = useBool(false)
+const isMinimize = ref(false)
 
 interface CloseOptions {
   isOk: boolean
@@ -368,25 +368,22 @@ defineExpose({ handleCancel, handleDestroy })
         v-show="open && !isMinimize"
         :style="{ zIndex: modalZindex }"
         class="gui-modal-mask fixed inset-0 flex items-center justify-center backdrop-blur-sm"
-        style="--wails-draggable: drag"
         @click.self="onMaskClick"
       >
         <div
           :style="contentStyle"
           :class="props.class"
           class="gui-modal-modal transition duration-200 flex flex-col rounded-8 shadow"
-          style="--wails-draggable: false"
         >
           <div
             v-if="title || slots.title || slots.toolbar"
             class="flex items-center p-16"
-            style="--wails-draggable: drag"
             @dblclick.self="toggleMaximize"
           >
             <slot name="title">
               <div v-if="title" class="font-bold">{{ $t(title) }}</div>
             </slot>
-            <div class="ml-auto" style="--wails-draggable: false">
+            <div class="ml-auto">
               <slot name="toolbar"></slot>
               <Button
                 v-if="toolbar.minimize"

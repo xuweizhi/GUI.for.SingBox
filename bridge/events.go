@@ -1,10 +1,6 @@
 package bridge
 
-import (
-	"sync"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
-)
+import "sync"
 
 type eventEnvelope struct {
 	Name string `json:"name"`
@@ -24,6 +20,13 @@ func newEventHub() *eventHub {
 		listeners:   make(map[string]map[int]func(...any)),
 		subscribers: make(map[int]chan eventEnvelope),
 	}
+}
+
+func (a *App) eventHub() *eventHub {
+	a.eventsOnce.Do(func() {
+		a.events = newEventHub()
+	})
+	return a.events
 }
 
 func (h *eventHub) on(name string, cb func(...any)) {
@@ -99,44 +102,24 @@ func (h *eventHub) subscribe() (<-chan eventEnvelope, func()) {
 	}
 }
 
-func (a *App) IsHeadless() bool {
-	return a.Headless != nil
-}
-
 func (a *App) EventsOn(name string, cb func(...any)) {
-	if a.IsHeadless() {
-		a.Headless.Hub.on(name, cb)
-		return
-	}
-	runtime.EventsOn(a.Ctx, name, cb)
+	a.eventHub().on(name, cb)
 }
 
 func (a *App) EventsOff(name string) {
-	if a.IsHeadless() {
-		a.Headless.Hub.off(name)
-		return
-	}
-	runtime.EventsOff(a.Ctx, name)
+	a.eventHub().off(name)
 }
 
 func (a *App) EventsEmit(name string, data ...any) {
-	if a.IsHeadless() {
-		a.Headless.Hub.emit(name, data...)
-		return
-	}
-	runtime.EventsEmit(a.Ctx, name, data...)
+	a.eventHub().emit(name, data...)
 }
 
 func (a *App) ClientEventsEmit(name string, data ...any) {
-	if a.IsHeadless() {
-		a.Headless.Hub.emitLocal(name, data...)
-		return
-	}
-	runtime.EventsEmit(a.Ctx, name, data...)
+	a.eventHub().emitLocal(name, data...)
 }
 
 func (a *App) RequestHeadlessShutdown() {
-	if !a.IsHeadless() {
+	if a.Headless == nil {
 		return
 	}
 	a.Headless.shutdownOnce.Do(func() {

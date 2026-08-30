@@ -2,10 +2,7 @@ import { useWebuiAuthStore } from '@/stores'
 
 const API_BASE = '/__webui/api'
 const EVENT_STREAM_RECONNECT_DELAY = 1000
-const EVENT_STREAM_AUTH_PROBE_BODY = JSON.stringify({
-  method: 'GetEnv',
-  args: [''],
-})
+const WEBUI_AUTH_HEADER = 'X-GFS-WebUI-Auth'
 
 type EventCallback = (...data: any[]) => void
 type ServerEvent = {
@@ -54,20 +51,10 @@ const closeEventStreamIfUnused = () => {
 }
 
 const probeEventStreamAuth = async () => {
-  const authStore = useWebuiAuthStore()
-  const token = authStore.token.trim()
-  if (!token) return true
+  const response = await fetch(`${API_BASE}/session`, { method: 'GET' })
 
-  const response = await fetch(`${API_BASE}/rpc?token=${encodeURIComponent(token)}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: EVENT_STREAM_AUTH_PROBE_BODY,
-  })
-
-  if (response.status === 401) {
-    await authStore.handleUnauthorized()
+  if (response.status === 401 && response.headers.get(WEBUI_AUTH_HEADER) === 'required') {
+    await useWebuiAuthStore().handleUnauthorized()
     return false
   }
 
@@ -112,7 +99,7 @@ const ensureEventStream = () => {
 }
 
 const handleUnauthorized = async (response: Response) => {
-  if (response.status !== 401) return
+  if (response.status !== 401 || response.headers.get(WEBUI_AUTH_HEADER) !== 'required') return
 
   await useWebuiAuthStore().handleUnauthorized()
   throw 'auth.invalidToken'
@@ -163,7 +150,7 @@ export const emitRuntimeEvent = (name: string, ...data: any[]) => {
     })
 }
 
-export const invokeBridge = async <T>(method: string, args: unknown[] = []) => {
+export const invokeBridge = async <T = unknown>(method: string, args: unknown[] = []) => {
   ensureEventStream()
 
   const response = await fetch(`${API_BASE}/rpc`, {

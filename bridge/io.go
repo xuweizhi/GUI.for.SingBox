@@ -6,14 +6,13 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/pkg/browser"
 )
 
 const (
@@ -23,6 +22,8 @@ const (
 
 func (a *App) WriteFile(path string, content string, options IOOptions) FlagResult {
 	log.Printf("WriteFile [%s %s]: %s", options.Mode, options.Range, path)
+	dataMutationMu.Lock()
+	defer dataMutationMu.Unlock()
 
 	fullPath := resolvePath(path)
 
@@ -45,11 +46,21 @@ func (a *App) WriteFile(path string, content string, options IOOptions) FlagResu
 		return FlagResult{false, "Unsupported IO mode: " + options.Mode}
 	}
 
-	file, err := os.OpenFile(fullPath, os.O_RDWR|os.O_CREATE, 0644)
+	if options.Range == "" {
+		if err := atomicWriteFile(fullPath, data, 0o600); err != nil {
+			return FlagResult{false, err.Error()}
+		}
+		return FlagResult{true, "Success"}
+	}
+
+	file, err := os.OpenFile(fullPath, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return FlagResult{false, err.Error()}
 	}
 	defer file.Close()
+	if err := file.Chmod(0o600); err != nil {
+		return FlagResult{false, err.Error()}
+	}
 
 	stat, err := file.Stat()
 	if err != nil {
@@ -59,23 +70,14 @@ func (a *App) WriteFile(path string, content string, options IOOptions) FlagResu
 
 	var start, end int64
 
-	if options.Range == "" {
-		start = 0
-		end = int64(len(data)) - 1
+	start, end, err = parseByteRange(options.Range, fileSize)
+	if err != nil {
+		return FlagResult{false, err.Error()}
+	}
 
-		if err := file.Truncate(0); err != nil {
-			return FlagResult{false, err.Error()}
-		}
-	} else {
-		start, end, err = parseByteRange(options.Range, fileSize)
-		if err != nil {
-			return FlagResult{false, err.Error()}
-		}
-
-		writeLength := int64(len(data))
-		if writeLength != end-start+1 {
-			return FlagResult{false, "data length does not match range length"}
-		}
+	writeLength := int64(len(data))
+	if writeLength != end-start+1 {
+		return FlagResult{false, "data length does not match range length"}
 	}
 
 	_, err = file.WriteAt(data, start)
@@ -150,13 +152,34 @@ func (a *App) MoveFile(source string, target string) FlagResult {
 func (a *App) RemoveFile(path string) FlagResult {
 	log.Printf("RemoveFile: %s", path)
 
-	fullPath := resolvePath(path)
+	fullPath, err := safeRemovalPath(path)
+	if err != nil {
+		return FlagResult{false, err.Error()}
+	}
 
 	if err := os.RemoveAll(fullPath); err != nil {
 		return FlagResult{false, err.Error()}
 	}
 
 	return FlagResult{true, "Success"}
+}
+
+func safeRemovalPath(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("refusing to remove an empty path")
+	}
+
+	fullPath := resolvePath(path)
+	basePath := resolvePath("")
+	if fullPath == basePath {
+		return "", errors.New("refusing to remove the application directory")
+	}
+	volume := filepath.VolumeName(fullPath)
+	root := filepath.ToSlash(volume + string(filepath.Separator))
+	if fullPath == root {
+		return "", errors.New("refusing to remove a filesystem root")
+	}
+	return fullPath, nil
 }
 
 func (a *App) CopyFile(src string, dst string) FlagResult {
@@ -222,38 +245,6 @@ func (a *App) ReadDir(path string) FlagResult {
 	}
 
 	return FlagResult{true, strings.Join(result, "|")}
-}
-
-func (a *App) OpenDir(path string) FlagResult {
-	log.Printf("OpenDir: %s", path)
-
-	if a.IsHeadless() {
-		return FlagResult{false, "OpenDir is not supported in headless WebUI mode"}
-	}
-
-	fullPath := resolvePath(path)
-
-	err := browser.OpenURL(fullPath)
-	if err != nil {
-		return FlagResult{false, err.Error()}
-	}
-
-	return FlagResult{true, "Success"}
-}
-
-func (a *App) OpenURI(uri string) FlagResult {
-	log.Printf("OpenURI: %s", uri)
-
-	if a.IsHeadless() {
-		return FlagResult{false, "OpenURI is not supported in headless WebUI mode"}
-	}
-
-	err := browser.OpenURL(uri)
-	if err != nil {
-		return FlagResult{false, err.Error()}
-	}
-
-	return FlagResult{true, "Success"}
 }
 
 func (a *App) AbsolutePath(path string) FlagResult {

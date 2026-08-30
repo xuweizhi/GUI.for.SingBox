@@ -7,7 +7,7 @@ import Dropdown from '@/components/Dropdown/index.vue'
 import Select from '@/components/Select/index.vue'
 import Switch from '@/components/Switch/index.vue'
 
-vi.mock('@wails/runtime/runtime', () => ({}))
+vi.mock('@/bridge/browser/runtime/runtime', () => ({}))
 
 vi.mock('@/bridge', () => ({}))
 
@@ -25,8 +25,7 @@ vi.mock('@/lang', () => ({
 
 vi.mock('@/utils', () => ({
   deepClone: <T>(value: T): T => structuredClone(value),
-  debounce: <T extends (...args: any[]) => any>(fn: T) =>
-    Object.assign(fn, { cancel: vi.fn() }),
+  debounce: <T extends (...args: any[]) => any>(fn: T) => Object.assign(fn, { cancel: vi.fn() }),
 }))
 
 vi.mock('vue-i18n', () => ({

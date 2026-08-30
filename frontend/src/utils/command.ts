@@ -1,10 +1,16 @@
-import { RestartApp } from '@/bridge'
 import { ColorOptions, ThemeOptions } from '@/constant/app'
 import { ModeOptions } from '@/constant/kernel'
 import { PluginTrigger, PluginTriggerEvent } from '@/enums/app'
 import useI18n from '@/lang'
-import { useAppSettingsStore, useAppStore, useEnvStore, useKernelApiStore, usePluginsStore, useRulesetsStore, useSubscribesStore } from '@/stores'
-import { exitApp, handleChangeMode, message, reloadApp } from '@/utils'
+import {
+  useAppSettingsStore,
+  useAppStore,
+  useKernelApiStore,
+  usePluginsStore,
+  useRulesetsStore,
+  useSubscribesStore,
+} from '@/stores'
+import { handleChangeMode, message, reloadApp, restartApp } from '@/utils'
 
 type Command = {
   label: string
@@ -36,7 +42,6 @@ const processCommands = (commands: Command[], parentLabel = '', parentCmd = '') 
 export const getCommands = () => {
   const kernelStore = useKernelApiStore()
   const appSettings = useAppSettingsStore()
-  const envStore = useEnvStore()
   const appStore = useAppStore()
   const subscriptionsStore = useSubscribesStore()
   const rulesetsStore = useRulesetsStore()
@@ -44,31 +49,31 @@ export const getCommands = () => {
 
   const rawCommands: Command[] = [
     {
-      label: 'tray.kernel',
+      label: 'commands.kernel',
       cmd: 'Core',
       children: [
         {
-          label: 'tray.startKernel',
+          label: 'commands.startKernel',
           cmd: 'Start Core',
           handler: kernelStore.startCore,
         },
         {
-          label: 'tray.stopKernel',
+          label: 'commands.stopKernel',
           cmd: 'Stop Core',
           handler: kernelStore.stopCore,
         },
         {
-          label: 'tray.restartKernel',
+          label: 'commands.restartKernel',
           cmd: 'Restart Core',
           handler: kernelStore.restartCore,
         },
         {
-          label: 'tray.enableTunMode',
+          label: 'commands.enableTunMode',
           cmd: 'Enable Tun',
           handler: () => kernelStore.updateConfig('tun', { enable: true }),
         },
         {
-          label: 'tray.disableTunMode',
+          label: 'commands.disableTunMode',
           cmd: 'Disable Tun',
           handler: () => kernelStore.updateConfig('tun', { enable: false }),
         },
@@ -94,24 +99,8 @@ export const getCommands = () => {
       ],
     },
     {
-      label: 'tray.proxy',
-      cmd: 'System Proxy',
-      children: [
-        {
-          label: 'tray.setSystemProxy',
-          cmd: 'Set System Proxy',
-          handler: envStore.setSystemProxy,
-        },
-        {
-          label: 'tray.clearSystemProxy',
-          cmd: 'Clear System Proxy',
-          handler: envStore.clearSystemProxy,
-        },
-      ],
-    },
-    {
-      label: 'APP',
-      cmd: 'APP',
+      label: 'Service',
+      cmd: 'Service',
       children: [
         {
           label: 'settings.lang.name',
@@ -152,22 +141,17 @@ export const getCommands = () => {
         },
         {
           label: 'titlebar.reload',
-          cmd: 'Reload Window',
+          cmd: 'Refresh Page',
           handler: reloadApp,
         },
         {
-          label: 'tray.restartTip',
-          cmd: 'Restart APP',
-          handler: RestartApp,
-        },
-        {
-          label: 'tray.exitTip',
-          cmd: 'Exit APP',
-          handler: exitApp,
+          label: 'commands.restartApp',
+          cmd: 'Restart Service',
+          handler: restartApp,
         },
         {
           label: 'router.about',
-          cmd: 'About APP',
+          cmd: 'About Service',
           handler: () => (appStore.showAbout = true),
         },
       ],
@@ -206,7 +190,7 @@ export const getCommands = () => {
       ],
     },
     {
-      label: 'tray.plugins',
+      label: 'commands.plugins',
       cmd: 'Plugins',
       children: pluginsStore.plugins.flatMap((plugin) => {
         const hasTrigger = !!plugin.triggers.find((trigger) => trigger === PluginTrigger.OnManual)

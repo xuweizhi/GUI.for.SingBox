@@ -1,17 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
-import { NavigationBar, TitleBar } from '@/components'
-import { useEnvStore } from '@/stores'
+import { NavigationBar } from '@/components'
 
 const route = useRoute()
-const envStore = useEnvStore()
-const showTitleBar = computed(() => envStore.env.runtimeMode !== 'webui')
 </script>
 
 <template>
-  <TitleBar v-if="showTitleBar" />
   <div class="app-content flex-1 overflow-y-auto flex flex-col p-8">
     <NavigationBar />
     <div

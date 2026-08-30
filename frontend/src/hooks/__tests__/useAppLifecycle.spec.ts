@@ -1,36 +1,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent } from 'vue'
 
 const appStoreMock = vi.hoisted(() => ({
   modalStack: [] as (() => MaybePromise<void>)[],
 }))
-const offMocks = vi.hoisted(() => [vi.fn(), vi.fn(), vi.fn()])
-
-vi.mock('@/bridge', () => ({
-  EventsOn: vi.fn((event: string) => {
-    const index = ['onLaunchApp', 'onBeforeExitApp', 'onExitApp'].indexOf(event)
-    return offMocks[index]
-  }),
-  WindowHide: vi.fn(),
-}))
-
 vi.mock('@/stores', () => ({
   useAppStore: () => appStoreMock,
-  useAppSettingsStore: () => ({ app: { exitOnClose: false } }),
-  useSubscribesStore: () => ({ importSubscribe: vi.fn() }),
-}))
-
-vi.mock('@/utils', () => ({
-  exitApp: vi.fn(),
-  message: { error: vi.fn(), success: vi.fn() },
-  sampleID: vi.fn(() => 'id'),
 }))
 
 describe('useAppLifecycle', () => {
   beforeEach(() => {
     appStoreMock.modalStack.splice(0)
-    offMocks.forEach((off) => off.mockReset())
   })
 
   afterEach(() => {
@@ -67,7 +48,6 @@ describe('useAppLifecycle', () => {
       window.removeEventListener('unhandledrejection', unhandled)
     }
 
-    expect(offMocks.every((off) => off.mock.calls.length === 1)).toBe(true)
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(appStoreMock.modalStack[0]).toHaveBeenCalledOnce()
   })

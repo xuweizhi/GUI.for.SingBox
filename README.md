@@ -1,182 +1,136 @@
-## Preview
+# GUI.for.SingBox WebUI
 
-Take a look at the live version here: 👉 <a href="https://gui-for-cores.github.io/guide/gfs/" target="_blank">Live Demo</a>
+GUI.for.SingBox 现在是一个仅面向服务端的 **headless + WebUI** sing-box 管理服务。项目不再包含桌面窗口、系统托盘、Wails WebView 或 Windows/macOS 桌面打包流程。
 
-<div align="center">
-  <img src="docs/imgs/light.png">
-</div>
+## 运行结构
 
-## Document
+- 单个 Go 服务进程托管 WebUI、RPC、事件流和 Clash API 反向代理。
+- sing-box 核心作为服务的子进程运行。
+- WebUI 编译产物嵌入 Go 二进制，生产环境不需要单独部署前端服务器。
+- 运行数据默认位于二进制同级的 `data/` 目录。
 
-[Community](https://gui-for-cores.github.io/guide/gfs/community)
+默认监听地址为 `127.0.0.1:18080`。使用非回环地址时，如果未配置 Token，服务会自动生成 Token 并输出到日志。
 
-## Build and deployment guide
+## 环境要求
 
-### Requirements
-
+- Go：版本以 `go.mod` 为准
 - Node.js
-- pnpm: `npm i -g pnpm`
-- Go
-- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- pnpm
+- Linux（生产部署目标）
 
-The frontend is configured around **pnpm** (`frontend/pnpm-lock.yaml`, `wails.json`), and the desktop/headless binary is built through **Wails**.
+不再需要 Wails CLI、GTK 或 WebKit 开发库。
 
-### Local build
+## 构建
 
 ```bash
-git clone https://github.com/xuweizhi/GUI.for.SingBox.git
-cd GUI.for.SingBox
+make install
+make build
+```
 
+输出文件：`build/bin/GUI.for.SingBox`。
+
+手动构建：
+
+```bash
 cd frontend
 pnpm install --frozen-lockfile
-pnpm test
 pnpm build
 
 cd ..
-wails build
+mkdir -p build/bin
+go build -trimpath -ldflags="-s -w" -o build/bin/GUI.for.SingBox .
 ```
 
-Build outputs:
-
-- Desktop/headless binary: `build/bin/GUI.for.SingBox`
-- Runtime data directory: `build/bin/data/`
-- Browser-targeted WebUI bundle: `frontend/dist/webui/` (embedded into the binary during build)
-
-### Run the headless WebUI locally
-
-After building, the same binary can run without opening the desktop window:
+## 运行
 
 ```bash
-./build/bin/GUI.for.SingBox --headless
+./build/bin/GUI.for.SingBox
 ```
 
-Defaults:
+认证始终开启。未提供 `WEBUI_TOKEN` 时，服务会自动生成
+`build/bin/data/webui-token`（权限 `0600`），登录时读取该文件即可。
 
-- Listen address: `127.0.0.1:18080`
-- CLI options:
-  - `--webui-listen 127.0.0.1:18080`
-  - `--webui-token your-token`
+可用参数：
 
-Examples:
+```text
+--webui-listen host:port
+--webui-token token
+```
+
+也可以使用环境变量：
 
 ```bash
-# local only
-./build/bin/GUI.for.SingBox --headless --webui-listen 127.0.0.1:18080
-
-# remote access
-./build/bin/GUI.for.SingBox --headless --webui-listen 0.0.0.0:18080 --webui-token change-me
+WEBUI_LISTEN=0.0.0.0:18080 \
+WEBUI_TOKEN=replace-with-a-long-random-token \
+./build/bin/GUI.for.SingBox
 ```
 
-When listening on a non-loopback address and no token is provided, the app will auto-generate one and print the access URL in stdout.
+升级期间旧的 `--headless` 参数会被安全忽略，但它已不再出现在新部署配置中，因为 WebUI 服务是唯一运行模式。
 
-### Deploy with systemd (recommended for Linux)
+## 与其他 sing-box 服务共存
 
-Reusable deployment files are included:
+本服务不再修改宿主机系统代理或系统 DNS，也不会创建托盘、窗口或桌面自启动项。HTTP 请求需要上游代理时，只读取进程环境中的 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 和 `NO_PROXY`。
+
+与其他 headless 服务共存时，只需确保以下资源不重复：
+
+- `WEBUI_LISTEN` 监听端口；
+- sing-box 配置中的入站端口和 Clash API 控制端口；
+- 二进制所在目录及其同级 `data/` 数据目录。
+
+因此，只要端口和数据目录独立，本项目不会主动修改或重启其他 sing-box 服务。
+
+## systemd 部署
+
+示例文件：
 
 - `build/linux/gui.for.singbox-headless.service`
 - `build/linux/gui.for.singbox-headless.env.example`
 
-The sample service expects:
-
-- Binary path: `/opt/GUI.for.SingBox/GUI.for.SingBox`
-- Working directory: `/opt/GUI.for.SingBox`
-- Runtime data directory: `/opt/GUI.for.SingBox/data`
-
-Example installation:
+示例安装：
 
 ```bash
-sudo useradd --system --home /opt/GUI.for.SingBox --shell /usr/sbin/nologin gui-for-singbox
-
-sudo mkdir -p /opt/GUI.for.SingBox
-sudo cp build/bin/GUI.for.SingBox /opt/GUI.for.SingBox/
-sudo cp -r build/bin/data /opt/GUI.for.SingBox/
-sudo chown -R gui-for-singbox:gui-for-singbox /opt/GUI.for.SingBox
-
-sudo cp build/linux/gui.for.singbox-headless.service /etc/systemd/system/
-sudo cp build/linux/gui.for.singbox-headless.env.example /etc/default/gui.for.singbox-headless
-
-# adjust install path, listen address, and token if needed
-sudo editor /etc/systemd/system/gui.for.singbox-headless.service
-sudo editor /etc/default/gui.for.singbox-headless
-
+sudo install -d -o gui-for-singbox -g gui-for-singbox /opt/GUI.for.SingBox
+sudo install -m 0755 build/bin/GUI.for.SingBox /opt/GUI.for.SingBox/GUI.for.SingBox
+sudo install -d -o gui-for-singbox -g gui-for-singbox /opt/GUI.for.SingBox/data
+sudo install -m 0644 build/linux/gui.for.singbox-headless.service \
+  /etc/systemd/system/gui.for.singbox-headless.service
+sudo install -m 0600 build/linux/gui.for.singbox-headless.env.example \
+  /etc/default/gui.for.singbox-headless
 sudo systemctl daemon-reload
 sudo systemctl enable --now gui.for.singbox-headless
-sudo systemctl status gui.for.singbox-headless
 ```
 
-### Upgrade an existing deployment
+远程监听时务必设置强 Token，并通过防火墙、HTTPS 反向代理或可信内网限制访问。
 
-If the service is already installed, a typical in-place upgrade flow is:
-
-```bash
-git pull
-
-cd frontend
-pnpm install --frozen-lockfile
-pnpm test
-pnpm build
-
-cd ..
-wails build
-
-sudo install -m 755 build/bin/GUI.for.SingBox /opt/GUI.for.SingBox/GUI.for.SingBox
-sudo systemctl restart gui.for.singbox-headless
-sudo systemctl status gui.for.singbox-headless
-```
-
-Or use the repo helper script to rebuild and restart in one step:
+## 原地重建并重启
 
 ```bash
 ./scripts/rebuild-restart-headless.sh
 ```
 
-Optional flags:
+常用选项：
 
-- `--no-install` skips `pnpm install --frozen-lockfile`
-- `--service <name>` restarts a different systemd service name
-- `--status-only` only shows the current systemd status
-- `--restart-only` restarts the service without rebuilding
+- `--no-install`：跳过 `pnpm install`
+- `--service <name>`：指定 systemd unit
+- `--status-only`：只查看服务状态
+- `--restart-only`：仅重启服务
 
-Examples:
+脚本只重启指定的 GUI.for.SingBox unit，不会操作其他 sing-box 管理服务。升级时请保留已有 `build/bin/data/`。
 
-```bash
-./scripts/rebuild-restart-headless.sh --no-install
-./scripts/rebuild-restart-headless.sh --service gui.for.singbox-headless
-./scripts/rebuild-restart-headless.sh --status-only
-./scripts/rebuild-restart-headless.sh --restart-only
-```
-
-Keep the existing `data/` directory unless you intentionally want to replace runtime data.
-
-### Service configuration notes
-
-- `WEBUI_LISTEN` defaults to `127.0.0.1:18080`
-- `WEBUI_TOKEN` can be left empty only for loopback-only access
-- For any remote bind (`0.0.0.0` / non-loopback), set an explicit token
-- The sample service keeps `CAP_NET_ADMIN`, `CAP_NET_BIND_SERVICE`, `CAP_NET_DAC_OVERRIDE`, and `CAP_NET_RAW` so the app can still work with TUN, privileged ports, and raw-socket DNS/bootstrap when needed
-
-### Common operations
+## 测试
 
 ```bash
-sudo systemctl restart gui.for.singbox-headless
-sudo systemctl stop gui.for.singbox-headless
-sudo systemctl status gui.for.singbox-headless
-sudo journalctl -u gui.for.singbox-headless -f
+make test
 ```
 
-## Local adaptation log
+该命令包含 Go 单元测试、前端类型检查、前端单元测试和部署脚本检查。
 
-This working tree is currently **6 commits ahead of `origin/main`**. The local adaptation history is:
+## 主要目录
 
-| Date | Commit | Change |
-| --- | --- | --- |
-| 2026-06-11 | `b7eb9e8` | Added headless WebUI management mode for browser-based operation. |
-| 2026-06-12 | `4987363` | Added the WebUI token-login design record. |
-| 2026-06-12 | `3277bb4` | Added the WebUI token login flow. |
-| 2026-06-12 | `18493bc` | Fixed missing assets on the headless login page. |
-| 2026-06-12 | `7866833` | Changed WebUI token verification to use the RPC probe path. |
-| 2026-06-12 | `4ae7a3d` | Fixed overview statistics streaming and added a memory fallback in the overview page. |
-
-## Stargazers over time
-
-[![Stargazers over time](https://starchart.cc/xuweizhi/GUI.for.SingBox.svg)](https://starchart.cc/xuweizhi/GUI.for.SingBox)
+```text
+bridge/                  WebUI RPC、事件、网络、核心进程与文件操作
+frontend/                Vue WebUI
+taskworker/              定时任务 worker
+build/linux/             systemd 与环境变量示例
+scripts/                 构建、重启和部署配置测试
+```

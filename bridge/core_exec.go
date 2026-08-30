@@ -17,9 +17,6 @@ import (
 var coreStartMu sync.Mutex
 
 func isCoreExecRequest(path string, options ExecOptions) bool {
-	if Env.RuntimeMode != RuntimeModeWebUI {
-		return false
-	}
 	if filepath.ToSlash(filepath.Clean(options.PidFile)) != filepath.ToSlash(filepath.Clean(headlessCorePidFilePath)) {
 		return false
 	}

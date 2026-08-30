@@ -27,41 +27,47 @@ export const useAppBootstrap = () => {
   }
 
   const initialize = async () => {
-    if (loading.value || initialized.value) return
+    if (loading.value || initialized.value) return initialized.value
 
     loading.value = true
     hasError.value = false
     percent.value = 0
 
-    await envStore.setupEnv()
+    try {
+      await envStore.setupEnv()
 
-    await Promise.all([
-      appSettings.setupAppSettings(),
-      profilesStore.setupProfiles(),
-      subscribesStore.setupSubscribes(),
-      rulesetsStore.setupRulesets(),
-      pluginsStore.setupPlugins(),
-      scheduledTasksStore.setupScheduledTasks(),
-    ])
+      await Promise.all([
+        appSettings.setupAppSettings(),
+        profilesStore.setupProfiles(),
+        subscribesStore.setupSubscribes(),
+        rulesetsStore.setupRulesets(),
+        pluginsStore.setupPlugins(),
+        scheduledTasksStore.setupScheduledTasks(),
+      ])
 
-    const startTime = performance.now()
-    percent.value = 20
+      const startTime = performance.now()
+      percent.value = 20
 
-    if (await IsStartup()) {
-      await pluginsStore.onStartupTrigger().catch(showError)
+      if (await IsStartup()) {
+        await pluginsStore.onStartupTrigger().catch(showError)
+      }
+
+      percent.value = 40
+      await pluginsStore.onReadyTrigger().catch(showError)
+
+      const duration = performance.now() - startTime
+      percent.value = duration < 500 ? 80 : 100
+      await sleep(Math.max(0, MIN_SPLASH_DURATION - duration))
+      await kernelApiStore.initCoreState()
+
+      initialized.value = true
+      return true
+    } catch (error) {
+      showError(error)
+      return false
+    } finally {
+      loading.value = false
     }
-
-    percent.value = 40
-    await pluginsStore.onReadyTrigger().catch(showError)
-
-    const duration = performance.now() - startTime
-    percent.value = duration < 500 ? 80 : 100
-
-    await sleep(Math.max(0, MIN_SPLASH_DURATION - duration))
-
-    loading.value = false
-    initialized.value = true
-    kernelApiStore.initCoreState()
   }
 
   return {
@@ -69,6 +75,6 @@ export const useAppBootstrap = () => {
     percent,
     hasError,
     initialized,
-    initialize: () => initialize().catch(showError),
+    initialize,
   }
 }

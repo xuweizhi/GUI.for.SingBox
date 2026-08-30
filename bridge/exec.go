@@ -21,7 +21,7 @@ import (
 )
 
 func (a *App) Exec(path string, args []string, options ExecOptions) FlagResult {
-	log.Printf("Exec: %s %s %v", path, args, options)
+	log.Printf("Exec: %s (%d args)", path, len(args))
 
 	exePath := resolvePath(path)
 
@@ -56,7 +56,7 @@ func (a *App) Exec(path string, args []string, options ExecOptions) FlagResult {
 }
 
 func (a *App) ExecBackground(path string, args []string, outEvent string, endEvent string, options ExecOptions) FlagResult {
-	log.Printf("ExecBackground: %s %s %s %s %v", path, args, outEvent, endEvent, options)
+	log.Printf("ExecBackground: %s (%d args)", path, len(args))
 
 	exePath := resolvePath(path)
 	pidPath := ""
@@ -111,8 +111,12 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 			return FlagResult{false, err.Error()}
 		}
 
-		logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
+			return FlagResult{false, err.Error()}
+		}
+		if err := logFile.Chmod(0o600); err != nil {
+			logFile.Close()
 			return FlagResult{false, err.Error()}
 		}
 		defer logFile.Close()
@@ -135,7 +139,7 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 	pid := strconv.Itoa(cmd.Process.Pid)
 
 	if pidPath != "" {
-		if err := os.WriteFile(pidPath, []byte(pid), os.ModePerm); err != nil {
+		if err := atomicWriteFile(pidPath, []byte(pid), 0o600); err != nil {
 			_ = SendExitSignal(cmd.Process)
 			_ = waitForProcessExitWithTimeout(cmd.Process, 10)
 			_ = cmd.Wait()
@@ -266,6 +270,18 @@ func (a *App) FindListeningProcess(port uint32) FlagResult {
 
 func (a *App) KillProcess(pid int, timeout int) FlagResult {
 	log.Printf("KillProcess: %d %d", pid, timeout)
+	if pid <= 1 {
+		return FlagResult{false, "refusing to signal an invalid or system process"}
+	}
+	if pid == os.Getpid() {
+		return FlagResult{false, "refusing to signal the WebUI service process"}
+	}
+	if timeout <= 0 {
+		timeout = 10
+	}
+	if timeout > 300 {
+		return FlagResult{false, "timeout must not exceed 300 seconds"}
+	}
 
 	process, err := os.FindProcess(pid)
 	if err != nil {

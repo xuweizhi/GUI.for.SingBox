@@ -1,7 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 import { useWebuiAuthStore } from '@/stores'
-import { isWebui } from '@/utils/env'
 import { buildLoginRedirect, resolveRedirectTarget } from '@/utils/webuiAuth'
 
 import routes from './routes'
@@ -12,8 +11,6 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
-  if (!isWebui) return true
-
   const authStore = useWebuiAuthStore()
 
   if (to.meta.public) {

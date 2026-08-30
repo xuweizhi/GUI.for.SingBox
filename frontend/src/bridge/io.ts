@@ -1,4 +1,4 @@
-import * as Bridge from '@wails/go/bridge/App'
+import * as Bridge from '@/bridge/browser/go/bridge/App'
 
 interface IOOptions {
   Mode?: 'Binary' | 'Text'
@@ -6,7 +6,11 @@ interface IOOptions {
 }
 
 export const WriteFile = async (path: string, content: string, options: IOOptions = {}) => {
-  const { flag, data } = await Bridge.WriteFile(path, content, { Mode: 'Text', Range: '', ...options })
+  const { flag, data } = await Bridge.WriteFile(path, content, {
+    Mode: 'Text',
+    Range: '',
+    ...options,
+  })
   if (!flag) {
     throw data
   }
@@ -89,22 +93,6 @@ export const ReadDir = async (path: string) => {
       const [name, size, isDir] = v.split(',') as [string, string, string]
       return { name, size: Number(size), isDir: isDir === 'true' }
     })
-}
-
-export const OpenDir = async (path: string) => {
-  const { flag, data } = await Bridge.OpenDir(path)
-  if (!flag) {
-    throw data
-  }
-  return data
-}
-
-export const OpenURI = async (uri: string) => {
-  const { flag, data } = await Bridge.OpenURI(uri)
-  if (!flag) {
-    throw data
-  }
-  return data
 }
 
 export const UnzipZIPFile = async (path: string, output: string) => {

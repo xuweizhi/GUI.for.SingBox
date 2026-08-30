@@ -3,28 +3,22 @@ package bridge
 import (
 	"context"
 	"net/http"
-
-	"github.com/wailsapp/wails/v2/pkg/menu"
+	"sync"
 )
 
 // App struct
 type App struct {
 	Ctx        context.Context
-	AppMenu    *menu.Menu
 	Headless   *HeadlessRuntime
 	TaskWorker *scheduledTaskWorkerSupervisor
+	eventsOnce sync.Once
+	events     *eventHub
 }
 
-const (
-	RuntimeModeDesktop = "desktop"
-	RuntimeModeWebUI   = "webui"
-)
+const RuntimeModeWebUI = "webui"
 
 type EnvResult struct {
 	IsStartup    bool     `json:"-"`
-	PreventExit  bool     `json:"-"`
-	FromTaskSch  bool     `json:"-"`
-	WebviewPath  string   `json:"-"`
 	Args         []string `json:"-"`
 	AppName      string   `json:"appName"`
 	AppVersion   string   `json:"appVersion"`
@@ -94,17 +88,9 @@ type HTTPResult struct {
 }
 
 type AppConfig struct {
-	WindowStartState  int            `yaml:"windowStartState"`
-	WebviewGpuPolicy  int            `yaml:"webviewGpuPolicy"`
-	ContentProtection bool           `yaml:"contentProtection"`
-	Width             int            `yaml:"width"`
-	Height            int            `yaml:"height"`
-	MultipleInstance  bool           `yaml:"multipleInstance"`
-	RollingRelease    bool           `yaml:"rollingRelease" default:"true"`
-	AutoStartKernel   bool           `yaml:"autoStartKernel"`
-	Log               LogSettings    `yaml:"log"`
-	Kernel            KernelSettings `yaml:"kernel"`
-	StartHidden       bool
+	AutoStartKernel bool           `yaml:"autoStartKernel"`
+	Log             LogSettings    `yaml:"log"`
+	Kernel          KernelSettings `yaml:"kernel"`
 }
 
 type LogSettings struct {
@@ -122,12 +108,6 @@ type KernelSettings struct {
 	Alpha  KernelRuntimeConfig `yaml:"alpha"`
 }
 
-type TrayContent struct {
-	Icon    string `json:"icon,omitempty"`
-	Title   string `json:"title,omitempty"`
-	Tooltip string `json:"tooltip,omitempty"`
-}
-
 type WriteTracker struct {
 	Total          int64
 	Progress       int64
@@ -135,15 +115,4 @@ type WriteTracker struct {
 	EmitThreshold  int64
 	ProgressChange string
 	App            *App
-}
-
-type MenuItem struct {
-	Type      string     `json:"type"` // Menu Type: item / separator
-	Text      string     `json:"text"`
-	Tooltip   string     `json:"tooltip"`
-	Event     string     `json:"event"`
-	Children  []MenuItem `json:"children"`
-	Hidden    bool       `json:"hidden"`
-	Checked   bool       `json:"checked"`
-	Checkable bool       `json:"checkable"`
 }

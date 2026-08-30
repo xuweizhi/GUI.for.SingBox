@@ -1,48 +1,33 @@
 package bridge
 
 import (
+	"context"
 	"embed"
 	"log"
 	"net"
 	"os"
-	"os/exec"
-	"os/user"
 	"path/filepath"
-	"slices"
+	"runtime"
 	"strings"
 	"time"
 
-	sysruntime "runtime"
-
-	"github.com/wailsapp/wails/v2/pkg/menu"
-	"github.com/wailsapp/wails/v2/pkg/menu/keys"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"gopkg.in/yaml.v3"
 )
 
 var Config = &AppConfig{}
 
+var AppVersion = "v1.26.1"
+
 var Env = &EnvResult{
-	IsStartup:    true,
-	PreventExit:  true,
-	FromTaskSch:  false,
-	WebviewPath:  "",
-	Args:         nil,
-	AppName:      "",
-	AppVersion:   "v1.26.1",
-	BasePath:     "",
-	OS:           sysruntime.GOOS,
-	ARCH:         sysruntime.GOARCH,
-	IsPrivileged: false,
-	RuntimeMode:  RuntimeModeDesktop,
+	IsStartup:   true,
+	AppVersion:  AppVersion,
+	OS:          runtime.GOOS,
+	ARCH:        runtime.GOARCH,
+	RuntimeMode: RuntimeModeWebUI,
 }
 
-// NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{
-		AppMenu: menu.NewMenu(),
-	}
+	return &App{Ctx: context.Background()}
 }
 
 func CreateApp(fs embed.FS) *App {
@@ -55,30 +40,14 @@ func CreateApp(fs embed.FS) *App {
 	Env.AppName = filepath.Base(exePath)
 	Env.Args = append([]string(nil), os.Args[1:]...)
 
-	if slices.Contains(os.Args, "tasksch") {
-		Env.FromTaskSch = true
-	}
-
 	if priv, err := IsPrivileged(); err == nil {
 		Env.IsPrivileged = priv
 	}
 
 	app := NewApp()
-
-	if Env.OS == "darwin" {
-		createMacOSSymlink()
-		createMacOSMenus(app)
-	}
-
-	if Env.OS == "windows" {
-		processFixedWebView2Runtime()
-	}
-
 	extractEmbeddedFiles(fs)
-
 	loadConfig()
 	configureAppLogging()
-
 	return app
 }
 
@@ -90,41 +59,25 @@ func (a *App) IsStartup() bool {
 	return false
 }
 
-func (a *App) ExitApp() {
-	log.Printf("ExitApp")
-	a.StopScheduledTaskWorker()
-	Env.PreventExit = false
-	if a.IsHeadless() {
-		go func() {
-			time.Sleep(50 * time.Millisecond)
-			a.RequestHeadlessShutdown()
-		}()
-		return
-	}
-	runtime.Quit(a.Ctx)
-}
-
 func (a *App) RestartApp() FlagResult {
 	log.Printf("RestartApp")
 	exePath := resolvePath(Env.AppName)
-
-	cmd := exec.Command(exePath, Env.Args...)
-	SetCmdWindowHidden(cmd)
-
-	if err := cmd.Start(); err != nil {
-		return FlagResult{false, err.Error()}
-	}
-
-	a.ExitApp()
-
+	args := append([]string{exePath}, Env.Args...)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		a.StopScheduledTaskWorker()
+		if err := restartCurrentProcess(exePath, args, os.Environ()); err != nil {
+			log.Printf("Failed to restart application: %v", err)
+			if workerErr := a.StartScheduledTaskWorker(); workerErr != nil {
+				log.Printf("Failed to restore scheduled task worker: %v", workerErr)
+			}
+		}
+	}()
 	return FlagResult{true, "Success"}
 }
 
-func (a *App) GetEnv(key string) any {
-	log.Printf("GetEnv: %s", key)
-	if key != "" {
-		return os.Getenv(key)
-	}
+func (a *App) GetEnv() EnvResult {
+	log.Printf("GetEnv")
 	return EnvResult{
 		AppName:      Env.AppName,
 		AppVersion:   Env.AppVersion,
@@ -132,177 +85,29 @@ func (a *App) GetEnv(key string) any {
 		OS:           Env.OS,
 		ARCH:         Env.ARCH,
 		IsPrivileged: Env.IsPrivileged,
-		RuntimeMode:  Env.RuntimeMode,
+		RuntimeMode:  RuntimeModeWebUI,
 	}
 }
 
 func (a *App) GetInterfaces() FlagResult {
 	log.Printf("GetInterfaces")
-
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return FlagResult{false, err.Error()}
 	}
 
-	var interfaceNames []string
-
+	interfaceNames := make([]string, 0, len(interfaces))
 	for _, inter := range interfaces {
 		interfaceNames = append(interfaceNames, inter.Name)
 	}
-
 	return FlagResult{true, strings.Join(interfaceNames, "|")}
 }
 
-func (a *App) ShowMainWindow() {
-	log.Printf("ShowMainWindow")
-	if a.IsHeadless() {
-		return
-	}
-	runtime.WindowShow(a.Ctx)
-}
-
-func createMacOSSymlink() {
-	currentUser, err := user.Current()
-	if err != nil {
-		log.Printf("Failed to resolve current user: %v", err)
-		return
-	}
-
-	linkPath := filepath.Join(Env.BasePath, "data")
-	appPath := filepath.Join("/Users", currentUser.Username, "Library", "Application Support", Env.AppName)
-
-	if err := os.MkdirAll(appPath, os.ModePerm); err != nil {
-		log.Printf("Failed to create macOS app data directory: %v", err)
-		return
-	}
-
-	if err := os.Symlink(appPath, linkPath); err != nil && !os.IsExist(err) {
-		log.Printf("Failed to create macOS data symlink: %v", err)
-	}
-}
-
-func createMacOSMenus(app *App) {
-	appMenu := app.AppMenu.AddSubmenu("App")
-	appMenu.AddText("Show", keys.CmdOrCtrl("s"), func(_ *menu.CallbackData) {
-		app.ShowMainWindow()
-	})
-	appMenu.AddText("Hide", keys.CmdOrCtrl("h"), func(_ *menu.CallbackData) {
-		if !app.IsHeadless() {
-			runtime.WindowHide(app.Ctx)
-		}
-	})
-	appMenu.AddSeparator()
-	appMenu.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
-		app.EventsEmit("onExitApp")
-	})
-
-	// on macos platform, we should append EditMenu to enable Cmd+C,Cmd+V,Cmd+Z... shortcut
-	app.AppMenu.Append(menu.EditMenu())
-}
-
-func processFixedWebView2Runtime() {
-	webviewDir := filepath.Join(Env.BasePath, "data", "WebView2")
-
-	err := filepath.Walk(webviewDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() && strings.EqualFold(info.Name(), "msedgewebview2.exe") {
-			Env.WebviewPath = filepath.Dir(path)
-			log.Printf("WebView2 runtime already exists at: %s", Env.WebviewPath)
-			return filepath.SkipDir
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Printf("Error during recursive search: %v\n", err)
-		return
-	}
-
-	if Env.WebviewPath != "" {
-		return
-	}
-
-	entries, err := os.ReadDir(webviewDir)
-	if err != nil {
-		log.Printf("Failed to read directory: %v\n", err)
-		return
-	}
-
-	var cabFile string
-	for _, e := range entries {
-		if !e.IsDir() &&
-			strings.HasSuffix(strings.ToLower(e.Name()), ".cab") &&
-			strings.Contains(e.Name(), "Microsoft.WebView2.FixedVersionRuntime") {
-			cabFile = filepath.Join(webviewDir, e.Name())
-			break
-		}
-	}
-
-	if cabFile == "" {
-		log.Println("No WebView2 .cab file found. Skipping extraction.")
-		return
-	}
-
-	log.Printf("Found CAB file: %s\n", cabFile)
-
-	cmd := exec.Command("expand.exe", "-F:*", cabFile, webviewDir)
-	SetCmdWindowHidden(cmd)
-
-	log.Println("Extracting WebView2 Runtime...")
-	if err := cmd.Run(); err != nil {
-		log.Printf("Extraction failed: %v\n", err)
-		return
-	}
-
-	log.Printf("WebView2 Runtime extracted successfully into: %s\n", webviewDir)
-	Env.WebviewPath = strings.TrimSuffix(cabFile, ".cab")
-}
-
 func extractEmbeddedFiles(fs embed.FS) {
-	iconSrc := "frontend/dist/icons"
-	iconDst := "data/.cache/icons"
-	imgSrc := "frontend/dist/imgs"
-	imgDst := "data/.cache/imgs"
 	workerDst := resolvePath(scheduledTaskWorkerScriptDst)
 	proxyUtilsDst := resolvePath(scheduledTaskWorkerProxyUtilsDst)
-
-	if err := os.MkdirAll(resolvePath(iconDst), os.ModePerm); err != nil {
-		log.Printf("Failed to create icon cache directory: %v", err)
-	}
-	if err := os.MkdirAll(resolvePath(imgDst), os.ModePerm); err != nil {
-		log.Printf("Failed to create image cache directory: %v", err)
-	}
-
-	extractFiles(fs, iconSrc, iconDst)
-	extractFiles(fs, imgSrc, imgDst)
 	extractEmbeddedFile(fs, scheduledTaskWorkerScriptSrc, workerDst)
 	extractEmbeddedFile(fs, scheduledTaskWorkerProxyUtilsSrc, proxyUtilsDst)
-}
-
-func extractFiles(fs embed.FS, srcDir, dstDir string) {
-	files, err := fs.ReadDir(srcDir)
-	if err != nil {
-		log.Printf("Failed to read embedded files [%s]: %v", srcDir, err)
-		return
-	}
-
-	for _, file := range files {
-		fileName := file.Name()
-		dstPath := resolvePath(dstDir + "/" + fileName)
-		if _, err := os.Stat(dstPath); os.IsNotExist(err) {
-			log.Printf("InitResources [%s]: %s", dstDir, fileName)
-			data, err := fs.ReadFile(srcDir + "/" + fileName)
-			if err != nil {
-				log.Printf("Error reading embedded file %s: %v", fileName, err)
-				continue
-			}
-			if err := os.WriteFile(dstPath, data, os.ModePerm); err != nil {
-				log.Printf("Error writing file %s: %v", dstPath, err)
-			}
-		}
-	}
 }
 
 func extractEmbeddedFile(fs embed.FS, srcPath, dstPath string) {
@@ -311,12 +116,10 @@ func extractEmbeddedFile(fs embed.FS, srcPath, dstPath string) {
 		log.Printf("Failed to read embedded file [%s]: %v", srcPath, err)
 		return
 	}
-
 	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
 		log.Printf("Failed to create directory for embedded file [%s]: %v", dstPath, err)
 		return
 	}
-
 	if err := os.WriteFile(dstPath, data, os.ModePerm); err != nil {
 		log.Printf("Failed to write embedded file [%s]: %v", dstPath, err)
 	}
@@ -328,19 +131,5 @@ func loadConfig() {
 		if err := yaml.Unmarshal(b, &Config); err != nil {
 			log.Printf("Failed to parse user config: %v", err)
 		}
-	}
-
-	if Config.Width == 0 {
-		Config.Width = 800
-	}
-
-	if Config.Height == 0 {
-		Config.Height = 540
-	}
-
-	Config.StartHidden = Env.FromTaskSch && Config.WindowStartState == int(options.Minimised)
-
-	if !Env.FromTaskSch {
-		Config.WindowStartState = int(options.Normal)
 	}
 }

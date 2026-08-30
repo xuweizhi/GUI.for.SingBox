@@ -1,6 +1,5 @@
 import { stringify } from 'yaml'
 
-import { OS } from '@/enums/app'
 import { useAppSettingsStore } from '@/stores'
 import appDts from '@/types/app.d.ts?raw'
 import { APP_TITLE, APP_VERSION, isValidIPv4, isValidIPv6 } from '@/utils'
@@ -31,26 +30,43 @@ export const omitArray = <T, K extends keyof T>(arr: T[], fields: K[]): Omit<T, 
     return item as Omit<T, K>
   })
 }
-export const debounce = (fn: (...args: any) => any, wait: number) => {
+export const debounce = <TArgs extends any[], TResult>(
+  fn: (...args: TArgs) => TResult | Promise<TResult>,
+  wait: number,
+) => {
   let timer: ReturnType<typeof setTimeout> | null = null
-  const _debuonce = function (...args: any) {
-    return new Promise((resolve, reject) => {
-      timer && clearTimeout(timer)
+  let pending: Array<{
+    resolve: (value: TResult) => void
+    reject: (reason?: unknown) => void
+  }> = []
+
+  const debounced = (...args: TArgs) => {
+    return new Promise<TResult>((resolve, reject) => {
+      pending.push({ resolve, reject })
+      if (timer) clearTimeout(timer)
       timer = setTimeout(async () => {
+        timer = null
+        const waiters = pending
+        pending = []
         try {
-          await fn(...args)
-          resolve(null)
+          const result = await fn(...args)
+          waiters.forEach((waiter) => waiter.resolve(result))
         } catch (error) {
-          reject(error)
+          waiters.forEach((waiter) => waiter.reject(error))
         }
       }, wait)
     })
   }
-  _debuonce.cancel = function () {
-    timer && clearTimeout(timer)
+
+  debounced.cancel = () => {
+    if (timer) clearTimeout(timer)
     timer = null
+    const waiters = pending
+    pending = []
+    waiters.forEach((waiter) => waiter.resolve(undefined as TResult))
   }
-  return _debuonce
+
+  return debounced
 }
 
 export function throttle<T extends (...args: any[]) => void>(
@@ -265,85 +281,6 @@ const transformGitHubUrl = (url: string) => {
 export const transformRequestUrl = (url: string) => {
   url = transformGitHubUrl(url)
   return url
-}
-
-export const getAutoStartConfiguration = (os: App.OS, appPath: string, delay = 30) => {
-  if (os === OS.Windows) {
-    const xml = /*xml*/ `<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>${APP_TITLE} at startup</Description>
-    <URI>\\${APP_TITLE}</URI>
-  </RegistrationInfo>
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-      <Delay>PT${delay}S</Delay>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>HighestAvailable</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>false</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <IdleSettings>
-      <StopOnIdleEnd>true</StopOnIdleEnd>
-      <RestartOnIdle>false</RestartOnIdle>
-    </IdleSettings>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT72H</ExecutionTimeLimit>
-    <Priority>7</Priority>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>${appPath}</Command>
-      <Arguments>tasksch</Arguments>
-    </Exec>
-  </Actions>
-</Task>`
-    return xml
-  }
-  if (os === OS.Linux) {
-    const desktop = `[Desktop Entry]
-Type=Application
-Exec=${appPath} tasksch
-Name=${APP_TITLE}`
-    return desktop
-  }
-  if (os === OS.Darwin) {
-    const plist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
- "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${APP_TITLE}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/open</string>
-        <string>${appPath}</string>
-        <string>--args</string>
-        <string>tasksch</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-</dict>
-</plist>`
-    return plist
-  }
-  throw new Error('Not Implemented')
 }
 
 export const setIntervalImmediately = (func: () => void, interval: number) => {

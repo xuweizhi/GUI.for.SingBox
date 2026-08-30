@@ -160,11 +160,11 @@ const testNode = async (name: string) => {
           <span>{{ node.proxy?.type || t('home.nodes.unknownType') }}</span>
           <span v-if="node.proxy?.udp" class="ml-4">UDP</span>
           <Button
+            v-tips.fast="node.error?.message"
             :data-delay="node.name"
             :loading="testingNodes.has(node.name)"
             :aria-description="node.error?.message"
             :title="node.error?.message"
-            v-tips.fast="node.error?.message"
             type="text"
             size="small"
             class="ml-auto"

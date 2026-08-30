@@ -229,7 +229,6 @@ type scheduledTaskWorkerSupervisor struct {
 	requestCounter uint64
 
 	scheduler *cron.Cron
-	entryIDs  map[string]cron.EntryID
 	logs      []scheduledTaskWorkerLogRecord
 }
 
@@ -239,7 +238,6 @@ func (a *App) taskWorker() *scheduledTaskWorkerSupervisor {
 			app:            a,
 			pending:        map[string]chan scheduledTaskWorkerResponse{},
 			supportedTypes: map[string]struct{}{},
-			entryIDs:       map[string]cron.EntryID{},
 		}
 	}
 	return a.TaskWorker
@@ -624,9 +622,10 @@ func (w *scheduledTaskWorkerSupervisor) reloadFromDisk() error {
 func (w *scheduledTaskWorkerSupervisor) reloadTasks(tasks []scheduledTaskConfig) error {
 	w.stopScheduler()
 
-	scheduler := cron.New(cron.WithSeconds())
-	nextEntries := map[string]cron.EntryID{}
-
+	scheduler := cron.New(
+		cron.WithSeconds(),
+		cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)),
+	)
 	for _, task := range tasks {
 		if task.Disabled || !w.supportsType(task.Type) {
 			continue
@@ -643,7 +642,7 @@ func (w *scheduledTaskWorkerSupervisor) reloadTasks(tasks []scheduledTaskConfig)
 		}
 
 		taskCopy := task
-		entryID, err := scheduler.AddFunc(spec, func() {
+		_, err = scheduler.AddFunc(spec, func() {
 			if _, runErr := w.executeTask(taskCopy); runErr != nil {
 				log.Printf("Scheduled task [%s] failed: %v", taskCopy.Name, runErr)
 			}
@@ -652,14 +651,12 @@ func (w *scheduledTaskWorkerSupervisor) reloadTasks(tasks []scheduledTaskConfig)
 			log.Printf("Failed to register scheduled task [%s]: %v", task.Name, err)
 			continue
 		}
-		nextEntries[task.ID] = entryID
 	}
 
 	scheduler.Start()
 
 	w.mu.Lock()
 	w.scheduler = scheduler
-	w.entryIDs = nextEntries
 	w.mu.Unlock()
 
 	return nil
@@ -672,10 +669,12 @@ func (w *scheduledTaskWorkerSupervisor) stopScheduler() {
 		w.scheduler.Stop()
 	}
 	w.scheduler = nil
-	w.entryIDs = map[string]cron.EntryID{}
 }
 
 func (w *scheduledTaskWorkerSupervisor) executeTask(task scheduledTaskConfig) ([]scheduledTaskWorkerResultItem, error) {
+	dataMutationMu.Lock()
+	defer dataMutationMu.Unlock()
+
 	startTime := time.Now().UnixMilli()
 
 	if err := updateScheduledTaskLastTime(task.ID, startTime); err != nil {
@@ -716,10 +715,6 @@ func (w *scheduledTaskWorkerSupervisor) executeTask(task scheduledTaskConfig) ([
 	}
 
 finalize:
-	if task.Notification {
-		log.Printf("Scheduled task [%s] requested notifications, but node worker notifications are not implemented yet", task.Name)
-	}
-
 	record := scheduledTaskWorkerLogRecord{
 		ID:        task.ID,
 		Name:      task.Name,
@@ -730,6 +725,15 @@ finalize:
 
 	w.recordLog(record)
 
+	failures := make([]string, 0)
+	for _, item := range result {
+		if !item.OK {
+			failures = append(failures, item.Result)
+		}
+	}
+	if len(failures) > 0 {
+		return result, fmt.Errorf("scheduled task failed: %s", strings.Join(failures, "; "))
+	}
 	return result, nil
 }
 
@@ -751,7 +755,7 @@ func (w *scheduledTaskWorkerSupervisor) recordLog(record scheduledTaskWorkerLogR
 	if err := appendScheduledTaskWorkerLog(record); err != nil {
 		log.Printf("Scheduled task log persist failed: %v", err)
 	}
-	if w.app == nil || (!w.app.IsHeadless() && w.app.Ctx == nil) {
+	if w.app == nil {
 		return
 	}
 	w.app.EventsEmit(scheduledTaskLogEventName, record)
@@ -961,7 +965,7 @@ func saveScheduledTasksUnlocked(tasks []scheduledTaskConfig) error {
 	if err := os.MkdirAll(resolvePath("data"), os.ModePerm); err != nil {
 		return err
 	}
-	return os.WriteFile(resolvePath(scheduledTasksFilePath), content, 0644)
+	return atomicWriteFile(resolvePath(scheduledTasksFilePath), content, 0o600)
 }
 
 func saveScheduledTasks(tasks []scheduledTaskConfig) error {
@@ -1023,7 +1027,7 @@ func saveRulesets(rulesets []rulesetConfig) error {
 	if err := os.MkdirAll(resolvePath("data"), os.ModePerm); err != nil {
 		return err
 	}
-	return os.WriteFile(resolvePath(rulesetsFilePath), content, 0644)
+	return atomicWriteFile(resolvePath(rulesetsFilePath), content, 0o600)
 }
 
 func loadSubscriptions() ([]subscriptionConfig, error) {
@@ -1054,7 +1058,7 @@ func saveSubscriptions(subscribes []subscriptionConfig) error {
 	if err := os.MkdirAll(resolvePath("data"), os.ModePerm); err != nil {
 		return err
 	}
-	return os.WriteFile(resolvePath(subscribesFilePath), content, 0644)
+	return atomicWriteFile(resolvePath(subscribesFilePath), content, 0o600)
 }
 
 func loadProfiles() ([]profileConfig, error) {
@@ -1085,7 +1089,7 @@ func saveProfiles(profiles []profileConfig) error {
 	if err := os.MkdirAll(resolvePath("data"), os.ModePerm); err != nil {
 		return err
 	}
-	return os.WriteFile(resolvePath(profilesFilePath), content, 0644)
+	return atomicWriteFile(resolvePath(profilesFilePath), content, 0o600)
 }
 
 func loadPlugins() ([]pluginConfig, error) {
@@ -1116,7 +1120,7 @@ func savePlugins(plugins []pluginConfig) error {
 	if err := os.MkdirAll(resolvePath("data"), os.ModePerm); err != nil {
 		return err
 	}
-	return os.WriteFile(resolvePath(pluginsFilePath), content, 0644)
+	return atomicWriteFile(resolvePath(pluginsFilePath), content, 0o600)
 }
 
 func loadPluginHub() ([]pluginConfig, error) {
@@ -1166,7 +1170,7 @@ func saveUserSettingsMap(settings map[string]any) error {
 	if err := os.MkdirAll(resolvePath("data"), os.ModePerm); err != nil {
 		return err
 	}
-	return os.WriteFile(resolvePath("data/user.yaml"), content, 0644)
+	return atomicWriteFile(resolvePath("data/user.yaml"), content, 0o600)
 }
 
 func loadPluginSettingsMap() (map[string]any, error) {
@@ -1747,10 +1751,10 @@ func (w *scheduledTaskWorkerSupervisor) doUpdatePlugin(
 	}
 
 	if nextPlugin.Type != "File" {
-		if err := os.MkdirAll(filepath.Dir(resolvePath(nextPlugin.Path)), os.ModePerm); err != nil {
+		if err := os.MkdirAll(filepath.Dir(resolvePath(nextPlugin.Path)), 0o700); err != nil {
 			return err
 		}
-		if err := os.WriteFile(resolvePath(nextPlugin.Path), []byte(code), 0644); err != nil {
+		if err := atomicWriteFile(resolvePath(nextPlugin.Path), []byte(code), 0o600); err != nil {
 			return err
 		}
 	}
@@ -1840,10 +1844,10 @@ func (w *scheduledTaskWorkerSupervisor) doUpdateSubscription(
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(resolvePath(subscribe.Path)), os.ModePerm); err != nil {
+		if err := os.MkdirAll(filepath.Dir(resolvePath(subscribe.Path)), 0o700); err != nil {
 			return err
 		}
-		if err := os.WriteFile(resolvePath(subscribe.Path), payload, 0644); err != nil {
+		if err := atomicWriteFile(resolvePath(subscribe.Path), payload, 0o600); err != nil {
 			return err
 		}
 	}
@@ -2439,130 +2443,7 @@ func isArrayLike(value any) bool {
 }
 
 func (w *scheduledTaskWorkerSupervisor) getSystemProxy() (string, error) {
-	switch Env.OS {
-	case "windows":
-		enabled := w.app.Exec("reg", []string{
-			"query",
-			`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`,
-			"/v",
-			"ProxyEnable",
-			"/t",
-			"REG_DWORD",
-		}, ExecOptions{})
-		if !enabled.Flag {
-			return "", nil
-		}
-		if strings.Contains(enabled.Data, "0x0") {
-			return "", nil
-		}
-		server := w.app.Exec("reg", []string{
-			"query",
-			`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`,
-			"/v",
-			"ProxyServer",
-			"/t",
-			"REG_SZ",
-		}, ExecOptions{})
-		if !server.Flag {
-			return "", nil
-		}
-		matches := regexp.MustCompile(`ProxyServer\s+REG_SZ\s+(\S+)`).FindStringSubmatch(server.Data)
-		if len(matches) < 2 {
-			return "", nil
-		}
-		if strings.HasPrefix(matches[1], "socks") {
-			return matches[1], nil
-		}
-		return "http://" + matches[1], nil
-	case "darwin":
-		out := w.app.Exec("scutil", []string{"--proxy"}, ExecOptions{})
-		if !out.Flag {
-			return "", nil
-		}
-		lines := strings.Split(out.Data, "\n")
-		values := map[string]string{}
-		for _, line := range lines {
-			segments := strings.SplitN(strings.TrimSpace(line), ":", 2)
-			if len(segments) != 2 {
-				continue
-			}
-			values[strings.TrimSpace(segments[0])] = strings.TrimSpace(segments[1])
-		}
-		if values["HTTPEnable"] == "1" {
-			return "http://" + values["HTTPProxy"] + ":" + values["HTTPPort"], nil
-		}
-		if values["SOCKSEnable"] == "1" {
-			return "socks5://" + values["SOCKSProxy"] + ":" + values["SOCKSPort"], nil
-		}
-		return "", nil
-	case "linux":
-		desktop := os.Getenv("XDG_CURRENT_DESKTOP")
-		if strings.Contains(desktop, "KDE") {
-			out := w.app.Exec("kreadconfig5", []string{
-				"--file",
-				"kioslaverc",
-				"--group",
-				"Proxy Settings",
-				"--key",
-				"ProxyType",
-			}, ExecOptions{})
-			if out.Flag && strings.Contains(out.Data, "1") {
-				httpOut := w.app.Exec("kreadconfig5", []string{
-					"--file",
-					"kioslaverc",
-					"--group",
-					"Proxy Settings",
-					"--key",
-					"httpProxy",
-				}, ExecOptions{})
-				httpProxy := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(httpOut.Data), "'", ""), "\"", "")
-				if httpOut.Flag && httpProxy != "" {
-					return strings.ReplaceAll(httpProxy, " ", ":"), nil
-				}
-
-				socksOut := w.app.Exec("kreadconfig5", []string{
-					"--file",
-					"kioslaverc",
-					"--group",
-					"Proxy Settings",
-					"--key",
-					"socksProxy",
-				}, ExecOptions{})
-				socksProxy := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(socksOut.Data), "'", ""), "\"", "")
-				if socksOut.Flag && socksProxy != "" {
-					return strings.ReplaceAll(socksProxy, " ", ":"), nil
-				}
-			}
-		}
-		if strings.Contains(desktop, "GNOME") || strings.Contains(desktop, "XFCE") {
-			modeOut := w.app.Exec("gsettings", []string{"get", "org.gnome.system.proxy", "mode"}, ExecOptions{})
-			if !modeOut.Flag {
-				return "", nil
-			}
-			if strings.Contains(modeOut.Data, "none") {
-				return "", nil
-			}
-			if strings.Contains(modeOut.Data, "manual") {
-				httpHostOut := w.app.Exec("gsettings", []string{"get", "org.gnome.system.proxy.http", "host"}, ExecOptions{})
-				httpPortOut := w.app.Exec("gsettings", []string{"get", "org.gnome.system.proxy.http", "port"}, ExecOptions{})
-				httpHost := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(httpHostOut.Data), "'", ""), "\"", "")
-				httpPort := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(httpPortOut.Data), "'", ""), "\"", "")
-				if httpHostOut.Flag && httpPortOut.Flag && httpHost != "" && httpPort != "0" {
-					return "http://" + httpHost + ":" + httpPort, nil
-				}
-
-				socksHostOut := w.app.Exec("gsettings", []string{"get", "org.gnome.system.proxy.socks", "host"}, ExecOptions{})
-				socksPortOut := w.app.Exec("gsettings", []string{"get", "org.gnome.system.proxy.socks", "port"}, ExecOptions{})
-				socksHost := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(socksHostOut.Data), "'", ""), "\"", "")
-				socksPort := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(socksPortOut.Data), "'", ""), "\"", "")
-				if socksHostOut.Flag && socksPortOut.Flag && socksHost != "" && socksPort != "0" {
-					return "socks5://" + socksHost + ":" + socksPort, nil
-				}
-			}
-		}
-	}
-
-	return "", nil
+	return environmentProxy(), nil
 }
 
 func (w *scheduledTaskWorkerSupervisor) runAllRulesetsTask() ([]scheduledTaskWorkerResultItem, error) {
@@ -2646,10 +2527,10 @@ func (w *scheduledTaskWorkerSupervisor) doUpdateRuleset(ruleset *rulesetConfig) 
 
 		ruleset.Count = count
 		if changed {
-			if err := os.MkdirAll(filepath.Dir(resolvePath(ruleset.Path)), os.ModePerm); err != nil {
+			if err := os.MkdirAll(filepath.Dir(resolvePath(ruleset.Path)), 0o700); err != nil {
 				return err
 			}
-			if err := os.WriteFile(resolvePath(ruleset.Path), []byte(prettyBody), 0644); err != nil {
+			if err := atomicWriteFile(resolvePath(ruleset.Path), []byte(prettyBody), 0o600); err != nil {
 				return err
 			}
 		}

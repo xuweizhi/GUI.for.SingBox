@@ -25,10 +25,7 @@ import type {
 
 const expandedSet = ref<Set<string>>(new Set())
 const loadingSet = ref<Set<string>>(new Set())
-const resultCache = new Map<
-  string,
-  { result?: LatencyResult; owners: Set<symbol> }
->()
+const resultCache = new Map<string, { result?: LatencyResult; owners: Set<symbol> }>()
 const handles = new Set<LatencyTaskHandle>()
 const destroyTimers = new Set<ReturnType<typeof setTimeout>>()
 let refreshQueue = Promise.resolve()
@@ -378,8 +375,8 @@ onScopeDispose(() => {
           </template>
         </Input>
         <Button
-          :data-test="`group-delay-${group.name}`"
           v-tips="'home.overview.delayTest'"
+          :data-test="`group-delay-${group.name}`"
           :loading="isLoading(group.name)"
           icon="speedTest"
           type="text"

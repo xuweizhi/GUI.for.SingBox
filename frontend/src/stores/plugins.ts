@@ -1,15 +1,14 @@
 import { defineStore } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { ref } from 'vue'
 import { parse } from 'yaml'
 
 import { HttpGet, ReadFile, RemoveFile, Requests, WriteFile } from '@/bridge'
 import { PluginHubFilePath, PluginsFilePath } from '@/constant/app'
 import { PluginTrigger, PluginTriggerEvent, RequestMethod } from '@/enums/app'
-import { normalizePluginCode } from '@/stores/pluginCompat'
 import { useAppSettingsStore } from '@/stores'
+import { normalizePluginCode } from '@/stores/pluginCompat'
 import {
   ignoredError,
-  updateTrayAndMenus,
   isNumber,
   omitArray,
   deepClone,
@@ -51,10 +50,6 @@ const PluginsTriggerMap: Partial<
 > = {
   [PluginTrigger.OnManual]: {
     fnName: PluginTriggerEvent.OnManual,
-    observers: [],
-  },
-  [PluginTrigger.OnTrayUpdate]: {
-    fnName: PluginTriggerEvent.OnTrayUpdate,
     observers: [],
   },
   [PluginTrigger.OnSubscribe]: {
@@ -483,7 +478,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     releasePluginRuntimeCache(id)
 
     if (plugin.path.startsWith('data')) {
-      await RemoveFile(plugin.path).catch((_) => {})
+      await RemoveFile(plugin.path).catch(() => {})
     }
     if (appSettingsStore.app.pluginSettings[plugin.id]) {
       if (await confirm('Tips', 'plugins.removeConfiguration').catch(() => 0)) {
@@ -801,45 +796,6 @@ export const usePluginsStore = defineStore('plugins', () => {
     return exitCode
   }
 
-  const onTrayUpdateTrigger = async (tray: App.TrayContent, menus: App.MenuItem[]) => {
-    const { fnName, observers } = PluginsTriggerMap[PluginTrigger.OnTrayUpdate]!
-    if (observers.length === 0) return [tray, menus] as const
-
-    let finalTray = tray
-    let finalMenus = menus
-    for (const observer of observers) {
-      const cache = PluginsCache[observer]
-
-      if (isPluginUnavailable(cache)) continue
-
-      const { tray, menus } = await runPluginEvent(observer, fnName, [finalTray, finalMenus])
-      finalTray = tray
-      finalMenus = menus
-    }
-
-    return [finalTray, finalMenus] as const
-  }
-
-  const _watchDisabled = computed(() =>
-    plugins.value
-      .map((v) => v.disabled)
-      .sort()
-      .join(),
-  )
-
-  const _watchMenus = computed(() =>
-    plugins.value
-      .map((v) => Object.entries(v.menus).map((v) => v[0] + v[1]))
-      .sort()
-      .join(),
-  )
-
-  watch([_watchMenus, _watchDisabled], () => {
-    if (appSettingsStore.app.addPluginToMenu) {
-      updateTrayAndMenus()
-    }
-  })
-
   return {
     plugins,
     setupPlugins,
@@ -852,7 +808,6 @@ export const usePluginsStore = defineStore('plugins', () => {
     updatePlugins,
     getPluginById,
     reloadPlugin,
-    onTrayUpdateTrigger,
     onSubscribeTrigger,
     onGenerateTrigger,
     onStartupTrigger: () => noParamsTrigger(PluginTrigger.OnStartup),

@@ -31,11 +31,55 @@ var requestTransportCache = requestTransportCacheStore{
 	entries: map[requestTransportKey]*http.Transport{},
 }
 
+var dataMutationMu sync.Mutex
+
 func resolvePath(path string) string {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(Env.BasePath, path)
 	}
 	return filepath.ToSlash(filepath.Clean(path))
+}
+
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return err
+	}
+
+	temp, err := os.CreateTemp(directory, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+
+	if err := temp.Chmod(mode); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
+}
+
+func sanitizedURLForLog(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func requestProxy(proxyAddr string) func(*http.Request) (*url.URL, error) {
@@ -214,35 +258,4 @@ func parseByteRange(s string, size int64) (start int64, end int64, err error) {
 	}
 
 	return 0, 0, errors.New("invalid range format")
-}
-
-func RollingRelease(next http.Handler) http.Handler {
-	isDevVersion := strings.Contains(Env.AppVersion, "dev")
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		url := r.URL.Path
-		isIndex := url == "/"
-
-		if isIndex {
-			w.Header().Set("Cache-Control", "no-cache")
-		} else {
-			w.Header().Set("Cache-Control", "max-age=31536000, immutable")
-		}
-
-		if isDevVersion || !Config.RollingRelease {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		if isIndex {
-			url = "/index.html"
-		}
-
-		filePath := resolvePath("data/rolling-release" + url)
-		if _, err := os.Stat(filePath); err != nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		http.ServeFile(w, r, filePath)
-	})
 }

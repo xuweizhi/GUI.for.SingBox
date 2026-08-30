@@ -14,14 +14,12 @@ import {
   BrowserOpenURL,
   MakeDir,
   FileExists,
-  OpenDir,
 } from '@/bridge'
 import { CoreWorkingDirectory } from '@/constant/kernel'
-import { Branch, OS } from '@/enums/app'
-import { useAppSettingsStore, useEnvStore, useKernelApiStore } from '@/stores'
+import { Branch } from '@/enums/app'
+import { useAppSettingsStore, useKernelApiStore } from '@/stores'
 import {
   getGitHubApiAuthorization,
-  GrantTUNPermission,
   ignoredError,
   confirm,
   message,
@@ -53,7 +51,6 @@ export const useCoreBranch = (isAlpha = false) => {
   const rollbackable = ref(false)
 
   const { t } = useI18n()
-  const envStore = useEnvStore()
   const appSettings = useAppSettingsStore()
   const kernelApiStore = useKernelApiStore()
 
@@ -66,8 +63,6 @@ export const useCoreBranch = (isAlpha = false) => {
   const updatable = computed(
     () => remoteVersion.value && localVersion.value !== remoteVersion.value,
   )
-
-  const grantable = computed(() => localVersion.value && envStore.env.os !== OS.Windows)
 
   const CoreFilePath = `${CoreWorkingDirectory}/${getKernelFileName(isAlpha)}`
   const CoreBakFilePath = `${CoreFilePath}.bak`
@@ -204,11 +199,6 @@ export const useCoreBranch = (isAlpha = false) => {
     remoteVersion.value = await getRemoteVersion(showTips)
   }
 
-  const grantCorePermission = async () => {
-    await GrantTUNPermission(CoreFilePath)
-    message.success('common.success')
-  }
-
   const rollbackCore = async () => {
     await confirm('common.warning', 'settings.kernel.rollback')
 
@@ -229,10 +219,6 @@ export const useCoreBranch = (isAlpha = false) => {
     BrowserOpenURL(isAlpha ? AlphaPage : StablePage)
   }
 
-  const openFileLocation = async () => {
-    await OpenDir(CoreWorkingDirectory)
-  }
-
   watch(
     () => appSettings.app.kernel.branch,
     () => (downloadCompleted.value = false),
@@ -251,7 +237,6 @@ export const useCoreBranch = (isAlpha = false) => {
   return {
     restartable,
     updatable,
-    grantable,
     rollbackable,
     versionDetail,
     localVersion,
@@ -266,8 +251,6 @@ export const useCoreBranch = (isAlpha = false) => {
     cancelDownload,
     restartCore,
     rollbackCore,
-    grantCorePermission,
     openReleasePage,
-    openFileLocation,
   }
 }

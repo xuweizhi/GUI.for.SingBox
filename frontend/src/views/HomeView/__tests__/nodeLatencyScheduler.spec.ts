@@ -481,6 +481,7 @@ describe('createNodeLatencyScheduler', () => {
       if (name === 'A') throw new Error('request timeout')
       return blocker.promise
     })
+    // eslint-disable-next-line prefer-const -- the callback may run synchronously during assignment
     retryTask = scheduler.submit({
       nodes: ['A', 'B'],
       url: 'url',
@@ -508,6 +509,7 @@ describe('createNodeLatencyScheduler', () => {
     })
     const scheduler = createNodeLatencyScheduler(probe)
     let task!: ReturnType<typeof scheduler.submit>
+    // eslint-disable-next-line prefer-const -- the callback may run synchronously during assignment
     task = scheduler.submit({
       nodes: ['A'],
       url: 'url',
@@ -531,6 +533,7 @@ describe('createNodeLatencyScheduler', () => {
     })
     const scheduler = createNodeLatencyScheduler(probe)
     let subscriber!: ReturnType<typeof scheduler.submit>
+    // eslint-disable-next-line prefer-const -- the callback may run synchronously during assignment
     subscriber = scheduler.submit({
       nodes: ['blocker', 'A'],
       url: 'url',
@@ -556,7 +559,11 @@ describe('createNodeLatencyScheduler', () => {
     await tick()
     expect(probe.mock.calls.map(([name]) => name)).toEqual(['blocker', 'A'])
 
-    await expect(subscriber.done).resolves.toMatchObject({ cancelled: true, success: 1, failure: 0 })
+    await expect(subscriber.done).resolves.toMatchObject({
+      cancelled: true,
+      success: 1,
+      failure: 0,
+    })
     shared.resolve({ delay: 8 })
     await expect(owner.done).resolves.toMatchObject({ success: 1, cancelled: false })
   })

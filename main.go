@@ -6,163 +6,89 @@ import (
 	"fmt"
 	"guiforcores/bridge"
 	"os"
+	"os/signal"
 	"strings"
-	"time"
-
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/logger"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/linux"
-	"github.com/wailsapp/wails/v2/pkg/options/mac"
-	"github.com/wailsapp/wails/v2/pkg/options/windows"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"syscall"
 )
 
-//go:embed all:frontend/dist taskworker/worker.mjs frontend/src/vendor/proxy-utils.esm.mjs
+//go:embed all:frontend/dist/webui taskworker/worker.mjs frontend/src/vendor/proxy-utils.esm.mjs
 var assets embed.FS
 
-//go:embed frontend/dist/favicon.ico
-var icon []byte
-
 func main() {
-	app := bridge.CreateApp(assets)
-
-	cliOptions := parseCLIOptions(os.Args[1:])
-	if cliOptions.Help {
-		return
-	}
-	if cliOptions.Headless {
-		err := bridge.RunHeadless(assets, app, bridge.HeadlessOptions{
-			Listen: cliOptions.WebUIListen,
-			Token:  cliOptions.WebUIToken,
-		})
-		if err != nil {
-			println("Error:", err.Error())
-		}
-		return
-	}
-
-	trayStart, trayEnd := bridge.CreateTray(app, icon)
-
-	// Create application with options
-	err := wails.Run(&options.App{
-		MinWidth:         600,
-		MinHeight:        400,
-		DisableResize:    false,
-		Menu:             app.AppMenu,
-		Title:            bridge.Env.AppName,
-		Frameless:        bridge.Env.OS != "darwin",
-		Width:            bridge.Config.Width,
-		Height:           bridge.Config.Height,
-		StartHidden:      bridge.Config.StartHidden,
-		WindowStartState: options.WindowStartState(bridge.Config.WindowStartState),
-		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 1},
-		Windows: &windows.Options{
-			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
-			ContentProtection:    bridge.Config.ContentProtection,
-			BackdropType:         windows.Acrylic,
-			WebviewBrowserPath:   bridge.Env.WebviewPath,
-		},
-		Mac: &mac.Options{
-			TitleBar:             mac.TitleBarHiddenInset(),
-			Appearance:           mac.DefaultAppearance,
-			ContentProtection:    bridge.Config.ContentProtection,
-			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
-			About: &mac.AboutInfo{
-				Title:   bridge.Env.AppName,
-				Message: "© 2026 GUI.for.Cores",
-				Icon:    icon,
-			},
-		},
-		Linux: &linux.Options{
-			Icon:                icon,
-			WindowIsTranslucent: false,
-			ProgramName:         bridge.Env.AppName,
-			WebviewGpuPolicy:    linux.WebviewGpuPolicy(bridge.Config.WebviewGpuPolicy),
-		},
-		AssetServer: &assetserver.Options{
-			Assets:     assets,
-			Middleware: bridge.RollingRelease,
-		},
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: func() string {
-				if bridge.Config.MultipleInstance {
-					return time.Now().String()
-				}
-				return bridge.Env.AppName
-			}(),
-			OnSecondInstanceLaunch: func(data options.SecondInstanceData) {
-				app.ShowMainWindow()
-				app.EventsEmit("onLaunchApp", data.Args)
-			},
-		},
-		OnStartup: func(ctx context.Context) {
-			app.Ctx = ctx
-			runtime.InitializeNotifications(ctx)
-			trayStart()
-			if err := app.StartScheduledTaskWorker(); err != nil {
-				println("Scheduled task worker:", err.Error())
-			}
-		},
-		OnBeforeClose: func(ctx context.Context) (prevent bool) {
-			if !bridge.Env.PreventExit {
-				trayEnd()
-				runtime.CleanupNotifications(ctx)
-				return false
-			}
-			app.EventsEmit("onBeforeExitApp")
-			return true
-		},
-		Bind: []any{
-			app,
-		},
-		LogLevel: logger.INFO,
-		Debug: options.Debug{
-			OpenInspectorOnStartup: true,
-		},
-	})
-
+	options, err := parseCLIOptions(os.Args[1:])
 	if err != nil {
-		println("Error:", err.Error())
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		printUsage(os.Stderr)
+		os.Exit(2)
+	}
+	if options.Help {
+		printUsage(os.Stdout)
+		return
+	}
+
+	app := bridge.CreateApp(assets)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := bridge.RunHeadless(ctx, assets, app, bridge.HeadlessOptions{
+		Listen: options.WebUIListen,
+		Token:  options.WebUIToken,
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
 	}
 }
 
 type cliOptions struct {
-	Headless    bool
 	Help        bool
 	WebUIListen string
 	WebUIToken  string
 }
 
-func parseCLIOptions(args []string) cliOptions {
+func parseCLIOptions(args []string) (cliOptions, error) {
 	options := cliOptions{
-		WebUIListen: "127.0.0.1:18080",
+		WebUIListen: envOrDefault("WEBUI_LISTEN", "127.0.0.1:18080"),
+		WebUIToken:  os.Getenv("WEBUI_TOKEN"),
 	}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "--headless":
-			options.Headless = true
+			// Upgrade-safe no-op: headless WebUI is now the only runtime.
 		case strings.HasPrefix(arg, "--webui-listen="):
 			options.WebUIListen = strings.TrimPrefix(arg, "--webui-listen=")
-		case arg == "--webui-listen" && i+1 < len(args):
+		case arg == "--webui-listen":
+			if i+1 >= len(args) {
+				return options, fmt.Errorf("missing value for %s", arg)
+			}
 			i++
 			options.WebUIListen = args[i]
 		case strings.HasPrefix(arg, "--webui-token="):
 			options.WebUIToken = strings.TrimPrefix(arg, "--webui-token=")
-		case arg == "--webui-token" && i+1 < len(args):
+		case arg == "--webui-token":
+			if i+1 >= len(args) {
+				return options, fmt.Errorf("missing value for %s", arg)
+			}
 			i++
 			options.WebUIToken = args[i]
 		case arg == "--help" || arg == "-h":
-			println("Usage:")
-			println(fmt.Sprintf("  %s [--headless] [--webui-listen host:port] [--webui-token token]", os.Args[0]))
 			options.Help = true
+		default:
+			return options, fmt.Errorf("unknown argument %q", arg)
 		}
 	}
 
-	return options
+	return options, nil
+}
+
+func printUsage(output *os.File) {
+	fmt.Fprintf(output, "Usage: %s [--webui-listen host:port] [--webui-token token]\n", os.Args[0])
+}
+
+func envOrDefault(key string, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }

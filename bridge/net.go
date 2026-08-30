@@ -16,12 +16,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) Requests(method string, url string, headers map[string]string, body string, options RequestOptions) HTTPResult {
-	log.Printf("Requests: %v %v %v %v %v", method, url, headers, body, options)
+	log.Printf("Requests: %s %s", method, sanitizedURLForLog(url))
 
 	client, ctx, cancel := withRequestOptionsClient(options)
 	defer cancel()
@@ -58,9 +56,12 @@ func (a *App) Requests(method string, url string, headers map[string]string, bod
 		return HTTPResult{false, 500, nil, err.Error()}
 	}
 	defer resp.Body.Close()
+	if !isSuccessfulHTTPStatus(resp.StatusCode) {
+		return failedHTTPResponse(resp)
+	}
 
 	if options.Stream != "" && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		runtime.EventsEmit(a.Ctx, options.Stream, map[string]any{
+		a.EventsEmit(options.Stream, map[string]any{
 			"type":    "response",
 			"status":  resp.StatusCode,
 			"headers": resp.Header,
@@ -101,7 +102,7 @@ func (a *App) Requests(method string, url string, headers map[string]string, bod
 			if retry != nil {
 				payload["retry"] = *retry
 			}
-			runtime.EventsEmit(a.Ctx, options.Stream, payload)
+			a.EventsEmit(options.Stream, payload)
 		}
 
 		for scanner.Scan() {
@@ -145,7 +146,7 @@ func (a *App) Requests(method string, url string, headers map[string]string, bod
 		}
 
 		if err := scanner.Err(); err != nil {
-			runtime.EventsEmit(a.Ctx, options.Stream, map[string]any{
+			a.EventsEmit(options.Stream, map[string]any{
 				"type":  "error",
 				"error": err.Error(),
 			})
@@ -153,7 +154,7 @@ func (a *App) Requests(method string, url string, headers map[string]string, bod
 		}
 
 		dispatch()
-		runtime.EventsEmit(a.Ctx, options.Stream, map[string]any{"type": "done"})
+		a.EventsEmit(options.Stream, map[string]any{"type": "done"})
 		return HTTPResult{true, resp.StatusCode, resp.Header, ""}
 	}
 
@@ -256,7 +257,7 @@ func (a *App) UdpRequest(address string, payload string, options NetOptions) Fla
 }
 
 func (a *App) Download(method string, url string, path string, headers map[string]string, event string, options RequestOptions) HTTPResult {
-	log.Printf("Download: %s %s %s %v %s %v", method, url, path, headers, event, options)
+	log.Printf("Download: %s %s -> %s", method, sanitizedURLForLog(url), path)
 
 	client, ctx, cancel := withRequestOptionsClient(options)
 	defer cancel()
@@ -281,18 +282,23 @@ func (a *App) Download(method string, url string, path string, headers map[strin
 		return HTTPResult{false, 500, nil, err.Error()}
 	}
 	defer resp.Body.Close()
+	if !isSuccessfulHTTPStatus(resp.StatusCode) {
+		return failedHTTPResponse(resp)
+	}
 
 	path = resolvePath(path)
 
-	err = os.MkdirAll(filepath.Dir(path), os.ModePerm)
+	err = os.MkdirAll(filepath.Dir(path), 0o700)
 	if err != nil {
 		return HTTPResult{false, 500, nil, err.Error()}
 	}
 
-	file, err := os.Create(path)
+	file, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".download-*")
 	if err != nil {
 		return HTTPResult{false, 500, nil, err.Error()}
 	}
+	tempPath := file.Name()
+	defer os.Remove(tempPath)
 
 	reader := wrapWithProgress(resp.Body, resp.ContentLength, event, a)
 	writer := io.Writer(file)
@@ -315,16 +321,18 @@ func (a *App) Download(method string, url string, path string, headers map[strin
 	if options.Sha256 != "" {
 		actual := fmt.Sprintf("%x", hash.Sum(nil))
 		if actual != options.Sha256 {
-			_ = os.Remove(path)
 			return HTTPResult{false, 500, nil, fmt.Sprintf("SHA256 mismatch: %s, expected %s, got %s", filepath.Base(path), options.Sha256, actual)}
 		}
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return HTTPResult{false, 500, nil, err.Error()}
 	}
 
 	return HTTPResult{true, resp.StatusCode, resp.Header, "Success"}
 }
 
 func (a *App) Upload(method string, url string, path string, headers map[string]string, event string, options RequestOptions) HTTPResult {
-	log.Printf("Upload: %s %s %s %v %s %v", method, url, path, headers, event, options)
+	log.Printf("Upload: %s %s <- %s", method, sanitizedURLForLog(url), path)
 
 	path = resolvePath(path)
 
@@ -398,8 +406,27 @@ func (a *App) Upload(method string, url string, path string, headers map[string]
 	if err != nil {
 		return HTTPResult{false, 500, nil, err.Error()}
 	}
+	if !isSuccessfulHTTPStatus(resp.StatusCode) {
+		return HTTPResult{false, resp.StatusCode, resp.Header, string(b)}
+	}
 
 	return HTTPResult{true, resp.StatusCode, resp.Header, string(b)}
+}
+
+func isSuccessfulHTTPStatus(status int) bool {
+	return status >= http.StatusOK && status < http.StatusMultipleChoices
+}
+
+func failedHTTPResponse(resp *http.Response) HTTPResult {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return HTTPResult{false, resp.StatusCode, resp.Header, err.Error()}
+	}
+	message := strings.TrimSpace(string(body))
+	if message == "" {
+		message = resp.Status
+	}
+	return HTTPResult{false, resp.StatusCode, resp.Header, message}
 }
 
 func (wt *WriteTracker) Write(p []byte) (n int, err error) {

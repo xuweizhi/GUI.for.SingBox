@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 
 import rawRoutes from '@/router/routes'
 import { useAppSettingsStore, useWebuiAuthStore } from '@/stores'
-import { isWebui } from '@/utils/env'
 
 const { t } = useI18n()
 const appSettings = useAppSettingsStore()
@@ -42,7 +41,7 @@ const handleLogout = async () => {
         </Button>
       </RouterLink>
     </div>
-    <Button v-if="isWebui" type="text" icon="grant" @click="handleLogout">
+    <Button type="text" icon="grant" @click="handleLogout">
       {{ t('auth.logout') }}
     </Button>
   </div>

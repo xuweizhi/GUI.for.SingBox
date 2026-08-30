@@ -4,17 +4,6 @@ export enum OS {
   Darwin = 'darwin',
 }
 
-export enum WindowStartState {
-  Normal = 0,
-  Minimised = 2,
-}
-
-export enum WebviewGpuPolicy {
-  Always = 0,
-  OnDemand = 1,
-  Never = 2,
-}
-
 export enum Theme {
   Auto = 'auto',
   Light = 'light',
@@ -82,7 +71,6 @@ export enum PluginTrigger {
   OnCoreStopped = 'on::core::stopped',
   OnBeforeCoreStart = 'on::before::core::start',
   OnBeforeCoreStop = 'on::before::core::stop',
-  OnTrayUpdate = 'on::tray::update',
 }
 
 export enum PluginTriggerEvent {
@@ -92,7 +80,6 @@ export enum PluginTriggerEvent {
   OnInstall = 'onInstall',
   OnUninstall = 'onUninstall',
   OnManual = 'onRun',
-  OnTrayUpdate = 'onTrayUpdate',
   OnSubscribe = 'onSubscribe',
   OnGenerate = 'onGenerate',
   OnStartup = 'onStartup',

@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/bridge', () => ({
-  GetSystemProxyBypass: vi.fn(),
   ReadFile: vi.fn(),
-  WindowIsMaximised: vi.fn(),
-  WindowIsMinimised: vi.fn(),
-  WindowSetSystemDefaultTheme: vi.fn(),
   WriteFile: vi.fn(),
 }))
 
@@ -26,14 +22,7 @@ vi.mock('@/stores/app', () => ({
   }),
 }))
 
-vi.mock('@/stores/env', () => ({
-  useEnvStore: () => ({
-    setSystemProxy: vi.fn(),
-    systemProxy: false,
-  }),
-}))
-
-import { normalizeLogSettings } from '@/stores/appSettings'
+import { mergeSettingsDefaults, normalizeLogSettings } from '@/stores/appSettings'
 
 describe('app settings store helpers', () => {
   it('defaults missing or invalid log retention days to 14', () => {
@@ -44,5 +33,17 @@ describe('app settings store helpers', () => {
 
   it('keeps positive log retention days', () => {
     expect(normalizeLogSettings({ retentionDays: 30 })).toEqual({ retentionDays: 30 })
+  })
+
+  it('fills missing defaults without dropping dynamic settings', () => {
+    expect(
+      mergeSettingsDefaults(
+        { theme: 'auto', pluginSettings: {} as Record<string, unknown> },
+        { pluginSettings: { customPlugin: { enabled: true } } },
+      ),
+    ).toEqual({
+      theme: 'auto',
+      pluginSettings: { customPlugin: { enabled: true } },
+    })
   })
 })

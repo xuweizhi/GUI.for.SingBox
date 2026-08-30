@@ -1,6 +1,6 @@
 <script lang="ts" setup>
-import { BrowserOpenURL, MakeDir, OpenDir } from '@/bridge'
-import { ColorOptions, DefaultFontFamily, LocalesFilePath, ThemeOptions } from '@/constant/app'
+import { BrowserOpenURL } from '@/bridge'
+import { ColorOptions, DefaultFontFamily, ThemeOptions } from '@/constant/app'
 import { Color } from '@/enums/app'
 import routes from '@/router/routes'
 import { useAppSettingsStore, useAppStore } from '@/stores'
@@ -24,11 +24,6 @@ const resetFontFamily = () => {
 const onThemeClick = (e: MouseEvent) => {
   document.documentElement.style.setProperty('--x', e.clientX + 'px')
   document.documentElement.style.setProperty('--y', e.clientY + 'px')
-}
-
-const handleOpenLocalesFolder = async () => {
-  await MakeDir(LocalesFilePath)
-  await OpenDir(LocalesFilePath)
 }
 </script>
 <template>
@@ -61,7 +56,6 @@ const handleOpenLocalesFolder = async () => {
       <div class="flex items-center text-16 font-bold">
         <div class="mr-4">{{ $t('settings.lang.name') }}</div>
         <Button type="text" icon="link" @click="BrowserOpenURL(APP_LOCALES_URL)" />
-        <Button type="text" icon="folder" @click="handleOpenLocalesFolder" />
         <Button
           v-tips="'settings.lang.load'"
           :loading="appStore.localesLoading"

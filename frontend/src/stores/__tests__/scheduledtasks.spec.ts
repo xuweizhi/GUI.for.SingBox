@@ -27,10 +27,6 @@ vi.mock('@/bridge', () => ({
   ClearScheduledTaskWorkerLogs: bridgeMocks.ClearScheduledTaskWorkerLogs,
   RecordScheduledTaskLog: bridgeMocks.RecordScheduledTaskLog,
   ReadDir: vi.fn().mockResolvedValue([]),
-  GetSystemProxyBypass: vi.fn(),
-  WindowSetSystemDefaultTheme: vi.fn(),
-  WindowIsMaximised: vi.fn().mockResolvedValue(false),
-  WindowIsMinimised: vi.fn().mockResolvedValue(false),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -52,12 +48,6 @@ vi.mock('@/lang', () => ({
 
 vi.mock('@/stores/kernelApi', () => ({
   useKernelApiStore: () => ({}),
-}))
-
-vi.mock('@/stores/env', () => ({
-  useEnvStore: () => ({
-    env: {},
-  }),
 }))
 
 Object.defineProperty(window, 'matchMedia', {

@@ -8,8 +8,6 @@ import {
   ScheduledTasksType,
   Theme,
   View,
-  WebviewGpuPolicy,
-  WindowStartState,
 } from '@/enums/app'
 import { APP_TITLE } from '@/utils'
 
@@ -30,8 +28,6 @@ export const ScheduledTasksFilePath = 'data/scheduledtasks.yaml'
 export const PluginHubFilePath = 'data/.cache/plugin-list.json'
 
 export const RulesetHubFilePath = 'data/.cache/ruleset-list.json'
-
-export const RollingReleaseDirectory = 'data/rolling-release'
 
 export const DefaultFontFamily =
   'system-ui, "Microsoft YaHei UI", "Source Han Sans CN", "Twemoji Mozilla", sans-serif'
@@ -125,17 +121,6 @@ export const ColorOptions = [
   },
 ]
 
-export const WindowStateOptions = [
-  { label: 'settings.windowState.normal', value: WindowStartState.Normal },
-  { label: 'settings.windowState.minimised', value: WindowStartState.Minimised },
-]
-
-export const WebviewGpuPolicyOptions = [
-  { label: 'settings.webviewGpuPolicy.always', value: WebviewGpuPolicy.Always },
-  { label: 'settings.webviewGpuPolicy.onDemand', value: WebviewGpuPolicy.OnDemand },
-  { label: 'settings.webviewGpuPolicy.never', value: WebviewGpuPolicy.Never },
-]
-
 export const DefaultPluginHubSources = () => [
   {
     enable: true,
@@ -167,7 +152,6 @@ export const PluginsTriggerOptions = [
   { label: 'plugin.on::manual', value: PluginTrigger.OnManual },
   { label: 'plugin.on::generate', value: PluginTrigger.OnGenerate },
   { label: 'plugin.on::subscribe', value: PluginTrigger.OnSubscribe },
-  { label: 'plugin.on::tray::update', value: PluginTrigger.OnTrayUpdate },
   { label: 'plugin.on::before::core::start', value: PluginTrigger.OnBeforeCoreStart },
   { label: 'plugin.on::core::started', value: PluginTrigger.OnCoreStarted },
   { label: 'plugin.on::before::core::stop', value: PluginTrigger.OnBeforeCoreStop },

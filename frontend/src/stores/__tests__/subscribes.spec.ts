@@ -13,10 +13,6 @@ vi.mock('@/bridge', () => ({
   Requests: vi.fn(),
   GetSystemProxy: getSystemProxy,
   ReadDir: vi.fn().mockResolvedValue([]),
-  GetSystemProxyBypass: vi.fn(),
-  WindowSetSystemDefaultTheme: vi.fn(),
-  WindowIsMaximised: vi.fn().mockResolvedValue(false),
-  WindowIsMinimised: vi.fn().mockResolvedValue(false),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -44,8 +40,6 @@ vi.mock('@/utils/env', () => ({
   PROJECT_URL: '',
   TG_GROUP: '',
   TG_CHANNEL: '',
-  APP_RUNTIME: 'webui',
-  isWebui: true,
   isDev: false,
 }))
 
@@ -61,43 +55,42 @@ vi.mock('@/stores/env', () => ({
   }),
 }))
 
+import { Requests } from '@/bridge'
+import { RequestMethod, RequestProxyMode } from '@/enums/app'
 import { useAppSettingsStore } from '@/stores/appSettings'
 import { useProfilesStore } from '@/stores/profiles'
 import { useSubscribesStore } from '@/stores/subscribes'
-import { RequestMethod, RequestProxyMode } from '@/enums/app'
-import { Requests } from '@/bridge'
 
 import type { Subscription } from '@/types/app'
 
-const subscription = (id: string): Subscription =>
-  ({
-    id,
-    name: id,
-    upload: 0,
-    download: 0,
-    total: 0,
-    expire: 0,
-    updateTime: 0,
-    type: 'Http',
-    url: 'https://example.test/sub',
-    website: '',
-    decryptPassword: '',
-    path: `data/subscribes/${id}.json`,
-    include: '',
-    exclude: '',
-    includeProtocol: '',
-    excludeProtocol: '',
-    proxyPrefix: '',
-    requestProxyMode: RequestProxyMode.System,
-    customProxy: '',
-    proxies: [],
-    disabled: false,
-    inSecure: false,
-    requestMethod: RequestMethod.Get,
-    requestTimeout: 60,
-    header: { request: {}, response: {} },
-    script: '',
-  })
+const subscription = (id: string): Subscription => ({
+  id,
+  name: id,
+  upload: 0,
+  download: 0,
+  total: 0,
+  expire: 0,
+  updateTime: 0,
+  type: 'Http',
+  url: 'https://example.test/sub',
+  website: '',
+  decryptPassword: '',
+  path: `data/subscribes/${id}.json`,
+  include: '',
+  exclude: '',
+  includeProtocol: '',
+  excludeProtocol: '',
+  proxyPrefix: '',
+  requestProxyMode: RequestProxyMode.System,
+  customProxy: '',
+  proxies: [],
+  disabled: false,
+  inSecure: false,
+  requestMethod: RequestMethod.Get,
+  requestTimeout: 60,
+  header: { request: {}, response: {} },
+  script: '',
+})
 
 describe('subscribes store', () => {
   beforeEach(() => {

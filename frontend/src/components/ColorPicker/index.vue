@@ -74,10 +74,4 @@ input::-webkit-color-swatch {
   border-radius: 8px;
   border: none;
 }
-
-body[feature-no-rounded='true'] {
-  input::-webkit-color-swatch {
-    border-radius: 0;
-  }
-}
 </style>

@@ -1,7 +1,7 @@
 import { Request } from '@/api/request'
 import { WebSockets } from '@/api/websocket'
 import { useProfilesStore, useWebuiAuthStore } from '@/stores'
-import { isWebui, formatProxyHost, normalizeProxyHost } from '@/utils'
+import { formatProxyHost, normalizeProxyHost } from '@/utils'
 
 import type {
   CoreApiConfig,
@@ -69,17 +69,13 @@ const setupCoreApi = (protocol: 'http' | 'ws') => {
   const controller = profile?.experimental.clash_api.external_controller || '127.0.0.1:20123'
   const { host, port } = resolveController(controller, 20123)
 
-  let base = `${protocol}://${formatProxyHost(host)}:${port}`
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const controllerPath = encodeURIComponent(`${formatProxyHost(host)}:${port}`)
+  const base =
+    protocol === 'http'
+      ? `${window.location.origin}/__webui/core/${controllerPath}`
+      : `${wsProtocol}://${window.location.host}/__webui/core/ws/${controllerPath}`
   let bearer = ''
-
-  if (isWebui) {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const controllerPath = encodeURIComponent(`${formatProxyHost(host)}:${port}`)
-    base =
-      protocol === 'http'
-        ? `${window.location.origin}/__webui/core/${controllerPath}`
-        : `${wsProtocol}://${window.location.host}/__webui/core/ws/${controllerPath}`
-  }
 
   if (profile) {
     bearer = profile.experimental.clash_api.secret
@@ -97,11 +93,7 @@ const setupCoreApi = (protocol: 'http' | 'ws') => {
 const request = new Request({
   beforeRequest: () => setupCoreApi('http'),
   timeout: 60 * 1000,
-  onUnauthorized: () => {
-    if (isWebui) {
-      return useWebuiAuthStore().handleUnauthorized()
-    }
-  },
+  onUnauthorized: () => useWebuiAuthStore().handleUnauthorized(),
 })
 const websocket = new WebSockets({ beforeConnect: () => setupCoreApi('ws') })
 

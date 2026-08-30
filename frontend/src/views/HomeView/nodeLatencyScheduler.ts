@@ -236,12 +236,10 @@ export const createNodeLatencyScheduler = (probe: LatencyProbe): NodeLatencySche
             ? activeTasks.indexOf(lastSelected) + 1
             : 0
         const initialPriority = activeTasks.some(
-          (candidate) =>
-            !candidate.cancelled &&
-            candidate.queue.length > 0,
+          (candidate) => !candidate.cancelled && candidate.queue.length > 0,
         )
         let task: Task | undefined
-        let attempts = initialPriority ? 1 : 2
+        const attempts = initialPriority ? 1 : 2
         for (let offset = 0; offset < activeTasks.length; offset++) {
           const candidate = activeTasks[(startIndex + offset) % activeTasks.length]!
           const queue = initialPriority ? candidate.queue : candidate.retryQueue

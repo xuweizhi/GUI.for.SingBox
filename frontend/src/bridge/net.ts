@@ -1,5 +1,5 @@
-import * as Bridge from '@wails/go/bridge/App'
-import { EventsOn, EventsOff, EventsEmit } from '@wails/runtime/runtime'
+import * as Bridge from '@/bridge/browser/go/bridge/App'
+import { EventsOn, EventsOff, EventsEmit } from '@/bridge/browser/runtime/runtime'
 
 import { RequestMethod } from '@/enums/app'
 import { sampleID, transformRequestUrl, getUserAgent } from '@/utils'
