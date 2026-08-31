@@ -15,6 +15,8 @@ const router = useRouter()
 const {
   query,
   sortByDelay,
+  nodeGroupFilter,
+  nodeGroupFilterOptions,
   nodePhases,
   testingNodes,
   switchingNode,
@@ -112,6 +114,13 @@ const openRoutePolicies = async () => {
         size="small"
         placeholder="common.keywords"
         class="node-search flex-1 min-w-128"
+      />
+      <Select
+        v-if="nodeGroupFilterOptions.length > 2"
+        v-model="nodeGroupFilter"
+        :options="nodeGroupFilterOptions"
+        class="node-group-filter"
+        size="small"
       />
       <Switch v-model="sortByDelay" size="small" label="home.nodes.sortByDelay" />
       <Button

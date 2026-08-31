@@ -28,6 +28,7 @@ const createController = () => {
   const selectedGroupName = ref('Proxy')
   const query = ref('')
   const sortByDelay = ref(false)
+  const nodeGroupFilter = ref('__all')
   const nodePhases = ref(
     new Map<string, 'queued' | 'testing' | 'retry-queued' | 'success' | 'failed' | 'cancelled'>(),
   )
@@ -99,6 +100,12 @@ const createController = () => {
     selectedGroupName,
     query,
     sortByDelay,
+    nodeGroupFilter,
+    nodeGroupFilterOptions: computed(() => [
+      { label: 'nodeGroups.all', value: '__all' },
+      { label: 'Hong Kong', value: 'group-hk' },
+      { label: 'nodeGroups.ungrouped', value: '__ungrouped' },
+    ]),
     nodePhases,
     nodeErrors: ref(new Map()),
     testingNodes: ref(new Set<string>()),
@@ -156,7 +163,8 @@ const mountModal = (controller = createController()) =>
           template: '<div class="modal-stub"><slot /><slot name="action" /></div>',
         },
         Select: {
-          template: '<button class="select">select</button>',
+          template:
+            '<button class="select" @click="$emit(\'update:modelValue\', \'group-hk\')">select</button>',
         },
         Input: {
           inheritAttrs: false,
@@ -346,6 +354,16 @@ describe('NodeSelectorModal', () => {
     expect(wrapper.find('.group-select').exists()).toBe(false)
     expect(controller.query.value).toBe('jp')
     expect(controller.sortByDelay.value).toBe(true)
+  })
+
+  it('changes the node-group view filter without switching the runtime node', async () => {
+    const controller = createController()
+    const wrapper = mountModal(controller)
+
+    await wrapper.get('.node-group-filter').trigger('click')
+
+    expect(controller.nodeGroupFilter.value).toBe('group-hk')
+    expect(controller.switchNode).not.toHaveBeenCalled()
   })
 
   it('retries a stale controller snapshot', async () => {

@@ -3,6 +3,7 @@ import { type RouteRecordRaw } from 'vue-router'
 import HomeView from '@/views/HomeView/index.vue'
 import LoginView from '@/views/LoginView/index.vue'
 import NetCheckView from '@/views/NetCheckView/index.vue'
+import NodeGroupsView from '@/views/NodeGroupsView/index.vue'
 import PluginsView from '@/views/PluginsView/index.vue'
 import ProfilesView from '@/views/ProfilesView/index.vue'
 import RulesetsView from '@/views/RulesetsView/index.vue'
@@ -46,6 +47,16 @@ const routes: RouteRecordRaw[] = [
     meta: {
       name: 'router.subscriptions',
       icon: 'subscriptions',
+    },
+  },
+  {
+    path: '/node-groups',
+    name: 'NodeGroups',
+    component: NodeGroupsView,
+    meta: {
+      name: 'router.nodeGroups',
+      icon: 'folder',
+      hidden: false,
     },
   },
   {

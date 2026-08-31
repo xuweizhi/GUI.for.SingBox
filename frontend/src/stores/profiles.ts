@@ -6,8 +6,9 @@ import { ReadFile, WriteFile } from '@/bridge'
 import { ProfilesFilePath } from '@/constant/app'
 import { DefaultOutboundIds } from '@/constant/outbound'
 import * as Defaults from '@/constant/profile'
-import { useAppSettingsStore } from '@/stores'
 import { ignoredError, eventBus, stringifyNoFolding, migrateProfiles, sampleID } from '@/utils'
+
+import { useAppSettingsStore } from './appSettings'
 
 export const useProfilesStore = defineStore('profiles', () => {
   const appSettingsStore = useAppSettingsStore()

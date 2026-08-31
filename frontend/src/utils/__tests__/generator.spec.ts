@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockGetSubscribeById = vi.fn()
+const mockSubscribes: App.Subscription[] = []
+const mockNodeGroups: App.NodeGroup[] = []
 
 vi.mock('@/bridge', () => ({
   ReadFile: vi.fn(),
@@ -23,11 +25,16 @@ vi.mock('@/stores', () => ({
   useProfilesStore: () => ({
     getProfileTemplate: () => createProfile(),
   }),
+  useNodeGroupsStore: () => ({
+    nodeGroups: mockNodeGroups,
+    getNodeGroupById: (id: string) => mockNodeGroups.find((group) => group.id === id),
+  }),
   useRulesetsStore: () => ({
     getRulesetById: vi.fn(),
   }),
   useSubscribesStore: () => ({
     getSubscribeById: mockGetSubscribeById,
+    subscribes: mockSubscribes,
   }),
 }))
 
@@ -76,6 +83,8 @@ describe('generateConfig dns servers', () => {
   beforeEach(() => {
     mockAppSettingsStore.app.kernel.branch = 'main'
     mockGetSubscribeById.mockReset()
+    mockSubscribes.splice(0)
+    mockNodeGroups.splice(0)
     vi.mocked(ReadFile).mockReset()
   })
 
@@ -297,6 +306,188 @@ describe('generateConfig dns servers', () => {
     expect(config.outbounds.map((outbound: { tag: string }) => outbound.tag)).toEqual(
       expect.arrayContaining(['Same Node', 'Same Node [sub-b]']),
     )
+  })
+
+  it('expands node-group strategy members to ordered leaf outbounds', async () => {
+    const profile = createProfile()
+    const subscription = {
+      id: 'sub-a',
+      name: 'Provider A',
+      path: 'sub-a.json',
+      disabled: false,
+      proxies: [
+        { id: 'node-a', tag: 'Node A', type: 'socks' },
+        { id: 'node-b', tag: 'Node B', type: 'socks' },
+      ],
+    } as App.Subscription
+    mockSubscribes.push(subscription)
+    mockGetSubscribeById.mockReturnValue(subscription)
+    mockNodeGroups.push({
+      id: 'group-a',
+      name: 'Work nodes',
+      icon: '',
+      mode: 'manual',
+      members: [
+        { subscription_id: 'sub-a', node_id: 'node-b', last_known_tag: 'Node B' },
+        { subscription_id: 'sub-a', node_id: 'node-a', last_known_tag: 'Node A' },
+      ],
+      source_scope: 'all',
+      subscription_ids: [],
+      include: '',
+      exclude: '',
+      max_nodes: 0,
+    })
+    profile.outbounds[1]!.outbounds = [
+      { id: 'group-a', type: 'NodeGroup', tag: 'Work nodes' },
+    ]
+    vi.mocked(ReadFile).mockResolvedValue(
+      JSON.stringify([
+        { type: 'socks', tag: 'Node A', server: 'a.example', server_port: 1080 },
+        { type: 'socks', tag: 'Node B', server: 'b.example', server_port: 1080 },
+      ]),
+    )
+
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    expect(config.outbounds[1].outbounds).toEqual(['Node B', 'Node A'])
+    expect(config.outbounds.some((outbound: Recordable) => outbound.tag === 'Work nodes')).toBe(false)
+  })
+
+  it('deduplicates node-group overlap and applies the strategy final filter', async () => {
+    const profile = createProfile()
+    const subscription = {
+      id: 'sub-a',
+      name: 'Provider A',
+      path: 'sub-a.json',
+      disabled: false,
+      proxies: [
+        { id: 'node-a', tag: 'HK Node', type: 'socks' },
+        { id: 'node-b', tag: 'US Node', type: 'socks' },
+      ],
+    } as App.Subscription
+    mockSubscribes.push(subscription)
+    mockGetSubscribeById.mockReturnValue(subscription)
+    mockNodeGroups.push({
+      id: 'group-a',
+      name: 'Regional',
+      icon: '',
+      mode: 'filter',
+      members: [],
+      source_scope: 'all',
+      subscription_ids: [],
+      include: 'Node',
+      exclude: '',
+      max_nodes: 0,
+    })
+    profile.outbounds[1]!.include = 'HK'
+    profile.outbounds[1]!.outbounds = [
+      { id: 'node-a', type: 'sub-a', tag: 'HK Node' },
+      { id: 'group-a', type: 'NodeGroup', tag: 'Regional' },
+    ]
+    vi.mocked(ReadFile).mockResolvedValue(
+      JSON.stringify([
+        { type: 'socks', tag: 'HK Node', server: 'hk.example', server_port: 1080 },
+        { type: 'socks', tag: 'US Node', server: 'us.example', server_port: 1080 },
+      ]),
+    )
+
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    expect(config.outbounds[1].outbounds).toEqual(['HK Node'])
+    expect(config.outbounds.filter((outbound: Recordable) => outbound.tag === 'HK Node')).toHaveLength(1)
+  })
+
+  it('rejects a strategy whose sources expand to no runtime members', async () => {
+    const profile = createProfile()
+    mockNodeGroups.push({
+      id: 'empty-group',
+      name: 'Empty group',
+      icon: '',
+      mode: 'manual',
+      members: [],
+      source_scope: 'all',
+      subscription_ids: [],
+      include: '',
+      exclude: '',
+      max_nodes: 0,
+    })
+    profile.outbounds[1]!.outbounds = [
+      { id: 'empty-group', type: 'NodeGroup', tag: 'Empty group' },
+    ]
+
+    await expect(
+      generateConfig(profile, {
+        enableStableConfigCompat: false,
+        enablePluginProcessing: false,
+        enableMixinProcessing: false,
+        enableScriptProcessing: false,
+      }),
+    ).rejects.toThrow('Empty group')
+  })
+
+  it('preserves an original node-group reference during safe restoration', async () => {
+    const profile = createProfile()
+    const subscription = {
+      id: 'sub-a',
+      name: 'Provider A',
+      path: 'sub-a.json',
+      disabled: false,
+      proxies: [
+        { id: 'node-a', tag: 'Node A', type: 'socks' },
+        { id: 'node-b', tag: 'Node B', type: 'socks' },
+      ],
+    } as App.Subscription
+    const group: App.NodeGroup = {
+      id: 'group-a',
+      name: 'Work nodes',
+      icon: '',
+      mode: 'manual',
+      members: [
+        { subscription_id: 'sub-a', node_id: 'node-a', last_known_tag: 'Node A' },
+        { subscription_id: 'sub-a', node_id: 'node-b', last_known_tag: 'Node B' },
+      ],
+      source_scope: 'all',
+      subscription_ids: [],
+      include: '',
+      exclude: '',
+      max_nodes: 0,
+    }
+    mockSubscribes.push(subscription)
+    mockGetSubscribeById.mockReturnValue(subscription)
+    mockNodeGroups.push(group)
+    profile.outbounds[1]!.outbounds = [
+      { id: group.id, type: 'NodeGroup', tag: group.name },
+    ]
+    vi.mocked(ReadFile).mockResolvedValue(
+      JSON.stringify([
+        { type: 'socks', tag: 'Node A', server: 'a.example', server_port: 1080 },
+        { type: 'socks', tag: 'Node B', server: 'b.example', server_port: 1080 },
+      ]),
+    )
+    const config = await generateConfig(profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
+
+    const restored = restoreProfile(config, profile.name, {
+      profile,
+      subscriptionIds: [subscription.id],
+    })
+
+    expect(restored.outbounds.find((outbound) => outbound.tag === profile.outbounds[1]!.tag)?.outbounds)
+      .toContainEqual({ id: group.id, type: 'NodeGroup', tag: group.name })
   })
 
   it('restores direct inbound configuration', () => {

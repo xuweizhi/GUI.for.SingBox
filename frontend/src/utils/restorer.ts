@@ -7,9 +7,15 @@ import {
   RuleType as RouteRuleType,
   DnsServer,
 } from '@/enums/kernel'
-import { useProfilesStore, useRulesetsStore, useSubscribesStore } from '@/stores'
+import {
+  useNodeGroupsStore,
+  useProfilesStore,
+  useRulesetsStore,
+  useSubscribesStore,
+} from '@/stores'
 
 import { createTextMatcher, deepAssign, sampleID } from './others'
+import { resolveNodeGroup } from './nodeGroup'
 import { getOutboundRole, getPrimaryProxyOutbound } from './outboundPolicy'
 
 const supportedRuleTypes = [
@@ -189,6 +195,7 @@ const restoreOutbounds = (
   subscriptionIds: string[],
 ): App.Outbound[] => {
   const subscribesStore = useSubscribesStore()
+  const nodeGroupsStore = useNodeGroupsStore()
 
   const subscriptionCache = new Map<string, App.Subscription>()
   const proxyToSubMap = new Map<string, { sub: string; id: string }>()
@@ -199,13 +206,26 @@ const restoreOutbounds = (
       .filter((o: Recordable) => [Outbound.Selector, Outbound.Urltest].includes(o.type))
       .map((o: Recordable) => o.tag),
   )
+  const leafTags = new Set(
+    outbounds
+      .filter((outbound) => ![Outbound.Selector, Outbound.Urltest].includes(outbound.type))
+      .map((outbound) => outbound.tag),
+  )
 
   subscriptionIds.forEach((id) => {
     const sub = subscribesStore.getSubscribeById(id)
     if (sub) {
       subscriptionCache.set(id, sub)
       sub.proxies.forEach((proxy) => {
-        proxyToSubMap.set(proxy.tag, { sub: id, id: proxy.id })
+        const candidates = [
+          proxy.tag,
+          `${proxy.tag} [${sub.name}]`,
+          ...[...leafTags].filter((tag) => tag.startsWith(`${proxy.tag} [${sub.name} `)),
+        ]
+        const runtimeTag = candidates.find(
+          (tag) => leafTags.has(tag) && !proxyToSubMap.has(tag),
+        )
+        if (runtimeTag) proxyToSubMap.set(runtimeTag, { sub: id, id: proxy.id })
       })
     }
   })
@@ -249,15 +269,36 @@ const restoreOutbounds = (
       outbound.hidden = originalGroup.hidden
       outbound.include = originalGroup.include
       outbound.exclude = originalGroup.exclude
+      outbound.source_node_group = originalGroup.source_node_group
 
       const currentNonBuiltInIds = new Set(
         newOutbounds.filter((v) => v.type !== 'Built-in').map((v) => v.id),
       )
+      const isTagMatching = createTextMatcher(originalGroup.include, originalGroup.exclude)
+
+      originalGroup.outbounds
+        .filter((member) => member.type === 'NodeGroup')
+        .forEach((member) => {
+          const group = nodeGroupsStore.getNodeGroupById(member.id)
+          if (!group) return
+          const resolvedIds = resolveNodeGroup(group, subscribesStore.subscribes).nodes
+            .filter((node) => isTagMatching(node.proxy.tag))
+            .map((node) => node.proxy.id)
+          const isSafelyRepresented =
+            resolvedIds.length > 0 && resolvedIds.every((id) => currentNonBuiltInIds.has(id))
+          if (!isSafelyRepresented) return
+
+          const idSet = new Set(resolvedIds)
+          newOutbounds = newOutbounds.filter(
+            (candidate) => candidate.type === 'Built-in' || !idSet.has(candidate.id),
+          )
+          newOutbounds.push({ id: group.id, type: 'NodeGroup', tag: group.name })
+          resolvedIds.forEach((id) => currentNonBuiltInIds.delete(id))
+        })
 
       subscriptionIds.forEach((id) => {
         const sub = subscriptionCache.get(id)
         if (sub) {
-          const isTagMatching = createTextMatcher(originalGroup.include, originalGroup.exclude)
           const matchedProxies = sub.proxies.filter((proxy) => isTagMatching(proxy.tag))
 
           const isAllMatched =

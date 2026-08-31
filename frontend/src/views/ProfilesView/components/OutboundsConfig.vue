@@ -7,7 +7,7 @@ import { OutboundOptions, BuiltInOutbound } from '@/constant/kernel'
 import { OutboundRoleOptions } from '@/constant/outbound'
 import { DefaultOutbound } from '@/constant/profile'
 import { Outbound } from '@/enums/kernel'
-import { useSubscribesStore } from '@/stores'
+import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
 import {
   deepClone,
   findOutboundGraphIssues,
@@ -22,9 +22,14 @@ const model = defineModel<App.Profile['outbounds']>({ required: true })
 let updateGroupId = 0
 const showEditModal = ref(false)
 const showSortModal = ref(false)
-const expandedSet = ref<Set<string>>(new Set(['Built-in', 'Subscription']))
+const expandedSet = ref<Set<string>>(new Set(['Built-in', 'Subscription', 'NodeGroup']))
 const SubscribesNameMap = ref<Record<string, string>>({})
 
+const fields = ref<App.Outbound>(DefaultOutbound())
+
+const { t } = useI18n()
+const subscribesStore = useSubscribesStore()
+const nodeGroupsStore = useNodeGroupsStore()
 const proxyGroup = ref([
   {
     id: 'Built-in',
@@ -35,16 +40,20 @@ const proxyGroup = ref([
     ],
   },
   {
+    id: 'NodeGroup',
+    name: 'nodeGroups.source',
+    proxies: nodeGroupsStore.nodeGroups.map((group) => ({
+      id: group.id,
+      tag: group.name,
+      type: group.mode,
+    })),
+  },
+  {
     id: 'Subscription',
     name: 'kernel.outbounds.subscriptions',
     proxies: [],
   },
 ])
-
-const fields = ref<App.Outbound>(DefaultOutbound())
-
-const { t } = useI18n()
-const subscribesStore = useSubscribesStore()
 
 const handleAdd = () => {
   updateGroupId = -1
@@ -69,6 +78,8 @@ const handleClearGroup = async (outbound: App.Outbound) => {
       return model.value.some((v) => v.id === id)
     } else if (type === 'Subscription') {
       return subscribesStore.getSubscribeById(id)
+    } else if (type === 'NodeGroup') {
+      return nodeGroupsStore.getNodeGroupById(id)
     }
     const sub = subscribesStore.getSubscribeById(type)
     return sub && sub.proxies.some((v) => v.id === id)
@@ -81,7 +92,9 @@ const handleAddEnd = () => {
   const { id, tag, type } = fields.value
   const next = model.value.map((outbound) => (outbound.id === id ? fields.value : outbound))
   if (updateGroupId === -1) next.unshift(fields.value)
-  const cycle = findOutboundGraphIssues(next).find((issue) => issue.type === 'cycle')
+  const cycle = findOutboundGraphIssues(next, nodeGroupsStore.nodeGroups).find(
+    (issue) => issue.type === 'cycle',
+  )
   if (cycle) {
     message.error(
       t('kernel.outbounds.cycle', [getOutboundChainLabels(cycle.chain, next).join(' → ')]),
@@ -142,6 +155,8 @@ const hasLost = (outbound: App.Outbound) => {
         const sub = subscribesStore.getSubscribeById(id)
         if (!sub) return true
         return false
+      } else if (type === 'NodeGroup') {
+        return !nodeGroupsStore.getNodeGroupById(id)
       }
       const sub = subscribesStore.getSubscribeById(type)
       if (!sub) return true
@@ -168,9 +183,18 @@ const clacSubscriptionsCount = (outbound: App.Outbound) => {
   return 0
 }
 
+const clacNodeGroupsCount = (outbound: App.Outbound) => {
+  if ([Outbound.Selector, Outbound.Urltest].includes(outbound.type as any)) {
+    return outbound.outbounds.filter((v) => v.type === 'NodeGroup').length
+  }
+  return 0
+}
+
 const clacOutboundsCount = (outbound: App.Outbound) => {
   if ([Outbound.Selector, Outbound.Urltest].includes(outbound.type as any)) {
-    return outbound.outbounds.filter((v) => v.type !== 'Subscription').length
+    return outbound.outbounds.filter(
+      (v) => v.type !== 'Subscription' && v.type !== 'NodeGroup',
+    ).length
   }
   return 0
 }
@@ -197,7 +221,11 @@ const showLost = () => message.warn('kernel.outbounds.notFound')
 const showNeedToAdd = () => message.error('kernel.outbounds.needToAdd')
 
 subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
-  proxyGroup.value[1]!.proxies.push({ id, tag: name, type: 'Subscribe' })
+  proxyGroup.value.find((group) => group.id === 'Subscription')!.proxies.push({
+    id,
+    tag: name,
+    type: 'Subscribe',
+  })
   proxyGroup.value.push({ id, name, proxies })
   SubscribesNameMap.value[id] = name
 })
@@ -243,6 +271,8 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
           {{ t('kernel.outbounds.refsOutbound') }}:{{ clacOutboundsCount(outbound) }}
           /
           {{ t('kernel.outbounds.refsSubscription') }}:{{ clacSubscriptionsCount(outbound) }}
+          /
+          {{ t('router.nodeGroups') }}:{{ clacNodeGroupsCount(outbound) }}
           )
         </Button>
         <div class="ml-auto">
@@ -336,7 +366,7 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
     </template>
     <template v-if="[Outbound.Selector, Outbound.Urltest].includes(fields.type as any)">
       <Divider>
-        {{ t('kernel.outbounds.refsOutbound') }} & {{ t('kernel.outbounds.refsSubscription') }}
+        {{ t('kernel.outbounds.refsOutbound') }}、{{ t('kernel.outbounds.refsSubscription') }}、{{ t('router.nodeGroups') }}
       </Divider>
 
       <div v-for="group in proxyGroup" :key="group.id" class="group">

@@ -55,7 +55,7 @@ vi.mock('@/stores/env', () => ({
   }),
 }))
 
-import { Requests } from '@/bridge'
+import { ReadFile, Requests } from '@/bridge'
 import { RequestMethod, RequestProxyMode } from '@/enums/app'
 import { useAppSettingsStore } from '@/stores/appSettings'
 import { useProfilesStore } from '@/stores/profiles'
@@ -107,6 +107,7 @@ describe('subscribes store', () => {
       }),
     )
     writeFile.mockClear()
+    vi.mocked(ReadFile).mockReset()
     getSystemProxy.mockReset()
     getSystemProxy.mockResolvedValue('')
     getProxyEndpoint.mockReset()
@@ -304,6 +305,35 @@ describe('subscribes store', () => {
         tag: 'ss-node',
         type: 'shadowsocks',
       }),
+    ])
+  })
+
+  it('keeps a proxy id when a subscription renames the same endpoint', async () => {
+    const subscribesStore = useSubscribesStore()
+    subscribesStore.subscribes = [subscription('sub-stable-id')].map((item) => ({
+      ...item,
+      proxies: [{ id: 'stable-node-id', tag: 'old-name', type: 'vmess' }],
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }))
+    vi.mocked(ReadFile).mockResolvedValueOnce(
+      JSON.stringify([
+        { tag: 'old-name', type: 'vmess', server: 'node.example', server_port: 443, uuid: 'old' },
+      ]),
+    )
+    vi.mocked(Requests).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        outbounds: [
+          { tag: 'new-name', type: 'vmess', server: 'node.example', server_port: 443, uuid: 'new' },
+        ],
+      }),
+    } as Awaited<ReturnType<typeof Requests>>)
+
+    await subscribesStore.updateSubscribe('sub-stable-id')
+
+    expect(subscribesStore.subscribes[0]?.proxies).toEqual([
+      { id: 'stable-node-id', tag: 'new-name', type: 'vmess' },
     ])
   })
 

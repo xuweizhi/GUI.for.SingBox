@@ -344,8 +344,30 @@ declare global {
 
     interface Proxy {
       id: string
-      type: string
+      type: string | 'NodeGroup'
       tag: string
+    }
+
+    type NodeGroupMode = 'manual' | 'filter'
+    type NodeGroupSourceScope = 'all' | 'selected'
+
+    interface NodeGroupMember {
+      subscription_id: string
+      node_id: string
+      last_known_tag: string
+    }
+
+    interface NodeGroup {
+      id: string
+      name: string
+      icon: string
+      mode: NodeGroupMode
+      members: NodeGroupMember[]
+      source_scope: NodeGroupSourceScope
+      subscription_ids: string[]
+      include: string
+      exclude: string
+      max_nodes: number
     }
 
     interface ProfileRuleSet {
@@ -416,6 +438,8 @@ declare global {
       exclude: string
       icon: string
       hidden: boolean
+      // GUI-only marker for visible strategy outbounds created from a node-group outlet shortcut.
+      source_node_group?: string
     }
 
     interface Rule {

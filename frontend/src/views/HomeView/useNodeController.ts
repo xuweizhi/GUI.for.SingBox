@@ -1,10 +1,16 @@
 import { computed, onScopeDispose, ref } from 'vue'
 
 import { DefaultConcurrencyLimit, DefaultTestTimeout, DefaultTestURL } from '@/constant/app'
-import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
+import {
+  useAppSettingsStore,
+  useKernelApiStore,
+  useNodeGroupsStore,
+  useProfilesStore,
+} from '@/stores'
 import { handleUseProxy } from '@/utils/helper'
 import { normalizeErrorMessage } from '@/utils/others'
 import { getOutboundRole } from '@/utils/outboundPolicy'
+import { getNodeGroupRuntimeNames } from '@/utils/nodeGroup'
 import {
   filterAndSortNodes,
   getDelayTestableNodeNames,
@@ -47,10 +53,12 @@ export const useNodeController = () => {
   const appSettingsStore = useAppSettingsStore()
   const kernelApiStore = useKernelApiStore()
   const profilesStore = useProfilesStore()
+  const nodeGroupsStore = useNodeGroupsStore()
 
   const selectedGroupName = ref('')
   const query = ref('')
   const sortByDelay = ref(false)
+  const nodeGroupFilter = ref('__all')
   const nodeErrors = ref(new Map<string, NodeDelayError>())
   const localDelays = ref(new Map<string, number>())
   const nodeAttempts = ref(new Map<string, number>())
@@ -84,6 +92,25 @@ export const useNodeController = () => {
   const readonlyMode = computed(
     () => mode.value === 'direct' || selectedGroup.value?.type !== 'Selector',
   )
+  const nodeGroupRuntimeMap = computed(() => {
+    const runtimeNames = selectedGroup.value?.all || []
+    return new Map(
+      nodeGroupsStore.nodeGroups.flatMap((group) => {
+        const names = getNodeGroupRuntimeNames(nodeGroupsStore.resolveGroup(group), runtimeNames)
+        return names.size ? [[group.id, names] as const] : []
+      }),
+    )
+  })
+  const groupedRuntimeNames = computed(
+    () => new Set([...nodeGroupRuntimeMap.value.values()].flatMap((names) => [...names])),
+  )
+  const nodeGroupFilterOptions = computed(() => [
+    { label: 'nodeGroups.all', value: '__all' },
+    ...nodeGroupsStore.nodeGroups.flatMap((group) =>
+      nodeGroupRuntimeMap.value.has(group.id) ? [{ label: group.name, value: group.id }] : [],
+    ),
+    { label: 'nodeGroups.ungrouped', value: '__ungrouped' },
+  ])
   const nodes = computed(() => {
     if (!selectedGroup.value) return []
     const profileOutbounds = profilesStore.currentProfile?.outbounds || []
@@ -115,6 +142,13 @@ export const useNodeController = () => {
         (node) => !node.role || !['direct', 'block', 'fallback', 'global'].includes(node.role),
       )
       .filter((node) => !['Direct', 'Reject'].includes(node.proxy?.type || ''))
+      .filter((node) => {
+        if (nodeGroupFilter.value === '__all') return true
+        if (nodeGroupFilter.value === '__ungrouped') {
+          return !groupedRuntimeNames.value.has(node.name)
+        }
+        return nodeGroupRuntimeMap.value.get(nodeGroupFilter.value)?.has(node.name) || false
+      })
   })
 
   let disposed = false
@@ -206,6 +240,7 @@ export const useNodeController = () => {
       refreshFailure = error
     }
     selectedGroupName.value = proxyGroup.value?.name || groups.value[0]?.name || ''
+    nodeGroupFilter.value = '__all'
     if (refreshFailure) throw refreshFailure
   }
 
@@ -213,6 +248,7 @@ export const useNodeController = () => {
     if (!groups.value.some((group) => group.name === name)) return
     selectedGroupName.value = name
     query.value = ''
+    nodeGroupFilter.value = '__all'
   }
 
   const switchNode = async (name: string): Promise<NodeOperationResult> => {
@@ -391,6 +427,8 @@ export const useNodeController = () => {
     selectedGroupName,
     query,
     sortByDelay,
+    nodeGroupFilter,
+    nodeGroupFilterOptions,
     nodeErrors,
     nodeAttempts,
     nodePhases,

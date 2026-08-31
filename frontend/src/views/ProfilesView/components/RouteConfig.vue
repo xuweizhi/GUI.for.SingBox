@@ -1,6 +1,9 @@
 <script lang="ts" setup>
-import { ref, useTemplateRef } from 'vue'
+import { computed, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+
+import { useNodeGroupsStore } from '@/stores'
+import { ensureNodeGroupOutlet, type NodeGroupOutletBehavior } from '@/utils'
 
 import RoutePolicyOverview from './RoutePolicyOverview.vue'
 import RouteRulesConfig from './RouteRulesConfig.vue'
@@ -32,6 +35,28 @@ const tabs = [
 ]
 
 const { t } = useI18n()
+const nodeGroupsStore = useNodeGroupsStore()
+const finalNodeGroup = ref('')
+const finalNodeGroupBehavior = ref<NodeGroupOutletBehavior>('manual')
+const nodeGroupOptions = computed(() =>
+  nodeGroupsStore.nodeGroups.map((group) => ({ label: group.name, value: group.id })),
+)
+
+const applyFinalNodeGroup = () => {
+  const group = nodeGroupsStore.getNodeGroupById(finalNodeGroup.value)
+  if (!group) return
+  const label = t(
+    finalNodeGroupBehavior.value === 'auto'
+      ? 'nodeGroups.outletAuto'
+      : 'nodeGroups.outletManual',
+  )
+  model.value.final = ensureNodeGroupOutlet(
+    outbounds.value,
+    group,
+    finalNodeGroupBehavior.value,
+    label,
+  ).id
+}
 
 const handleAdd = () => {
   const handlerMap: Record<string, (() => void) | undefined> = {
@@ -81,6 +106,25 @@ defineExpose({ handleAdd })
         {{ t('kernel.route.final') }}
         <Select v-model="model.final" :options="outboundOptions" clearable />
       </div>
+      <div v-if="nodeGroupOptions.length" class="form-item">
+        {{ t('router.nodeGroups') }}
+        <div class="flex items-center gap-8">
+          <Select
+            v-model="finalNodeGroup"
+            :options="nodeGroupOptions"
+            clearable
+            @change="applyFinalNodeGroup"
+          />
+          <Radio
+            v-model="finalNodeGroupBehavior"
+            :options="[
+              { label: 'nodeGroups.outletManual', value: 'manual' },
+              { label: 'nodeGroups.outletAuto', value: 'auto' },
+            ]"
+            @change="applyFinalNodeGroup"
+          />
+        </div>
+      </div>
     </template>
     <template #rule_set>
       <RouteRulesetConfig
@@ -95,6 +139,7 @@ defineExpose({ handleAdd })
         v-model="model.rules"
         :inbound-options="inboundOptions"
         :outbound-options="outboundOptions"
+        :outbounds="outbounds"
         :server-options="serverOptions"
         :rule-set="model.rule_set"
       />

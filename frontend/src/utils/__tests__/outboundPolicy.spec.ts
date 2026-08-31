@@ -59,6 +59,22 @@ describe('outbound policy model', () => {
     ).toEqual(['cycle', 'missing'])
   })
 
+  it('reports missing node groups without treating them as strategy cycles', () => {
+    const a = group('a', 'A', [
+      { id: 'a', tag: 'Existing collection', type: 'NodeGroup' },
+      { id: 'missing-group', tag: 'Missing collection', type: 'NodeGroup' },
+    ])
+
+    expect(findOutboundGraphIssues([a], [{ id: 'a' }])).toEqual([
+      {
+        type: 'missing-node-group',
+        groupId: 'a',
+        targetId: 'missing-group',
+        chain: ['a', 'missing-group'],
+      },
+    ])
+  })
+
   it('resolves the configured initial chain and reorders semantic targets', () => {
     const direct = group('direct-group', 'Direct', [
       { id: 'direct', tag: 'direct', type: 'Built-in' },

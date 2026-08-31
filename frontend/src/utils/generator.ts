@@ -19,6 +19,7 @@ import {
 } from '@/enums/kernel'
 import {
   useAppSettingsStore,
+  useNodeGroupsStore,
   usePluginsStore,
   useRulesetsStore,
   useSubscribesStore,
@@ -30,6 +31,7 @@ import {
   createTextMatcher,
   isValidIPv4,
   isValidIPv6,
+  resolveNodeGroup,
 } from '@/utils'
 
 const _generateRule = (
@@ -123,12 +125,16 @@ const generateInbounds = (inbounds: App.Inbound[]) => {
 
 const generateOutbounds = async (outbounds: App.Outbound[]) => {
   const result: Recordable[] = []
-  const subscriptionCache = new Map<string, { name: string; proxies: Recordable[] }>()
+  const subscriptionCache = new Map<
+    string,
+    { name: string; proxies: Recordable[]; subscription: App.Subscription }
+  >()
   const proxiesByTag = new Map<string, Recordable>()
   const runtimeTags = new WeakMap<Recordable, string>()
   const builtInProxiesSet = new Set<string>()
 
   const subscribesStore = useSubscribesStore()
+  const nodeGroupsStore = useNodeGroupsStore()
 
   const outboundTags = new Set<string>()
   outbounds.forEach((outbound) => {
@@ -161,6 +167,7 @@ const generateOutbounds = async (outbounds: App.Outbound[]) => {
       subscriptionCache.set(subscriptionId, {
         name: subscription.name || subscriptionId,
         proxies: parsed,
+        subscription,
       })
     }
     return subscriptionCache.get(subscriptionId)!
@@ -189,6 +196,26 @@ const generateOutbounds = async (outbounds: App.Outbound[]) => {
     return runtimeTag
   }
 
+  const registerSubscriptionNode = async (
+    subscriptionId: string,
+    nodeId: string,
+    lastKnownTag: string,
+  ) => {
+    const subscription = await getSubscriptionProxies(subscriptionId)
+    const metadata = subscription.subscription.proxies.find((candidate) => candidate.id === nodeId)
+    const currentTag = metadata?.tag || lastKnownTag
+    const proxy = subscription.proxies.find((candidate) => candidate.tag === currentTag)
+    if (!proxy) {
+      throw new Error(
+        `Proxy "${lastKnownTag || nodeId}" not found in subscription ${subscription.name}`,
+      )
+    }
+    return {
+      proxy,
+      runtimeTag: registerProxy(proxy, subscriptionId, subscription.name),
+    }
+  }
+
   for (const outbound of outbounds) {
     const _outbound: Recordable = {
       type: outbound.type,
@@ -202,6 +229,7 @@ const generateOutbounds = async (outbounds: App.Outbound[]) => {
     if (outbound.type === Outbound.Selector || outbound.type === Outbound.Urltest) {
       _outbound.interrupt_exist_connections = outbound.interrupt_exist_connections
       const members = new Set<string>()
+      const emptySourceLabels: string[] = []
       const isTagMatching = createTextMatcher(outbound.include, outbound.exclude)
       for (const proxy of outbound.outbounds) {
         if (proxy.type === 'Built-in') {
@@ -209,6 +237,26 @@ const generateOutbounds = async (outbounds: App.Outbound[]) => {
             builtInProxiesSet.add(proxy.id)
           }
           members.add(proxy.tag)
+        } else if (proxy.type === 'NodeGroup') {
+          const group = nodeGroupsStore.getNodeGroupById(proxy.id)
+          if (!group) throw new Error(`Node group not found: ${proxy.tag || proxy.id}`)
+          const resolution = resolveNodeGroup(group, subscribesStore.subscribes)
+          let matched = 0
+          for (const node of resolution.nodes) {
+            const registered = await registerSubscriptionNode(
+              node.subscription.id,
+              node.proxy.id,
+              node.proxy.tag,
+            )
+            if (!isTagMatching(registered.proxy.tag)) continue
+            members.add(registered.runtimeTag)
+            matched += 1
+          }
+          if (matched === 0) {
+            const issue = resolution.issues[0]
+            const suffix = issue ? ` (${issue.type})` : ''
+            emptySourceLabels.push(`node group "${group.name}"${suffix}`)
+          }
         } else {
           const subId = proxy.type === 'Subscription' ? proxy.id : proxy.type
           const subscription = await getSubscriptionProxies(subId)
@@ -219,17 +267,20 @@ const generateOutbounds = async (outbounds: App.Outbound[]) => {
               members.add(registerProxy(subscriptionProxy, subId, subscription.name))
             })
           } else {
-            const _proxy = subscriptionProxies.find((v) => v.tag === proxy.tag)
-            if (!_proxy) {
-              throw new Error(`Proxy "${proxy.tag}" not found in subscription ${subId}`)
-            }
-            if (_proxy && isTagMatching(_proxy.tag)) {
-              members.add(registerProxy(_proxy, subId, subscription.name))
+            const registered = await registerSubscriptionNode(subId, proxy.id, proxy.tag)
+            if (isTagMatching(registered.proxy.tag)) {
+              members.add(registered.runtimeTag)
             }
           }
         }
       }
       _outbound.outbounds = [...members]
+      if (outbound.outbounds.length > 0 && members.size === 0) {
+        const details = emptySourceLabels.length
+          ? ` Check ${emptySourceLabels.join(', ')} and the strategy include/exclude filters.`
+          : ' Check its member sources and include/exclude filters.'
+        throw new Error(`Strategy "${outbound.tag}" has no valid runtime members.${details}`)
+      }
     }
     result.push(_outbound)
   }

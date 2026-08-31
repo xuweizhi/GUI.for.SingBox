@@ -2,7 +2,7 @@
 import { ref, inject, computed, useTemplateRef, type Ref, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { useProfilesStore } from '@/stores'
+import { useNodeGroupsStore, useProfilesStore } from '@/stores'
 import {
   alert,
   deepClone,
@@ -50,6 +50,7 @@ const outboundsRef = useTemplateRef('outboundsRef')
 const routeRef = useTemplateRef('routeRef')
 const dnsRef = useTemplateRef('dnsRef')
 const profilesStore = useProfilesStore()
+const nodeGroupsStore = useNodeGroupsStore()
 
 const loading = ref(false)
 const currentStep = ref(props.step)
@@ -104,7 +105,11 @@ const handlePrevStep = () => currentStep.value--
 const handleNextStep = () => currentStep.value++
 
 const handleSave = async () => {
-  const cycle = findOutboundGraphIssues(profile.value.outbounds).find(
+  const graphIssues = findOutboundGraphIssues(
+    profile.value.outbounds,
+    nodeGroupsStore.nodeGroups,
+  )
+  const cycle = graphIssues.find(
     (issue) => issue.type === 'cycle',
   )
   if (cycle) {
@@ -113,6 +118,11 @@ const handleSave = async () => {
         getOutboundChainLabels(cycle.chain, profile.value.outbounds).join(' → '),
       ]),
     )
+    return
+  }
+  const missingNodeGroup = graphIssues.find((issue) => issue.type === 'missing-node-group')
+  if (missingNodeGroup) {
+    message.error(`Node group not found: ${missingNodeGroup.targetId}`)
     return
   }
   const primaryProxy = getPrimaryProxyOutbound(profile.value)

@@ -19,6 +19,8 @@ export const ProfilesFilePath = 'data/profiles.yaml'
 
 export const SubscribesFilePath = 'data/subscribes.yaml'
 
+export const NodeGroupsFilePath = 'data/node-groups.yaml'
+
 export const RulesetsFilePath = 'data/rulesets.yaml'
 
 export const PluginsFilePath = 'data/plugins.yaml'

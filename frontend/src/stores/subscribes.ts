@@ -25,7 +25,9 @@ import {
   isEncryptedSubscription,
   isSubscriptionShareLinkList,
   normalizeSubscriptionProxies,
+  reconcileSubscriptionProxyIds,
   SubscriptionEncryptionHeader,
+  deepClone,
 } from '@/utils'
 
 export const useSubscribesStore = defineStore('subscribes', () => {
@@ -194,6 +196,17 @@ export const useSubscribesStore = defineStore('subscribes', () => {
 
   const _doUpdateSub = async (s: App.Subscription, options: Partial<App.Subscription> = {}) => {
     const userInfo: Recordable = {}
+    const previousMetadata = deepClone(s.proxies)
+    const previousBody = await ignoredError(ReadFile, s.path)
+    let previousOutbounds: Recordable[] = []
+    if (previousBody) {
+      try {
+        const parsed = JSON.parse(previousBody)
+        previousOutbounds = Array.isArray(parsed) ? parsed : parsed.outbounds || []
+      } catch {
+        // A missing or legacy cache only disables content-based identity matching.
+      }
+    }
     let body = ''
     let proxies: Record<string, any>[] = []
 
@@ -295,11 +308,14 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     s.total = userInfo.total ?? 0
     s.expire = userInfo.expire * 1000
     s.updateTime = Date.now()
-    s.proxies = proxies.map(({ tag, type }) => {
-      // Keep the original ID value of the proxy unchanged
-      const id = s.proxies.find((v) => v.tag === tag)?.id || sampleID()
-      return { id, tag, type }
-    })
+    s.proxies = reconcileSubscriptionProxyIds(
+      previousMetadata,
+      previousOutbounds,
+      proxies,
+      sampleID,
+    )
+    const preScriptMetadata = deepClone(s.proxies)
+    const preScriptOutbounds = deepClone(proxies)
 
     const fn = new window.AsyncFunction(
       'proxies',
@@ -313,11 +329,12 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     const { proxies: _proxies, subscription } = await fn(proxies, s)
 
     Object.assign(s, subscription)
-    s.proxies = _proxies.map(({ tag, type }) => {
-      // Keep the original ID value of the proxy unchanged
-      const id = s.proxies.find((v) => v.tag === tag)?.id || sampleID()
-      return { id, tag, type }
-    })
+    s.proxies = reconcileSubscriptionProxyIds(
+      preScriptMetadata,
+      preScriptOutbounds,
+      _proxies,
+      sampleID,
+    )
 
     if (s.type === 'Http' || (s.type === 'File' && s.url !== s.path)) {
       proxies = omitArray(_proxies, ['__id__', '__tmp__id__'])

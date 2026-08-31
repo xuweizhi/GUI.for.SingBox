@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { ClipboardSetText, ReadFile, WriteFile } from '@/bridge'
 import { DraggableOptions } from '@/constant/app'
 import { useBool } from '@/hooks'
-import { useSubscribesStore } from '@/stores'
+import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
 import { buildSmartRegExp, deepClone, ignoredError, message, sampleID } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
@@ -102,6 +102,35 @@ const menus: App.Menu[] = [
 
 const { t } = useI18n()
 const subscribeStore = useSubscribesStore()
+const nodeGroupsStore = useNodeGroupsStore()
+const manualNodeGroups = computed(() =>
+  nodeGroupsStore.nodeGroups.filter((group) => group.mode === 'manual'),
+)
+
+const generateMenus = (record: App.Subscription['proxies'][0]): App.Menu[] => [
+  ...menus.map((item) => ({ ...item, handler: () => item.handler?.(record) })),
+  { label: '', separator: true },
+  {
+    label: 'nodeGroups.addNode',
+    children: manualNodeGroups.value.length
+      ? manualNodeGroups.value.map((group) => ({
+          label: group.name,
+          handler: async () => {
+            try {
+              const added = await nodeGroupsStore.addMember(group.id, {
+                subscription_id: sub.value.id,
+                node_id: record.id,
+                last_known_tag: record.tag,
+              })
+              added && message.success('common.success')
+            } catch (error: any) {
+              message.error(error.message || error)
+            }
+          },
+        }))
+      : [{ label: 'nodeGroups.noManualGroups' }],
+  },
+]
 
 const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
@@ -235,7 +264,7 @@ defineExpose({ modalSlots })
       <Card
         v-for="proxy in filteredProxies"
         :key="proxy.tag"
-        v-menu="menus.map((v) => ({ ...v, handler: () => v.handler?.(proxy) }))"
+        v-menu="generateMenus(proxy)"
         :title="proxy.tag"
       >
         <div class="text-12">

@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   handleUseProxy: vi.fn(),
   refresh: vi.fn(),
   store: undefined as any,
+  nodeGroups: [] as any[],
 }))
 
 vi.mock('@/views/HomeView/nodeLatencyScheduler', () => ({
@@ -57,6 +58,10 @@ vi.mock('@/stores', () => {
         route: { final: 'proxy-id' },
         outbounds: [{ id: 'proxy-id', tag: 'Proxy', hidden: false }],
       },
+    }),
+    useNodeGroupsStore: () => ({
+      nodeGroups: mocks.nodeGroups,
+      resolveGroup: (group: any) => ({ nodes: group.resolvedNodes || [], issues: [] }),
     }),
     useAppSettingsStore: () => ({
       app: { kernel: { testUrl: 'test-url', testTimeout: 5000, concurrencyLimit: 7 } },
@@ -101,6 +106,7 @@ describe('useNodeController', () => {
     mocks.store.running = true
     mocks.store.config.mode = 'rule'
     mocks.store.proxies = proxies()
+    mocks.nodeGroups.splice(0)
     mocks.refresh.mockResolvedValue(undefined)
     mocks.handleUseProxy.mockResolvedValue(undefined)
     mocks.submit.mockImplementation(successSubmit)
@@ -147,6 +153,33 @@ describe('useNodeController', () => {
     expect(mocks.refresh).toHaveBeenCalledOnce()
     expect(await controller.switchNode('HK 01')).toEqual({ ok: true })
     expect(mocks.handleUseProxy).toHaveBeenCalledOnce()
+    scope.stop()
+  })
+
+  it('filters the primary selector snapshot by node group without mutating runtime state', () => {
+    mocks.nodeGroups.push({
+      id: 'group-hk',
+      name: 'Hong Kong',
+      resolvedNodes: [
+        {
+          subscription: { name: 'Provider A' },
+          proxy: { id: 'hk', tag: 'HK 01', type: 'vless' },
+        },
+      ],
+    })
+    const scope = effectScope()
+    const controller = scope.run(useNodeController)!
+    controller.selectGroup('Proxy')
+
+    expect(controller.nodeGroupFilterOptions.value).toContainEqual({
+      label: 'Hong Kong',
+      value: 'group-hk',
+    })
+    controller.nodeGroupFilter.value = 'group-hk'
+    expect(controller.nodes.value.map((node) => node.name)).toEqual(['HK 01'])
+    controller.nodeGroupFilter.value = '__ungrouped'
+    expect(controller.nodes.value.map((node) => node.name)).toEqual(['JP 01'])
+    expect(mocks.handleUseProxy).not.toHaveBeenCalled()
     scope.stop()
   })
 

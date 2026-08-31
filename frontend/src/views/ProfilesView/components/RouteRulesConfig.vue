@@ -20,13 +20,20 @@ import {
   Strategy,
 } from '@/enums/kernel'
 import { useBool } from '@/hooks'
-import { deepClone, message } from '@/utils'
+import { useNodeGroupsStore } from '@/stores'
+import {
+  deepClone,
+  ensureNodeGroupOutlet,
+  message,
+  type NodeGroupOutletBehavior,
+} from '@/utils'
 
 interface Props {
   inboundOptions: { label: string; value: string }[]
   outboundOptions: { label: string; value: string }[]
   serverOptions: { label: string; value: string }[]
   ruleSet: App.ProfileRuleSet[]
+  outbounds: App.Outbound[]
 }
 
 const props = defineProps<Props>()
@@ -37,11 +44,19 @@ let ruleId = 0
 const fields = ref<App.Rule>(DefaultRouteRule())
 
 const { t } = useI18n()
+const nodeGroupsStore = useNodeGroupsStore()
+const outletNodeGroup = ref('')
+const outletBehavior = ref<NodeGroupOutletBehavior>('manual')
+const nodeGroupOptions = computed(() =>
+  nodeGroupsStore.nodeGroups.map((group) => ({ label: group.name, value: group.id })),
+)
 const [showEditModal] = useBool(false)
 
 const handleAdd = () => {
   ruleId = -1
   fields.value = DefaultRouteRule()
+  outletNodeGroup.value = ''
+  outletBehavior.value = 'manual'
   showEditModal.value = true
 }
 
@@ -78,7 +93,24 @@ const handleAddEnd = () => {
 const handleEdit = (index: number) => {
   ruleId = index
   fields.value = deepClone(model.value[index]!)
+  const generated = props.outbounds.find((outbound) => outbound.id === fields.value.outbound)
+  outletNodeGroup.value = generated?.source_node_group || ''
+  outletBehavior.value = generated?.type === 'urltest' ? 'auto' : 'manual'
   showEditModal.value = true
+}
+
+const applyNodeGroupOutlet = () => {
+  const group = nodeGroupsStore.getNodeGroupById(outletNodeGroup.value)
+  if (!group) return
+  const label = t(
+    outletBehavior.value === 'auto' ? 'nodeGroups.outletAuto' : 'nodeGroups.outletManual',
+  )
+  fields.value.outbound = ensureNodeGroupOutlet(
+    props.outbounds,
+    group,
+    outletBehavior.value,
+    label,
+  ).id
 }
 
 const handleUse = (ruleset: any) => {
@@ -276,6 +308,25 @@ const renderRule = (rule: App.Rule) => {
         <div class="form-item">
           {{ t('kernel.route.rules.outbound') }}
           <Select v-model="fields.outbound" :options="outboundOptions" clearable />
+        </div>
+        <div v-if="nodeGroupOptions.length" class="form-item">
+          {{ t('router.nodeGroups') }}
+          <div class="flex items-center gap-8">
+            <Select
+              v-model="outletNodeGroup"
+              :options="nodeGroupOptions"
+              clearable
+              @change="applyNodeGroupOutlet"
+            />
+            <Radio
+              v-model="outletBehavior"
+              :options="[
+                { label: 'nodeGroups.outletManual', value: 'manual' },
+                { label: 'nodeGroups.outletAuto', value: 'auto' },
+              ]"
+              @change="applyNodeGroupOutlet"
+            />
+          </div>
         </div>
       </template>
       <template v-else-if="fields.action === RuleAction.RouteOptions">

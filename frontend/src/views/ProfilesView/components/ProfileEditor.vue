@@ -2,7 +2,7 @@
 import { ref, inject, h, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { useProfilesStore } from '@/stores'
+import { useNodeGroupsStore, useProfilesStore } from '@/stores'
 import { generateConfig, message, restoreProfile } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
@@ -18,6 +18,7 @@ const profileText = ref('')
 
 const { t } = useI18n()
 const profilesStore = useProfilesStore()
+const nodeGroupsStore = useNodeGroupsStore()
 
 const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
@@ -27,7 +28,11 @@ const handleSave = async () => {
   try {
     const subscriptions = props.profile.outbounds.reduce((p, c) => {
       c.outbounds.forEach((outbound) => {
-        if (outbound.type !== 'Built-in') {
+        if (outbound.type === 'NodeGroup') {
+          nodeGroupsStore
+            .resolveGroup(outbound.id)
+            .nodes.forEach((node) => p.add(node.subscription.id))
+        } else if (outbound.type !== 'Built-in') {
           const id = outbound.type === 'Subscription' ? outbound.id : outbound.type
           p.add(id)
         }

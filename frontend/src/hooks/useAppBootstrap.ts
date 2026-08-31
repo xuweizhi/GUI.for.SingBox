@@ -17,6 +17,7 @@ export const useAppBootstrap = () => {
   const profilesStore = Stores.useProfilesStore()
   const subscribesStore = Stores.useSubscribesStore()
   const rulesetsStore = Stores.useRulesetsStore()
+  const nodeGroupsStore = Stores.useNodeGroupsStore()
   const pluginsStore = Stores.usePluginsStore()
   const scheduledTasksStore = Stores.useScheduledTasksStore()
   const kernelApiStore = Stores.useKernelApiStore()
@@ -41,6 +42,7 @@ export const useAppBootstrap = () => {
         profilesStore.setupProfiles(),
         subscribesStore.setupSubscribes(),
         rulesetsStore.setupRulesets(),
+        nodeGroupsStore.setupNodeGroups(),
         pluginsStore.setupPlugins(),
         scheduledTasksStore.setupScheduledTasks(),
       ])

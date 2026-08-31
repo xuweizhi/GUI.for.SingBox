@@ -2,7 +2,7 @@ import { DefaultOutboundIds, DefaultOutboundRoleById } from '@/constant/outbound
 import { Outbound, RuleAction } from '@/enums/kernel'
 
 export interface OutboundGraphIssue {
-  type: 'missing' | 'cycle'
+  type: 'missing' | 'missing-node-group' | 'cycle'
   groupId: string
   targetId?: string
   chain: string[]
@@ -45,12 +45,18 @@ export const getPrimaryProxyOutbound = (
 }
 
 const outboundReferences = (outbound: App.Outbound, allIds: Set<string>) =>
-  outbound.outbounds.filter((member) => allIds.has(member.id)).map((member) => member.id)
+  outbound.outbounds
+    .filter((member) => member.type === 'Built-in' && allIds.has(member.id))
+    .map((member) => member.id)
 
-export const findOutboundGraphIssues = (outbounds: App.Outbound[]): OutboundGraphIssue[] => {
+export const findOutboundGraphIssues = (
+  outbounds: App.Outbound[],
+  nodeGroups: Pick<App.NodeGroup, 'id'>[] = [],
+): OutboundGraphIssue[] => {
   const issues: OutboundGraphIssue[] = []
   const ids = new Set(outbounds.map((outbound) => outbound.id))
   const byId = new Map(outbounds.map((outbound) => [outbound.id, outbound]))
+  const nodeGroupIds = new Set(nodeGroups.map((group) => group.id))
 
   outbounds.forEach((outbound) => {
     outbound.outbounds.forEach((member) => {
@@ -61,6 +67,13 @@ export const findOutboundGraphIssues = (outbounds: App.Outbound[]): OutboundGrap
       ) {
         issues.push({
           type: 'missing',
+          groupId: outbound.id,
+          targetId: member.id,
+          chain: [outbound.id, member.id],
+        })
+      } else if (member.type === 'NodeGroup' && !nodeGroupIds.has(member.id)) {
+        issues.push({
+          type: 'missing-node-group',
           groupId: outbound.id,
           targetId: member.id,
           chain: [outbound.id, member.id],
