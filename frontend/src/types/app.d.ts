@@ -398,10 +398,14 @@ declare global {
       }
     }
 
+    type OutboundRole = 'proxy' | 'auto' | 'direct' | 'block' | 'fallback' | 'global' | 'custom'
+
     interface Outbound {
       id: string
       tag: string
       type: OutboundType
+      // GUI semantic role. Optional for compatibility with profiles created by older versions.
+      role?: OutboundRole
       outbounds: Proxy[]
       url: string
       interval: string
@@ -504,6 +508,8 @@ declare global {
     interface Profile {
       id: string
       name: string
+      // GUI-only pointer to the selector opened by the home proxy-node picker.
+      primary_proxy_outbound?: string
       log: Log
       experimental: Experimental
       inbounds: Inbound[]

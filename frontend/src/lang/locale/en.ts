@@ -156,9 +156,25 @@ export default {
       exclude: 'Exclude',
       icon: 'Icon',
       hidden: 'Hidden',
+      cycle: 'Outbound groups contain a circular reference: {0}',
+      role: {
+        name: 'Purpose',
+        proxy: 'Proxy Nodes',
+        auto: 'Automatic Selection',
+        direct: 'Direct Traffic',
+        block: 'Blocked Traffic',
+        fallback: 'Unmatched Traffic',
+        global: 'Global Mode Outbound',
+        custom: 'Custom Policy Group',
+      },
+      target: {
+        direct: 'Direct',
+        block: 'Block',
+      },
     },
     route: {
       tab: {
+        policy: 'Routing Overview',
         common: 'Common',
         rules: 'Rules',
         rule_set: 'Rule-Set',
@@ -167,6 +183,25 @@ export default {
       auto_detect_interface: 'Auto Detect Interface',
       default_interface: 'Default Interface',
       final: 'Final Outbound Tag',
+      policy: {
+        primaryProxy: 'Home Proxy Group',
+        primaryProxyDesc:
+          'The home proxy-node picker controls only this group. Custom profiles can select their primary proxy group here.',
+        validationTitle: 'Outbound policy configuration needs attention',
+        issue: {
+          missing: 'Referenced outbound group is missing',
+          cycle: 'Circular reference detected',
+        },
+        final: 'Final fallback',
+        references: 'Route references',
+        initialChain: 'Initial chain',
+        initialTarget: 'Initial outbound',
+        contraryTargetWarning:
+          'The current outbound conflicts with this policy purpose and may block allowed traffic or allow blocked traffic.',
+        autoSummary: '{0} members, tested every {1}, with a {2}ms switching tolerance',
+        cacheNote:
+          'This is the configured initial chain. Sing-Box may restore the last runtime selection from cache.',
+      },
       default_domain_resolver: {
         server: 'Default Domain Resolver',
         client_subnet: 'Client Subnet',
@@ -435,9 +470,29 @@ export default {
       needTun: 'Please add a TUN inbound first',
     },
     nodes: {
-      title: 'Node Selector',
-      current: 'Current Node',
-      openSelector: 'Open node selector',
+      title: 'Select Proxy Node',
+      current: 'Current Proxy',
+      openSelector: 'Open proxy node selector',
+      automaticOption: 'Automatic Selection',
+      proxyOption: 'Proxy Nodes',
+      currentAutoNode: 'Current node',
+      via: 'Effective chain:',
+      effectiveChain: 'View current effective chain',
+      emptyProxyNodes: 'No proxy nodes are available. Add and update a subscription first.',
+      addSubscription: 'Add Subscription',
+      managePolicies: 'Manage Routing Policies',
+      globalProxyInactive:
+        'The global outbound is not using the proxy, so node changes here do not affect traffic immediately.',
+      mode: {
+        rule: 'Rule Mode',
+        global: 'Global Mode',
+        direct: 'Direct Mode',
+      },
+      modeHint: {
+        rule: 'Only traffic that requires a proxy uses the selected node.',
+        global: 'All traffic is handled by the global-mode outbound.',
+        direct: 'Proxy nodes can be viewed and tested but are inactive in direct mode.',
+      },
       sortByDelay: 'Sort by latency',
       testGroup: 'Test Group',
       testProgress: 'Completed {0}/{1}, success {2}, failed {3}',

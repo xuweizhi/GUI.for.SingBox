@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
 import { message } from '@/utils'
 
@@ -9,9 +10,9 @@ import type { NodeController } from '@/views/HomeView/useNodeController'
 const props = defineProps<{ controller: NodeController }>()
 const open = defineModel<boolean>('open', { default: false })
 const { t } = useI18n()
+const router = useRouter()
 
 const {
-  selectedGroupName,
   query,
   sortByDelay,
   nodePhases,
@@ -20,18 +21,19 @@ const {
   batch,
   stale,
   refreshError,
-  groups,
+  mode,
+  primary,
+  proxyActive,
   selectedGroup,
   nodes,
   readonlyMode,
 } = props.controller
 
-const groupOptions = computed(() =>
-  groups.value.map((group) => ({ label: group.name, value: group.name })),
-)
 const batchPercent = computed(() =>
   batch.value.total ? (batch.value.completed / batch.value.total) * 100 : 0,
 )
+const modeMessage = computed(() => `home.nodes.modeHint.${mode.value}`)
+const effectiveChain = computed(() => primary.value.chain.join(' → '))
 const readonlyMessage = computed(() =>
   selectedGroup.value?.type === 'URLTest'
     ? 'home.nodes.urlTestReadonly'
@@ -65,6 +67,16 @@ const testNode = async (name: string) => {
   const result = await props.controller.testNode(name)
   if (!result.ok) message.error(result.error)
 }
+
+const openSubscriptions = async () => {
+  open.value = false
+  await router.push('/subscriptions')
+}
+
+const openRoutePolicies = async () => {
+  open.value = false
+  await router.push('/profiles')
+}
 </script>
 
 <template>
@@ -77,13 +89,22 @@ const testNode = async (name: string) => {
     height="82"
     mask-closable
   >
+    <div class="mode-banner rounded-6 p-8 mb-8 text-12">
+      <div class="flex items-center gap-8">
+        <Tag size="small" color="blue">{{ t(`home.nodes.mode.${mode}`) }}</Tag>
+        <span>{{ t(modeMessage) }}</span>
+      </div>
+      <div v-if="mode === 'global' && !proxyActive" class="mt-4">
+        {{ t('home.nodes.globalProxyInactive') }}
+      </div>
+    </div>
+
+    <details v-if="effectiveChain" class="chain-details rounded-6 p-8 mb-8 text-12">
+      <summary class="cursor-pointer">{{ t('home.nodes.effectiveChain') }}</summary>
+      <div class="mt-4 break-all">{{ effectiveChain }}</div>
+    </details>
+
     <div class="node-toolbar sticky top-0 z-2 flex flex-wrap items-center gap-8 pb-8">
-      <Select
-        :model-value="selectedGroupName"
-        :options="groupOptions"
-        size="small"
-        @change="controller.selectGroup"
-      />
       <Input
         v-model="query"
         auto-size
@@ -134,12 +155,19 @@ const testNode = async (name: string) => {
       </div>
     </div>
 
-    <Empty v-if="nodes.length === 0" />
+    <Empty v-if="nodes.length === 0" :description="t('home.nodes.emptyProxyNodes')">
+      <template #description>
+        <div class="text-12">{{ t('home.nodes.emptyProxyNodes') }}</div>
+        <Button type="link" size="small" @click="openSubscriptions">
+          {{ t('home.nodes.addSubscription') }}
+        </Button>
+      </template>
+    </Empty>
     <div v-else class="node-grid grid gap-8 pb-8">
       <Card
         v-for="node in nodes"
         :key="node.name"
-        :title="node.name"
+        :title="node.displayName ? t(node.displayName) : node.name"
         :selected="node.name === selectedGroup?.now"
         :data-node="node.name"
         :aria-disabled="!!switchingNode || readonlyMode || selectedGroup?.type !== 'Selector'"
@@ -156,6 +184,12 @@ const testNode = async (name: string) => {
         @keydown.enter.prevent="switchNode(node.name)"
         @keydown.space.prevent="switchNode(node.name)"
       >
+        <div v-if="node.displayName" class="text-12 mb-4 line-clamp-1">
+          {{ node.name }}
+          <span v-if="node.proxy?.now">
+            · {{ t('home.nodes.currentAutoNode') }}: {{ node.proxy.now }}</span
+          >
+        </div>
         <div class="flex items-center text-12">
           <span>{{ node.proxy?.type || t('home.nodes.unknownType') }}</span>
           <span v-if="node.proxy?.udp" class="ml-4">UDP</span>
@@ -190,6 +224,13 @@ const testNode = async (name: string) => {
         </div>
       </Card>
     </div>
+
+    <Divider />
+    <div class="flex justify-end">
+      <Button type="link" size="small" @click="openRoutePolicies">
+        {{ t('home.nodes.managePolicies') }}
+      </Button>
+    </div>
   </Modal>
 </template>
 
@@ -199,6 +240,16 @@ const testNode = async (name: string) => {
 }
 
 .readonly-banner {
+  color: var(--level-3-color);
+  background: var(--card-bg);
+}
+
+.mode-banner {
+  color: var(--card-color);
+  background: var(--card-bg);
+}
+
+.chain-details {
   color: var(--level-3-color);
   background: var(--card-bg);
 }

@@ -1,10 +1,22 @@
 import { RequestProxyMode } from '@/enums/app'
 
+import { getOutboundRole, getPrimaryProxyOutbound } from './outboundPolicy'
 
 export const migrateProfiles = async (profiles: App.Profile[], save: () => Promise<string>) => {
   let needSync = false
 
   profiles.forEach((profile) => {
+    profile.outbounds.forEach((outbound) => {
+      if (typeof outbound.role === 'undefined') {
+        outbound.role = getOutboundRole(outbound)
+        needSync = true
+      }
+    })
+    const primaryProxy = getPrimaryProxyOutbound(profile)
+    if (primaryProxy && profile.primary_proxy_outbound !== primaryProxy.id) {
+      profile.primary_proxy_outbound = primaryProxy.id
+      needSync = true
+    }
     profile.dns.rules.forEach((rule) => {
       if (typeof rule.enable === 'undefined') {
         rule.enable = true

@@ -3,7 +3,15 @@ import { ref, inject, computed, useTemplateRef, type Ref, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useProfilesStore } from '@/stores'
-import { deepClone, generateConfig, message, alert } from '@/utils'
+import {
+  alert,
+  deepClone,
+  findOutboundGraphIssues,
+  generateConfig,
+  getOutboundChainLabels,
+  getPrimaryProxyOutbound,
+  message,
+} from '@/utils'
 
 import Button from '@/components/Button/index.vue'
 import Dropdown from '@/components/Dropdown/index.vue'
@@ -96,6 +104,20 @@ const handlePrevStep = () => currentStep.value--
 const handleNextStep = () => currentStep.value++
 
 const handleSave = async () => {
+  const cycle = findOutboundGraphIssues(profile.value.outbounds).find(
+    (issue) => issue.type === 'cycle',
+  )
+  if (cycle) {
+    message.error(
+      t('kernel.outbounds.cycle', [
+        getOutboundChainLabels(cycle.chain, profile.value.outbounds).join(' → '),
+      ]),
+    )
+    return
+  }
+  const primaryProxy = getPrimaryProxyOutbound(profile.value)
+  if (primaryProxy) profile.value.primary_proxy_outbound = primaryProxy.id
+
   loading.value = true
   try {
     if (props.id) {
@@ -257,9 +279,12 @@ defineExpose({ modalSlots })
       <RouteConfig
         ref="routeRef"
         v-model="profile.route"
+        v-model:outbounds="profile.outbounds"
+        v-model:primary-proxy-outbound="profile.primary_proxy_outbound"
         :inbound-options="inboundOptions"
         :outbound-options="outboundOptions"
         :server-options="serverOptions"
+        :dns="profile.dns"
       />
     </div>
     <div v-if="currentStep === Step.Dns">

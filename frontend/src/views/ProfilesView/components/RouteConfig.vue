@@ -2,6 +2,7 @@
 import { ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import RoutePolicyOverview from './RoutePolicyOverview.vue'
 import RouteRulesConfig from './RouteRulesConfig.vue'
 import RouteRulesetConfig from './RouteRulesetConfig.vue'
 
@@ -9,16 +10,22 @@ interface Props {
   inboundOptions: { label: string; value: string }[]
   outboundOptions: { label: string; value: string }[]
   serverOptions: { label: string; value: string }[]
+  dns: App.Dns
 }
 
 defineProps<Props>()
 
 const model = defineModel<App.Profile['route']>({ required: true })
+const outbounds = defineModel<App.Outbound[]>('outbounds', { required: true })
+const primaryProxyOutbound = defineModel<string | undefined>('primaryProxyOutbound', {
+  default: '',
+})
 
-const activeKey = ref('common')
+const activeKey = ref('policy')
 const rulesConfigRef = useTemplateRef('rulesConfigRef')
 const rulesetConfigRef = useTemplateRef('rulesetConfigRef')
 const tabs = [
+  { key: 'policy', tab: 'kernel.route.tab.policy' },
   { key: 'common', tab: 'kernel.route.tab.common' },
   { key: 'rule_set', tab: 'kernel.route.tab.rule_set' },
   { key: 'rules', tab: 'kernel.route.tab.rules' },
@@ -28,6 +35,7 @@ const { t } = useI18n()
 
 const handleAdd = () => {
   const handlerMap: Record<string, (() => void) | undefined> = {
+    policy: () => {},
     common: () => {},
     rules: rulesConfigRef.value?.handleAdd,
     rule_set: rulesetConfigRef.value?.handleAdd,
@@ -40,6 +48,14 @@ defineExpose({ handleAdd })
 
 <template>
   <Tabs v-model:active-key="activeKey" :items="tabs" tab-position="top">
+    <template #policy>
+      <RoutePolicyOverview
+        v-model:primary-proxy-outbound="primaryProxyOutbound"
+        :route="model"
+        :outbounds="outbounds"
+        :dns="dns"
+      />
+    </template>
     <template #common>
       <div class="form-item">
         {{ t('kernel.route.find_process') }}

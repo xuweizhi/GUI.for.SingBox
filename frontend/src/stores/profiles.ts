@@ -4,6 +4,7 @@ import { parse } from 'yaml'
 
 import { ReadFile, WriteFile } from '@/bridge'
 import { ProfilesFilePath } from '@/constant/app'
+import { DefaultOutboundIds } from '@/constant/outbound'
 import * as Defaults from '@/constant/profile'
 import { useAppSettingsStore } from '@/stores'
 import { ignoredError, eventBus, stringifyNoFolding, migrateProfiles, sampleID } from '@/utils'
@@ -72,6 +73,7 @@ export const useProfilesStore = defineStore('profiles', () => {
     return {
       id: sampleID(),
       name: name,
+      primary_proxy_outbound: DefaultOutboundIds.Select,
       log: Defaults.DefaultLog(),
       experimental: Defaults.DefaultExperimental(),
       inbounds: Defaults.DefaultInbounds(),

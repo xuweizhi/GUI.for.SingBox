@@ -13,9 +13,9 @@ const active = ref(false)
 const controller = useNodeController()
 const kernelApiStore = useKernelApiStore()
 const { t } = useI18n()
-const { primary, stale } = controller
+const { mode, primary, stale } = controller
 
-const displayChain = computed(() => primary.value.chain.join(' -> '))
+const displayChain = computed(() => primary.value.chain.join(' → '))
 
 const openSelector = () => {
   if (!kernelApiStore.running) {
@@ -71,6 +71,9 @@ watch(
   >
     <Card :title="t('home.nodes.current')" class="h-full cursor-pointer">
       <template #extra>
+        <Tag v-if="kernelApiStore.running" size="small" color="blue">
+          {{ t(`home.nodes.mode.${mode}`) }}
+        </Tag>
         <span v-if="stale" class="text-12 mr-4">
           {{ t('home.nodes.stale') }}
         </span>
@@ -88,10 +91,10 @@ watch(
       </div>
       <div v-else class="py-8 min-w-0">
         <div class="font-bold line-clamp-1">
-          {{ primary.groupName }}
+          {{ primary.leafName }}
         </div>
         <div v-tips="displayChain" class="text-12 line-clamp-1 mt-4">
-          {{ displayChain }}
+          {{ t('home.nodes.via') }} {{ displayChain }}
         </div>
       </div>
     </Card>

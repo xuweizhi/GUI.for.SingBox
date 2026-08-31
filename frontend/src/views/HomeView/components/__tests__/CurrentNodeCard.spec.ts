@@ -28,6 +28,7 @@ vi.mock('@/views/HomeView/useNodeController', async () => {
       }),
       stale: ref(false),
       refreshError: ref(''),
+      mode: ref('rule'),
       groups: computed(() => []),
       primary: computed(() => ({
         kind: 'group',
@@ -39,6 +40,8 @@ vi.mock('@/views/HomeView/useNodeController', async () => {
         readonly: false,
       })),
       selectedGroup: computed(() => undefined),
+      proxyGroup: computed(() => undefined),
+      proxyActive: computed(() => true),
       nodes: computed(() => []),
       readonlyMode: computed(() => false),
       refresh: vi.fn(),
@@ -81,6 +84,7 @@ const mountCard = () =>
         Card: {
           template: '<div class="card"><slot name="extra" /><slot /></div>',
         },
+        Tag: { template: '<span class="tag"><slot /></span>' },
         NodeSelectorModal: {
           props: ['open'],
           template: '<div class="selector-modal" :data-open="open" />',

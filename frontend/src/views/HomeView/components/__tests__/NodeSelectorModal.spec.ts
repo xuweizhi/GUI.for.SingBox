@@ -8,6 +8,7 @@ const toast = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
 }))
+const push = vi.hoisted(() => vi.fn())
 
 vi.mock('@/utils', () => ({
   message: toast,
@@ -17,6 +18,10 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,
   }),
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push }),
 }))
 
 const createController = () => {
@@ -108,6 +113,7 @@ const createController = () => {
     }),
     stale: ref(false),
     refreshError: ref(''),
+    mode: ref('rule' as const),
     groups: computed(() => [group]),
     primary: computed(() => ({
       kind: 'group' as const,
@@ -119,6 +125,8 @@ const createController = () => {
       readonly: false,
     })),
     selectedGroup: computed(() => group),
+    proxyGroup: computed(() => group),
+    proxyActive: computed(() => true),
     nodes,
     readonlyMode: computed(() => false),
     refresh: vi.fn(),
@@ -148,8 +156,7 @@ const mountModal = (controller = createController()) =>
           template: '<div class="modal-stub"><slot /><slot name="action" /></div>',
         },
         Select: {
-          template:
-            '<button class="group-select" @click="$emit(\'change\', \'Proxy\')">group</button>',
+          template: '<button class="select">select</button>',
         },
         Input: {
           inheritAttrs: false,
@@ -168,6 +175,8 @@ const mountModal = (controller = createController()) =>
         },
         Progress: { template: '<div class="progress" />' },
         Empty: { template: '<div class="empty" />' },
+        Tag: { template: '<span class="tag"><slot /></span>' },
+        Divider: { template: '<div class="divider" />' },
         Icon: true,
       },
       directives: {
@@ -327,15 +336,14 @@ describe('NodeSelectorModal', () => {
     expect(controller.cancelGroupTest).toHaveBeenCalled()
   })
 
-  it('wires group selection, search and delay sorting controls', async () => {
+  it('wires search and delay sorting controls without exposing a policy-group selector', async () => {
     const controller = createController()
     const wrapper = mountModal(controller)
 
-    await wrapper.get('.group-select').trigger('click')
     await wrapper.get('.search').setValue('jp')
     await wrapper.get('.sort').trigger('click')
 
-    expect(controller.selectGroup).toHaveBeenCalledWith('Proxy')
+    expect(wrapper.find('.group-select').exists()).toBe(false)
     expect(controller.query.value).toBe('jp')
     expect(controller.sortByDelay.value).toBe(true)
   })

@@ -10,6 +10,7 @@ import {
 import { useProfilesStore, useRulesetsStore, useSubscribesStore } from '@/stores'
 
 import { createTextMatcher, deepAssign, sampleID } from './others'
+import { getOutboundRole, getPrimaryProxyOutbound } from './outboundPolicy'
 
 const supportedRuleTypes = [
   RouteRuleType.Inbound,
@@ -57,19 +58,27 @@ export const restoreProfile = (
   const OutboundsIds = buildTagIdMapping('out-', config.outbounds)
   const RouteRuleSetIds = buildTagIdMapping('ruleset-', config.route?.rule_set)
   const DnsServersIds = buildTagIdMapping('dns-', config.dns?.servers)
+  const restoredOutbounds = restoreOutbounds(
+    config.outbounds || [],
+    OutboundsIds,
+    profile?.outbounds || [],
+    subscriptionIds || [],
+  )
+  const originalPrimaryTag = profile?.outbounds.find(
+    (outbound) => outbound.id === profile.primary_proxy_outbound,
+  )?.tag
+  const restoredPrimary =
+    restoredOutbounds.find((outbound) => outbound.tag === originalPrimaryTag) ||
+    getPrimaryProxyOutbound({ outbounds: restoredOutbounds })
 
   return {
     id: profile?.id || sampleID(),
     name,
+    primary_proxy_outbound: restoredPrimary?.id,
     log: deepAssign(Defaults.DefaultLog(), config.log),
     experimental: restoreExperimental(config.experimental, OutboundsIds),
     inbounds: restoreInbounds(config.inbounds || [], InboundsIds),
-    outbounds: restoreOutbounds(
-      config.outbounds || [],
-      OutboundsIds,
-      profile?.outbounds || [],
-      subscriptionIds || [],
-    ),
+    outbounds: restoredOutbounds,
     route: {
       rule_set: restoreRouteRuleset(config.route?.rule_set || [], RouteRuleSetIds, OutboundsIds),
       rules: restoreRouteRules(
@@ -235,6 +244,7 @@ const restoreOutbounds = (
 
     const originalGroup = originalOutboundMap.get(outbound.tag)
     if (originalGroup) {
+      outbound.role = getOutboundRole(originalGroup)
       outbound.icon = originalGroup.icon
       outbound.hidden = originalGroup.hidden
       outbound.include = originalGroup.include
@@ -282,6 +292,8 @@ const restoreOutbounds = (
       if ('tolerance' in raw) {
         outbound.tolerance = raw.tolerance
       }
+    } else {
+      outbound.role = 'custom'
     }
     return outbound
   })

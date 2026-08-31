@@ -4,10 +4,18 @@ import { useI18n } from 'vue-i18n'
 
 import { DraggableOptions } from '@/constant/app'
 import { OutboundOptions, BuiltInOutbound } from '@/constant/kernel'
+import { OutboundRoleOptions } from '@/constant/outbound'
 import { DefaultOutbound } from '@/constant/profile'
 import { Outbound } from '@/enums/kernel'
 import { useSubscribesStore } from '@/stores'
-import { deepClone, message } from '@/utils'
+import {
+  deepClone,
+  findOutboundGraphIssues,
+  getOutboundChainLabels,
+  getOutboundRole,
+  getOutboundRoleLabel,
+  message,
+} from '@/utils'
 
 const model = defineModel<App.Profile['outbounds']>({ required: true })
 
@@ -71,6 +79,15 @@ const handleClearGroup = async (outbound: App.Outbound) => {
 
 const handleAddEnd = () => {
   const { id, tag, type } = fields.value
+  const next = model.value.map((outbound) => (outbound.id === id ? fields.value : outbound))
+  if (updateGroupId === -1) next.unshift(fields.value)
+  const cycle = findOutboundGraphIssues(next).find((issue) => issue.type === 'cycle')
+  if (cycle) {
+    message.error(
+      t('kernel.outbounds.cycle', [getOutboundChainLabels(cycle.chain, next).join(' → ')]),
+    )
+    return false
+  }
   // Add
   if (updateGroupId === -1) {
     model.value.unshift(fields.value)
@@ -217,6 +234,9 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
             [ ! ]
           </span>
           {{ outbound.tag }}
+          <Tag size="small" color="blue" class="ml-4">
+            {{ t(getOutboundRoleLabel(getOutboundRole(outbound))) }}
+          </Tag>
         </div>
         <Button type="link" size="small" @click="handleSortGroup(index)">
           (
@@ -267,6 +287,10 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
     <div class="form-item">
       {{ t('kernel.outbounds.type') }}
       <Radio v-model="fields.type" :options="OutboundOptions" />
+    </div>
+    <div class="form-item">
+      {{ t('kernel.outbounds.role.name') }}
+      <Select v-model="fields.role" :options="OutboundRoleOptions" />
     </div>
     <template v-if="Outbound.Selector === fields.type || Outbound.Urltest === fields.type">
       <div class="form-item">

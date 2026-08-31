@@ -4,11 +4,13 @@ import { DefaultConcurrencyLimit, DefaultTestTimeout, DefaultTestURL } from '@/c
 import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
 import { handleUseProxy } from '@/utils/helper'
 import { normalizeErrorMessage } from '@/utils/others'
+import { getOutboundRole } from '@/utils/outboundPolicy'
 import {
   filterAndSortNodes,
   getDelayTestableNodeNames,
   isDelayTestableNode,
   getVisibleGroups,
+  resolvePrimaryProxyGroup,
   resolvePrimaryNode,
 } from '@/views/HomeView/nodeController'
 import { nodeLatencyScheduler } from '@/views/HomeView/nodeLatencyScheduler'
@@ -66,6 +68,14 @@ export const useNodeController = () => {
   const primary = computed(() =>
     resolvePrimaryNode(mode.value, profilesStore.currentProfile, kernelApiStore.proxies),
   )
+  const proxyGroup = computed(() =>
+    resolvePrimaryProxyGroup(profilesStore.currentProfile, kernelApiStore.proxies),
+  )
+  const proxyActive = computed(() => {
+    if (mode.value === 'rule') return true
+    if (mode.value === 'direct') return false
+    return !!primary.value.leaf && !['Direct', 'Reject'].includes(primary.value.leaf.type)
+  })
   const selectedGroup = computed(
     () =>
       kernelApiStore.proxies[selectedGroupName.value] ||
@@ -76,6 +86,8 @@ export const useNodeController = () => {
   )
   const nodes = computed(() => {
     if (!selectedGroup.value) return []
+    const profileOutbounds = profilesStore.currentProfile?.outbounds || []
+    const outboundByTag = new Map(profileOutbounds.map((outbound) => [outbound.tag, outbound]))
     return filterAndSortNodes(
       selectedGroup.value,
       kernelApiStore.proxies,
@@ -85,6 +97,24 @@ export const useNodeController = () => {
       localDelays.value,
       nodeAttempts.value,
     )
+      .map((node) => {
+        const configured = outboundByTag.get(node.name)
+        const role = configured ? getOutboundRole(configured) : undefined
+        return {
+          ...node,
+          role,
+          displayName:
+            role === 'auto'
+              ? 'home.nodes.automaticOption'
+              : role === 'proxy'
+                ? 'home.nodes.proxyOption'
+                : undefined,
+        }
+      })
+      .filter(
+        (node) => !node.role || !['direct', 'block', 'fallback', 'global'].includes(node.role),
+      )
+      .filter((node) => !['Direct', 'Reject'].includes(node.proxy?.type || ''))
   })
 
   let disposed = false
@@ -175,8 +205,7 @@ export const useNodeController = () => {
     } catch (error) {
       refreshFailure = error
     }
-    selectedGroupName.value =
-      primary.value.kind === 'group' ? primary.value.groupName : groups.value[0]?.name || ''
+    selectedGroupName.value = proxyGroup.value?.name || groups.value[0]?.name || ''
     if (refreshFailure) throw refreshFailure
   }
 
@@ -371,7 +400,10 @@ export const useNodeController = () => {
     stale,
     refreshError,
     groups,
+    mode,
     primary,
+    proxyGroup,
+    proxyActive,
     selectedGroup,
     nodes,
     readonlyMode,

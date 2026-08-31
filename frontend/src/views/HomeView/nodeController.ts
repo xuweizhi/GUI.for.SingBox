@@ -1,3 +1,5 @@
+import { getOutboundRole, getPrimaryProxyOutbound } from '@/utils/outboundPolicy'
+
 import type { CoreApiProxy } from '@/types/kernel'
 
 export type NodeMode = 'rule' | 'global' | 'direct'
@@ -37,6 +39,8 @@ export interface PrimaryNodeState extends ProxyChain {
 
 export interface NodeListItem {
   name: string
+  displayName?: string
+  role?: App.OutboundRole
   proxy?: CoreApiProxy
   delay: number | null
   delayStatus: DelayStatus
@@ -45,7 +49,7 @@ export interface NodeListItem {
   attempts?: number
 }
 
-type NodeProfile = Pick<IProfile, 'route' | 'outbounds'> | undefined
+type NodeProfile = Pick<IProfile, 'route' | 'outbounds' | 'primary_proxy_outbound'> | undefined
 
 const nonDelayTestableNamePatterns = [
   /剩余流量/i,
@@ -166,6 +170,39 @@ export const getVisibleGroups = (
   const global = proxies.GLOBAL
   if (!global) return regular
   return mode === 'global' ? [global, ...regular] : [...regular, global]
+}
+
+export const resolvePrimaryProxyGroup = (
+  profile: NodeProfile,
+  proxies: Record<string, CoreApiProxy>,
+) => {
+  const hidden = hiddenTags(profile)
+  const configured = getPrimaryProxyOutbound(profile)
+  const configuredRuntime = configured && proxies[configured.tag]
+  if (
+    configuredRuntime &&
+    ['Selector', 'URLTest'].includes(configuredRuntime.type) &&
+    !hidden.has(configuredRuntime.name)
+  ) {
+    return configuredRuntime
+  }
+
+  const candidates = Object.values(proxies).filter(
+    (proxy) =>
+      ['Selector', 'URLTest'].includes(proxy.type) &&
+      proxy.name !== 'GLOBAL' &&
+      !hidden.has(proxy.name),
+  )
+  const profileByTag = new Map(
+    (profile?.outbounds || []).map((outbound) => [outbound.tag, outbound]),
+  )
+  return (
+    candidates.find((proxy) => getOutboundRole(profileByTag.get(proxy.name)) === 'proxy') ||
+    candidates.find((proxy) => {
+      const role = getOutboundRole(profileByTag.get(proxy.name))
+      return !['direct', 'block', 'fallback', 'global'].includes(role)
+    })
+  )
 }
 
 export const resolvePrimaryNode = (

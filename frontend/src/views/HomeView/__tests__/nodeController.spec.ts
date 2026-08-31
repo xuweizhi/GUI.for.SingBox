@@ -7,6 +7,7 @@ import {
   isDelayTestableNode,
   isRetryableDelayError,
   getVisibleGroups,
+  resolvePrimaryProxyGroup,
   resolvePrimaryNode,
   resolveProxyChain,
 } from '@/views/HomeView/nodeController'
@@ -98,6 +99,26 @@ describe('resolvePrimaryNode', () => {
       readonly: true,
       chain: [],
     })
+  })
+})
+
+describe('resolvePrimaryProxyGroup', () => {
+  it('opens the configured proxy group instead of the route fallback group', () => {
+    const configured = {
+      ...profile,
+      primary_proxy_outbound: 'proxy-id',
+      route: { final: 'fallback-id' },
+      outbounds: [
+        ...profile.outbounds,
+        { id: 'fallback-id', tag: 'Fallback', role: 'fallback', hidden: false },
+      ],
+    } as Pick<IProfile, 'route' | 'outbounds' | 'primary_proxy_outbound'>
+    const values = {
+      ...proxies,
+      Fallback: proxy({ name: 'Fallback', type: 'Selector', all: ['Proxy'], now: 'Proxy' }),
+    }
+
+    expect(resolvePrimaryProxyGroup(configured, values)?.name).toBe('Proxy')
   })
 })
 

@@ -16,17 +16,11 @@ import { generateSecureKey, sampleID } from '@/utils'
 
 import { DefaultTestURL } from './app'
 import { SystemDnsResolverTag } from './kernel'
+import { DefaultOutboundIds } from './outbound'
 
 const { t } = i18n.global
 
-const DefaultOutboundIds = {
-  Select: 'outbound-select',
-  Urltest: 'outbound-urltest',
-  Direct: 'outbound-direct',
-  Block: 'outbound-block',
-  Fallback: 'outbound-fallback',
-  Global: 'outbound-global',
-}
+export { DefaultOutboundIds } from './outbound'
 
 const DefaultInboundIds = {
   MixedIn: 'mixed-in',
@@ -156,6 +150,7 @@ export const DefaultOutbound = (): App.Outbound => ({
   id: sampleID(),
   tag: '',
   type: Outbound.Selector,
+  role: 'custom',
   outbounds: [],
   interrupt_exist_connections: true,
   url: DefaultTestURL,
@@ -172,6 +167,7 @@ export const DefaultOutbounds = (): App.Outbound[] => [
     id: DefaultOutboundIds.Select,
     tag: t('outbound.select'),
     type: Outbound.Selector,
+    role: 'proxy',
     outbounds: [{ id: DefaultOutboundIds.Urltest, type: 'Built-in', tag: t('outbound.urltest') }],
     interrupt_exist_connections: true,
     url: '',
@@ -186,6 +182,7 @@ export const DefaultOutbounds = (): App.Outbound[] => [
     id: DefaultOutboundIds.Urltest,
     tag: t('outbound.urltest'),
     type: Outbound.Urltest,
+    role: 'auto',
     outbounds: [],
     interrupt_exist_connections: true,
     url: DefaultTestURL,
@@ -200,6 +197,7 @@ export const DefaultOutbounds = (): App.Outbound[] => [
     id: DefaultOutboundIds.Direct,
     tag: t('outbound.direct'),
     type: Outbound.Selector,
+    role: 'direct',
     outbounds: [
       { id: 'direct', type: 'Built-in', tag: 'direct' },
       { id: 'block', type: 'Built-in', tag: 'block' },
@@ -217,6 +215,7 @@ export const DefaultOutbounds = (): App.Outbound[] => [
     id: DefaultOutboundIds.Block,
     tag: t('outbound.block'),
     type: Outbound.Selector,
+    role: 'block',
     outbounds: [
       { id: 'block', type: 'Built-in', tag: 'block' },
       { id: 'direct', type: 'Built-in', tag: 'direct' },
@@ -234,6 +233,7 @@ export const DefaultOutbounds = (): App.Outbound[] => [
     id: DefaultOutboundIds.Fallback,
     tag: t('outbound.fallback'),
     type: Outbound.Selector,
+    role: 'fallback',
     outbounds: [
       { id: DefaultOutboundIds.Select, type: 'Built-in', tag: t('outbound.select') },
       { id: DefaultOutboundIds.Direct, type: 'Built-in', tag: t('outbound.direct') },
@@ -251,6 +251,7 @@ export const DefaultOutbounds = (): App.Outbound[] => [
     id: DefaultOutboundIds.Global,
     tag: 'GLOBAL',
     type: Outbound.Selector,
+    role: 'global',
     outbounds: [
       { id: DefaultOutboundIds.Select, type: 'Built-in', tag: t('outbound.select') },
       { id: DefaultOutboundIds.Urltest, type: 'Built-in', tag: t('outbound.urltest') },
