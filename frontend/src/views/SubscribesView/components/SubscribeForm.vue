@@ -13,6 +13,7 @@ import { RequestProxyMode } from '@/enums/app'
 import { useBool } from '@/hooks'
 import { useAppSettingsStore, useSubscribesStore } from '@/stores'
 import { deepClone, GetRequestProxy, message } from '@/utils'
+import { parseSubscriptionDnsAddresses } from '@/utils/subscriptionConfig'
 
 import Button from '@/components/Button/index.vue'
 
@@ -30,6 +31,24 @@ const appSettingsStore = useAppSettingsStore()
 const loading = ref(false)
 const proxyTesting = ref(false)
 const sub = ref<App.Subscription>(subscribeStore.getSubscribeTemplate())
+
+const dnsAddresses = computed({
+  get: () => (sub.value.outboundDns || []).join('\n'),
+  set: (value: string) => {
+    sub.value.outboundDns = value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+  },
+})
+const importedDnsSummary = computed(() =>
+  (sub.value.importedDns?.servers || [])
+    .map((server) => {
+      const address = server.address || server.server || server.type || 'unknown'
+      return `${server.tag}: ${address}`
+    })
+    .join(' · '),
+)
 
 const isManual = computed(() => sub.value.type === 'Manual')
 const isRemote = computed(() => sub.value.type === 'Http')
@@ -51,6 +70,7 @@ const handleSave = async () => {
   loading.value = true
 
   try {
+    parseSubscriptionDnsAddresses(sub.value.outboundDns || [])
     if (props.id) {
       await subscribeStore.editSubscribe(props.id, sub.value)
     } else {
@@ -160,6 +180,27 @@ defineExpose({ modalSlots })
       <div class="min-w-[75%]">
         <Input v-model="sub.path" placeholder="data/subscribes/{filename}.json" class="w-full" />
       </div>
+    </div>
+    <div class="form-item">
+      {{ t('subscribe.preferOutboundDns') }}
+      <Switch v-model="sub.preferOutboundDns" />
+    </div>
+    <div class="text-12 text-secondary mb-8">{{ t('subscribe.outboundDnsHint') }}</div>
+    <div v-if="sub.preferOutboundDns" class="form-item items-start">
+      {{ t('subscribe.outboundDns') }}
+      <div class="min-w-[75%]">
+        <textarea
+          v-model="dnsAddresses"
+          rows="3"
+          class="w-full bg-transparent border rounded-4 p-8"
+          :aria-label="t('subscribe.outboundDns')"
+          :placeholder="t('subscribe.outboundDnsPlaceholder')"
+        />
+        <div class="text-12 text-secondary mt-4">{{ t('subscribe.outboundDnsOverrideHint') }}</div>
+      </div>
+    </div>
+    <div class="text-12 text-secondary mb-8 break-all">
+      {{ t('subscribe.importedDns') }}: {{ importedDnsSummary || t('subscribe.noImportedDns') }}
     </div>
     <Divider v-if="!isManual">
       <Button type="text" size="small" @click="toggleShowMore">

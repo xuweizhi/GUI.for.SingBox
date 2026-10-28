@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
-import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
+import { computed, ref } from 'vue'
 
 import NodeDiagnosticsPanel from '@/views/NetCheckView/components/NodeDiagnosticsPanel.vue'
 
@@ -19,7 +19,12 @@ const createController = () => ({
   })),
   groups: computed(() => [{ name: 'Proxy', type: 'Selector', all: ['HK 01'], now: 'HK 01' }]),
   selectedGroupName: ref('Proxy'),
-  selectedGroup: computed(() => ({ name: 'Proxy', type: 'Selector', all: ['HK 01'], now: 'HK 01' })),
+  selectedGroup: computed(() => ({
+    name: 'Proxy',
+    type: 'Selector',
+    all: ['HK 01'],
+    now: 'HK 01',
+  })),
   nodes: computed(() => [
     {
       name: 'HK 01',
@@ -41,6 +46,44 @@ const createController = () => ({
 })
 
 describe('NodeDiagnosticsPanel', () => {
+  it('shows the active resolver and distinguishes upstream transport from node-local DNS', async () => {
+    const wrapper = mount(NodeDiagnosticsPanel, {
+      props: {
+        controller: createController() as never,
+        coreReady: true,
+        runtimeDetails: {
+          kind: 'endpoint',
+          resolver: 'sub:a:bootstrap',
+          resolverAddress: 'udp 1.1.1.1',
+          chain: ['HK 01'],
+          incomplete: false,
+        },
+      },
+      global: {
+        stubs: {
+          Card: { template: '<div><slot /></div>' },
+          Button: true,
+          Select: true,
+          Empty: true,
+        },
+      },
+    })
+    expect(wrapper.get('[data-runtime-node]').text()).toContain('sub:a:bootstrap')
+    expect(wrapper.text()).toContain('netCheck.node.endpoint')
+    await wrapper.setProps({
+      runtimeDetails: {
+        kind: 'outbound',
+        via: 'Relay',
+        chain: ['Relay node', 'HK 01'],
+        incomplete: true,
+      },
+    })
+    expect(wrapper.text()).toContain('Relay node → HK 01')
+    expect(wrapper.text()).toContain('netCheck.node.upstreamDns')
+    expect(wrapper.text()).toContain('netCheck.node.incompleteChain')
+    expect(wrapper.text()).not.toContain('sub:a:bootstrap')
+  })
+
   it('renders primary group and node delay', () => {
     const wrapper = mount(NodeDiagnosticsPanel, {
       props: { controller: createController() as never, coreReady: true },

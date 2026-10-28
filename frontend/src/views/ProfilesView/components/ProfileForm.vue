@@ -105,13 +105,8 @@ const handlePrevStep = () => currentStep.value--
 const handleNextStep = () => currentStep.value++
 
 const handleSave = async () => {
-  const graphIssues = findOutboundGraphIssues(
-    profile.value.outbounds,
-    nodeGroupsStore.nodeGroups,
-  )
-  const cycle = graphIssues.find(
-    (issue) => issue.type === 'cycle',
-  )
+  const graphIssues = findOutboundGraphIssues(profile.value.outbounds, nodeGroupsStore.nodeGroups)
+  const cycle = graphIssues.find((issue) => issue.type === 'cycle')
   if (cycle) {
     message.error(
       t('kernel.outbounds.cycle', [
@@ -283,7 +278,7 @@ defineExpose({ modalSlots })
       <InboundsConfig ref="inboundsRef" v-model="profile.inbounds" />
     </div>
     <div v-if="currentStep === Step.Outbounds">
-      <OutboundsConfig ref="outboundsRef" v-model="profile.outbounds" />
+      <OutboundsConfig ref="outboundsRef" v-model="profile.outbounds" :native="profile.native" />
     </div>
     <div v-if="currentStep === Step.Route">
       <RouteConfig

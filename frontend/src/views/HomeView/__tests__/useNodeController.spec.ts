@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   store: undefined as any,
   nodeGroups: [] as any[],
+  subscriptions: [] as App.Subscription[],
 }))
 
 vi.mock('@/views/HomeView/nodeLatencyScheduler', () => ({
@@ -63,6 +64,7 @@ vi.mock('@/stores', () => {
       nodeGroups: mocks.nodeGroups,
       resolveGroup: (group: any) => ({ nodes: group.resolvedNodes || [], issues: [] }),
     }),
+    useSubscribesStore: () => ({ subscribes: mocks.subscriptions }),
     useAppSettingsStore: () => ({
       app: { kernel: { testUrl: 'test-url', testTimeout: 5000, concurrencyLimit: 7 } },
     }),
@@ -107,6 +109,7 @@ describe('useNodeController', () => {
     mocks.store.config.mode = 'rule'
     mocks.store.proxies = proxies()
     mocks.nodeGroups.splice(0)
+    mocks.subscriptions.splice(0)
     mocks.refresh.mockResolvedValue(undefined)
     mocks.handleUseProxy.mockResolvedValue(undefined)
     mocks.submit.mockImplementation(successSubmit)
@@ -180,6 +183,34 @@ describe('useNodeController', () => {
     controller.nodeGroupFilter.value = '__ungrouped'
     expect(controller.nodes.value.map((node) => node.name)).toEqual(['JP 01'])
     expect(mocks.handleUseProxy).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('filters every chained node instance while keeping literal chain-like names separate', () => {
+    mocks.subscriptions.push({
+      id: 'literal-sub', name: 'Another provider',
+      proxies: [{ id: 'literal', tag: 'HK 01 [via Office]', type: 'trojan' }],
+    } as App.Subscription)
+    mocks.nodeGroups.push({
+      id: 'group-hk', name: 'Hong Kong',
+      resolvedNodes: [{
+        subscription: { name: 'Provider A' },
+        proxy: { id: 'hk', tag: 'HK 01', type: 'vless' },
+      }],
+    })
+    const runtimeNames = ['HK 01 [via Upstream]', 'HK 01 [via Backup] 2', 'HK 01 [via Office]']
+    mocks.store.proxies.Proxy.all = runtimeNames
+    for (const name of runtimeNames) {
+      mocks.store.proxies[name] = { ...mocks.store.proxies['HK 01'], name }
+    }
+    const scope = effectScope()
+    const controller = scope.run(useNodeController)!
+    controller.selectGroup('Proxy')
+    controller.nodeGroupFilter.value = 'group-hk'
+
+    expect(controller.nodes.value.map((node) => node.name)).toEqual(runtimeNames.slice(0, 2))
+    controller.nodeGroupFilter.value = '__ungrouped'
+    expect(controller.nodes.value.map((node) => node.name)).toEqual([runtimeNames[2]])
     scope.stop()
   })
 

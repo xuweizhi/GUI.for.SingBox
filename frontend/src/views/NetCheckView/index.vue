@@ -7,6 +7,7 @@ import { useNodeController } from '@/views/HomeView/useNodeController'
 import NetCheckGroupCard from '@/views/NetCheckView/components/NetCheckGroupCard.vue'
 import NodeDiagnosticsPanel from '@/views/NetCheckView/components/NodeDiagnosticsPanel.vue'
 import { useRuntimeNetworkCheck } from '@/views/NetCheckView/useRuntimeNetworkCheck'
+import { useRuntimeNodeDetails } from '@/views/NetCheckView/useRuntimeNodeDetails'
 
 const { t, te } = useI18n()
 const kernelApiStore = useKernelApiStore()
@@ -15,6 +16,11 @@ const networkCheck = useRuntimeNetworkCheck()
 const runError = ref('')
 
 const coreReady = computed(() => kernelApiStore.running)
+const runtimeNode = useRuntimeNodeDetails(
+  coreReady,
+  computed(() => nodeController.primary.value.leafName || ''),
+  computed(() => kernelApiStore.proxies || {}),
+)
 
 const renderText = (value?: string) => {
   if (!value) return ''
@@ -38,6 +44,7 @@ const handleRun = async () => {
     await networkCheck.run()
     if (kernelApiStore.running) {
       await Promise.resolve(nodeController.refresh()).catch(() => undefined)
+      await runtimeNode.refresh()
     }
   } catch (error) {
     runError.value = error instanceof Error ? error.message : String(error)
@@ -107,6 +114,11 @@ onUnmounted(() => {
       </div>
     </Card>
 
-    <NodeDiagnosticsPanel :controller="nodeController" :core-ready="coreReady" />
+    <NodeDiagnosticsPanel
+      :controller="nodeController"
+      :core-ready="coreReady"
+      :runtime-details="runtimeNode.details.value"
+      :runtime-unavailable="runtimeNode.unavailable.value"
+    />
   </div>
 </template>

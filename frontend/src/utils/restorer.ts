@@ -14,8 +14,8 @@ import {
   useSubscribesStore,
 } from '@/stores'
 
-import { createTextMatcher, deepAssign, sampleID } from './others'
 import { resolveNodeGroup } from './nodeGroup'
+import { createTextMatcher, deepAssign, deepClone, sampleID } from './others'
 import { getOutboundRole, getPrimaryProxyOutbound } from './outboundPolicy'
 
 const supportedRuleTypes = [
@@ -49,6 +49,7 @@ const buildTagIdMapping = (prefix: string, arr?: Recordable[]): Recordable<strin
 type RestoreProfileOptions = {
   profile?: App.Profile
   subscriptionIds?: string[]
+  baseline?: Recordable
 }
 
 export const restoreProfile = (
@@ -58,18 +59,45 @@ export const restoreProfile = (
 ): App.Profile => {
   const template = useProfilesStore().getProfileTemplate()
 
-  const { profile, subscriptionIds } = options
+  const { profile, subscriptionIds, baseline } = options
+  // A source/chain can only be reused when every generated dependency still matches.
+  // Otherwise restore the edited graph as native entries, retaining the actual dial path.
+  const preserveSources =
+    !!profile &&
+    !!baseline &&
+    ['outbounds', 'endpoints'].every(
+      (key) => JSON.stringify(config[key] || []) === JSON.stringify(baseline[key] || []),
+    ) &&
+    JSON.stringify(config.dns?.servers || []) === JSON.stringify(baseline.dns?.servers || [])
+  const nativeGraph = !!baseline && !preserveSources
+  const rawNodes = [...(config.outbounds || []), ...(config.endpoints || [])]
+  const leafNodes = rawNodes.filter(
+    (entry) => ![Outbound.Selector, Outbound.Urltest].includes(entry.type),
+  )
 
   const InboundsIds = buildTagIdMapping('in-', config.inbounds)
-  const OutboundsIds = buildTagIdMapping('out-', config.outbounds)
+  const OutboundsIds = buildTagIdMapping('out-', rawNodes)
+  leafNodes.forEach((entry) => {
+    OutboundsIds[entry.tag] = entry.tag
+  })
+  if (preserveSources)
+    profile!.outbounds.forEach((entry) => {
+      OutboundsIds[entry.tag] = entry.id
+    })
   const RouteRuleSetIds = buildTagIdMapping('ruleset-', config.route?.rule_set)
   const DnsServersIds = buildTagIdMapping('dns-', config.dns?.servers)
-  const restoredOutbounds = restoreOutbounds(
-    config.outbounds || [],
-    OutboundsIds,
-    profile?.outbounds || [],
-    subscriptionIds || [],
-  )
+  if (preserveSources)
+    profile!.dns.servers.forEach((entry) => {
+      DnsServersIds[entry.tag] = entry.id
+    })
+  const restoredOutbounds = preserveSources
+    ? deepClone(profile!.outbounds)
+    : restoreOutbounds(
+        rawNodes,
+        OutboundsIds,
+        nativeGraph ? [] : profile?.outbounds || [],
+        nativeGraph ? [] : subscriptionIds || [],
+      )
   const originalPrimaryTag = profile?.outbounds.find(
     (outbound) => outbound.id === profile.primary_proxy_outbound,
   )?.tag
@@ -80,6 +108,41 @@ export const restoreProfile = (
   return {
     id: profile?.id || sampleID(),
     name,
+    native: preserveSources
+      ? profile!.native
+        ? deepClone(profile!.native)
+        : undefined
+      : {
+          outbounds: deepClone(
+            (config.outbounds || []).filter(
+              (entry: Recordable) =>
+                ![Outbound.Selector, Outbound.Urltest].includes(entry.type) &&
+                (!profile ||
+                  nativeGraph ||
+                  restoredOutbounds.some((group) =>
+                    group.outbounds.some(
+                      (member) => member.type === 'Native' && member.id === entry.tag,
+                    ),
+                  )),
+            ),
+          ),
+          endpoints: deepClone(
+            (config.endpoints || []).filter(
+              (entry: Recordable) =>
+                !profile ||
+                nativeGraph ||
+                restoredOutbounds.some((group) =>
+                  group.outbounds.some(
+                    (member) => member.type === 'Native' && member.id === entry.tag,
+                  ),
+                ),
+            ),
+          ),
+          dnsServers: (config.dns?.servers || []).map((server: Recordable) => ({
+            ...deepClone(server),
+            ...(server.type ? { _gui_id: DnsServersIds[server.tag] } : {}),
+          })),
+        },
     primary_proxy_outbound: restoredPrimary?.id,
     log: deepAssign(Defaults.DefaultLog(), config.log),
     experimental: restoreExperimental(config.experimental, OutboundsIds),
@@ -100,9 +163,15 @@ export const restoreProfile = (
       default_interface: config.route?.default_interface ?? template.route.default_interface,
       final: OutboundsIds[config.route?.final] ?? template.route.final,
       default_domain_resolver: {
+        ...(typeof config.route?.default_domain_resolver === 'object'
+          ? config.route.default_domain_resolver
+          : {}),
         server:
-          DnsServersIds[config.route?.default_domain_resolver?.server] ??
-          template.route.default_domain_resolver.server,
+          DnsServersIds[
+            typeof config.route?.default_domain_resolver === 'string'
+              ? config.route.default_domain_resolver
+              : config.route?.default_domain_resolver?.server
+          ] ?? template.route.default_domain_resolver.server,
         client_subnet:
           config.route?.default_domain_resolver?.client_subnet ??
           template.route.default_domain_resolver.client_subnet,
@@ -115,7 +184,9 @@ export const restoreProfile = (
       final: DnsServersIds[config.dns?.final] ?? template.dns.final,
       strategy: config.dns?.strategy ?? template.dns.strategy,
       client_subnet: config.dns?.client_subnet ?? template.dns.client_subnet,
-      servers: restoreDnsServers(config.dns?.servers || [], DnsServersIds, OutboundsIds),
+      servers: preserveSources
+        ? deepClone(profile!.dns.servers)
+        : restoreDnsServers(config.dns?.servers || [], DnsServersIds, OutboundsIds),
       rules: restoreDnsRules(config.dns?.rules || [], InboundsIds, RouteRuleSetIds, DnsServersIds),
     },
     mixin: profile?.mixin || Defaults.DefaultMixin(),
@@ -127,7 +198,7 @@ const restoreExperimental = (raw: Recordable, OutboundsIds: Recordable): App.Exp
   const template = Defaults.DefaultExperimental()
   const experimental = deepAssign(template, raw)
   experimental.clash_api.external_ui_download_detour =
-    OutboundsIds[raw.clash_api?.external_ui_download_detour] || ''
+    OutboundsIds[raw?.clash_api?.external_ui_download_detour] || ''
   return experimental
 }
 
@@ -222,9 +293,7 @@ const restoreOutbounds = (
           `${proxy.tag} [${sub.name}]`,
           ...[...leafTags].filter((tag) => tag.startsWith(`${proxy.tag} [${sub.name} `)),
         ]
-        const runtimeTag = candidates.find(
-          (tag) => leafTags.has(tag) && !proxyToSubMap.has(tag),
-        )
+        const runtimeTag = candidates.find((tag) => leafTags.has(tag) && !proxyToSubMap.has(tag))
         if (runtimeTag) proxyToSubMap.set(runtimeTag, { sub: id, id: proxy.id })
       })
     }
@@ -242,6 +311,19 @@ const restoreOutbounds = (
     outbound.id = OutboundsIds[raw.tag]
     outbound.tag = raw.tag
     outbound.type = raw.type
+    const native = { ...raw }
+    for (const field of [
+      'type',
+      'tag',
+      'outbounds',
+      'default',
+      'url',
+      'interval',
+      'tolerance',
+      'interrupt_exist_connections',
+    ])
+      delete native[field]
+    if (Object.keys(native).length) outbound.native = native
 
     let newOutbounds: App.Proxy[] = []
 
@@ -258,6 +340,8 @@ const restoreOutbounds = (
         const proxy = proxyToSubMap.get(tag)
         if (proxy) {
           newOutbounds.push({ id: proxy.id, type: proxy.sub, tag })
+        } else if (leafTags.has(tag)) {
+          newOutbounds.push({ id: tag, type: 'Native', tag })
         }
       }
     })
@@ -281,8 +365,8 @@ const restoreOutbounds = (
         .forEach((member) => {
           const group = nodeGroupsStore.getNodeGroupById(member.id)
           if (!group) return
-          const resolvedIds = resolveNodeGroup(group, subscribesStore.subscribes).nodes
-            .filter((node) => isTagMatching(node.proxy.tag))
+          const resolvedIds = resolveNodeGroup(group, subscribesStore.subscribes)
+            .nodes.filter((node) => isTagMatching(node.proxy.tag))
             .map((node) => node.proxy.id)
           const isSafelyRepresented =
             resolvedIds.length > 0 && resolvedIds.every((id) => currentNonBuiltInIds.has(id))
@@ -318,6 +402,10 @@ const restoreOutbounds = (
       })
     }
 
+    if (raw.default) {
+      const index = newOutbounds.findIndex((member) => member.tag === raw.default)
+      if (index > 0) newOutbounds.unshift(...newOutbounds.splice(index, 1))
+    }
     outbound.outbounds = newOutbounds
 
     if ('interrupt_exist_connections' in raw) {
@@ -494,7 +582,12 @@ const restoreDnsServers = (
         server.detour = OutboundsIds[raw.detour]
       }
       if ('domain_resolver' in raw) {
-        server.domain_resolver = DnsServersIds[raw.domain_resolver]
+        server.domain_resolver =
+          DnsServersIds[
+            typeof raw.domain_resolver === 'string'
+              ? raw.domain_resolver
+              : raw.domain_resolver?.server
+          ]
       }
       if (
         [

@@ -4,9 +4,13 @@ import { useI18n } from 'vue-i18n'
 
 import type { NodeController } from '@/views/HomeView/useNodeController'
 
+import type { RuntimeNodeDetails } from '../runtimeNodeDetails'
+
 const props = defineProps<{
   controller: NodeController
   coreReady: boolean
+  runtimeDetails?: RuntimeNodeDetails
+  runtimeUnavailable?: boolean
 }>()
 
 const { t } = useI18n()
@@ -67,6 +71,26 @@ watchEffect(() => {
         </div>
         <div v-if="controller.primary.value.delay" class="text-12 mt-4">
           {{ controller.primary.value.delay }} ms
+        </div>
+        <div v-if="runtimeDetails" data-runtime-node class="text-12 mt-4 flex flex-col gap-4">
+          <div v-if="runtimeDetails.kind === 'endpoint'">{{ t('netCheck.node.endpoint') }}</div>
+          <template v-if="runtimeDetails.via">
+            <div>{{ t('netCheck.node.upstreamDns', [runtimeDetails.via]) }}</div>
+            <div>
+              {{ t('netCheck.node.transportChain') }} {{ runtimeDetails.chain.join(' → ') }}
+            </div>
+          </template>
+          <div v-else>
+            {{ t('netCheck.node.nodeDns') }}
+            {{ runtimeDetails.resolver || t('netCheck.node.unknownResolver') }}
+            <span v-if="runtimeDetails.resolverAddress"
+              >({{ runtimeDetails.resolverAddress }})</span
+            >
+          </div>
+          <div v-if="runtimeDetails.incomplete">{{ t('netCheck.node.incompleteChain') }}</div>
+        </div>
+        <div v-else-if="runtimeUnavailable" class="text-12 mt-4">
+          {{ t('netCheck.node.runtimeUnavailable') }}
         </div>
       </div>
 

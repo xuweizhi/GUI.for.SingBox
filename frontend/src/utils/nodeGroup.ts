@@ -2,6 +2,10 @@ export interface ResolvedNodeGroupNode {
   subscription: App.Subscription
   proxy: App.Subscription['proxies'][number]
   key: string
+  match?: {
+    field: App.NodeGroupMatchField
+    value: string
+  }
 }
 
 export type NodeGroupIssue =
@@ -41,16 +45,56 @@ export const nodeGroupNodeKey = (subscriptionId: string, nodeId: string) =>
 export const getNodeGroupRuntimeNames = (
   resolution: NodeGroupResolution,
   runtimeNames: string[],
+  subscriptions: App.Subscription[] = [],
 ) => {
-  const available = new Set(runtimeNames)
   const names = new Set<string>()
+  const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const isChainSuffix = (suffix: string) => /^ \[via [\s\S]+\](?: [1-9]\d*)?$/.test(suffix)
+  const knownTags = new Set([
+    ...subscriptions.flatMap((subscription) => subscription.proxies.map((proxy) => proxy.tag)),
+    ...resolution.nodes.flatMap(({ subscription, proxy }) => [
+      proxy.tag,
+      ...(subscription.proxies || []).map((candidate) => candidate.tag),
+    ]),
+  ])
+  const literalBases = new Map<string, string | undefined>(runtimeNames.map((name) => {
+    if (knownTags.has(name)) return [name, name]
+    // Search suffix boundaries from right to left so a longer literal tag wins
+    // over a shorter node whose generated name happens to share its prefix.
+    let boundary = name.lastIndexOf(' [via ')
+    while (boundary >= 0) {
+      const base = name.slice(0, boundary)
+      if (knownTags.has(base) && isChainSuffix(name.slice(boundary))) return [name, base]
+      boundary = boundary > 0 ? name.lastIndexOf(' [via ', boundary - 1) : -1
+    }
+    return [name, undefined]
+  }))
   resolution.nodes.forEach(({ subscription, proxy }) => {
-    const disambiguatedPrefix = `${proxy.tag} [${subscription.name}`
-    const disambiguated = runtimeNames.find(
-      (name) => name.startsWith(disambiguatedPrefix) && name.endsWith(']'),
+    // Recognize both legacy "[Provider 2]" and "[Provider] 2" aliases, without
+    // conflating "Provider" with "Provider Extra". Match literal tags first:
+    // a user may legitimately name a node "Node [via Office]".
+    const qualified = new RegExp(
+      `^${escapePattern(proxy.tag)} \\[${escapePattern(subscription.name)}(?: [1-9]\\d*)?\\](?: [1-9]\\d*)?`,
     )
-    if (disambiguated) names.add(disambiguated)
-    else if (available.has(proxy.tag)) names.add(proxy.tag)
+    const qualifiedNames: string[] = []
+    const unqualifiedNames: string[] = []
+    runtimeNames.forEach((name) => {
+      const literalBase = literalBases.get(name)
+      if (literalBase && literalBase !== proxy.tag) return
+      if (name === proxy.tag) {
+        unqualifiedNames.push(name)
+        return
+      }
+      const alias = name.match(qualified)?.[0]
+      if (alias && (name === alias || isChainSuffix(name.slice(alias.length)))) {
+        qualifiedNames.push(name)
+      } else if (name.startsWith(proxy.tag) && isChainSuffix(name.slice(proxy.tag.length))) {
+        unqualifiedNames.push(name)
+      }
+    })
+    // Legacy runtime names cannot identify the source of an unqualified duplicate.
+    // Keep the established preference for subscription-qualified names.
+    for (const name of qualifiedNames.length ? qualifiedNames : unqualifiedNames) names.add(name)
   })
   return names
 }
@@ -69,6 +113,24 @@ const compileFilter = (
   }
 }
 
+const getMatchValue = (
+  field: App.NodeGroupMatchField,
+  subscription: App.Subscription,
+  proxy: App.Subscription['proxies'][number],
+) => {
+  switch (field) {
+    case 'name':
+      return proxy.tag
+    case 'protocol':
+      return proxy.type
+    case 'subscription':
+      return subscription.name
+    default:
+      // Keep the original concatenation, including separators, for existing filters.
+      return `${subscription.name} ${proxy.tag} ${proxy.type}`
+  }
+}
+
 export const resolveNodeGroup = (
   group: App.NodeGroup,
   subscriptions: App.Subscription[],
@@ -81,11 +143,12 @@ export const resolveNodeGroup = (
   const addNode = (
     subscription: App.Subscription,
     proxy: App.Subscription['proxies'][number],
+    match?: ResolvedNodeGroupNode['match'],
   ) => {
     const key = nodeGroupNodeKey(subscription.id, proxy.id)
     if (seen.has(key)) return
     seen.add(key)
-    nodes.push({ subscription, proxy, key })
+    nodes.push({ subscription, proxy, key, ...(match ? { match } : {}) })
   }
 
   if (group.mode === 'manual') {
@@ -138,13 +201,14 @@ export const resolveNodeGroup = (
     })
   }
 
+  const matchField = group.match_field ?? 'all'
   for (const subscription of subscriptions) {
     if (subscription.disabled || !sourceIds.has(subscription.id)) continue
     for (const proxy of subscription.proxies) {
-      const text = `${subscription.name} ${proxy.tag} ${proxy.type}`
+      const text = getMatchValue(matchField, subscription, proxy)
       if (include && !include.test(text)) continue
       if (exclude?.test(text)) continue
-      addNode(subscription, proxy)
+      addNode(subscription, proxy, { field: matchField, value: text })
       if (group.max_nodes > 0 && nodes.length >= group.max_nodes) return { nodes, issues }
     }
   }

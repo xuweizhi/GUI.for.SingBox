@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { DefaultNodeGroup } from '@/constant/nodeGroup'
 import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
 import { deepClone, message, nodeGroupNodeKey, resolveNodeGroup } from '@/utils'
+import type { ResolvedNodeGroupNode } from '@/utils/nodeGroup'
 
 import Button from '@/components/Button/index.vue'
 
@@ -18,7 +19,9 @@ const handleSubmit = inject('submit') as () => void
 const loading = ref(false)
 const keywords = ref('')
 const original = props.id ? nodeGroupsStore.getNodeGroupById(props.id) : undefined
-const group = ref<App.NodeGroup>(deepClone(original || DefaultNodeGroup()))
+const group = ref<App.NodeGroup>(
+  deepClone({ ...DefaultNodeGroup(), ...original, match_field: original?.match_field ?? 'all' }),
+)
 
 const modeOptions = [
   { label: 'nodeGroups.manual', value: 'manual' },
@@ -27,6 +30,12 @@ const modeOptions = [
 const sourceOptions = [
   { label: 'nodeGroups.allSources', value: 'all' },
   { label: 'nodeGroups.selectedSources', value: 'selected' },
+]
+const matchFieldOptions = [
+  { label: 'nodeGroups.matchFields.all', value: 'all' },
+  { label: 'nodeGroups.matchFields.name', value: 'name' },
+  { label: 'nodeGroups.matchFields.protocol', value: 'protocol' },
+  { label: 'nodeGroups.matchFields.subscription', value: 'subscription' },
 ]
 const subscriptionOptions = computed(() =>
   subscribesStore.subscribes.map((subscription) => ({
@@ -47,6 +56,17 @@ const availableNodes = computed(() => {
   )
 })
 const resolution = computed(() => resolveNodeGroup(group.value, subscribesStore.subscribes))
+const matchExplanation = (node: ResolvedNodeGroupNode) => {
+  if (!node.match) return ''
+  const reason = t(group.value.include ? 'nodeGroups.matchIncluded' : 'nodeGroups.matchUnrestricted', {
+    field: t(`nodeGroups.matchFields.${node.match.field}`),
+    value: node.match.value,
+    expression: group.value.include,
+  })
+  return group.value.exclude
+    ? `${reason} · ${t('nodeGroups.matchNotExcluded', { expression: group.value.exclude })}`
+    : reason
+}
 
 const toggleMember = (
   subscription: App.Subscription,
@@ -138,6 +158,15 @@ defineExpose({ modalSlots })
         {{ t('nodeGroups.sources') }}
         <Select v-model="group.subscription_ids" :options="subscriptionOptions" multiple />
       </div>
+      <div class="form-item">
+        {{ t('nodeGroups.matchField') }}
+        <Select
+          v-model="group.match_field"
+          :options="matchFieldOptions"
+          data-testid="node-group-match-field"
+        />
+        <span class="text-12 opacity-70">{{ t('nodeGroups.matchFieldHint') }}</span>
+      </div>
       <div class="node-group-fields grid grid-cols-2 gap-12">
         <div class="form-item">
           {{ t('nodeGroups.include') }}
@@ -156,9 +185,12 @@ defineExpose({ modalSlots })
 
     <Divider>{{ t('nodeGroups.resolved') }} · {{ resolution.nodes.length }}</Divider>
     <div class="flex flex-wrap gap-6">
-      <Tag v-for="node in resolution.nodes" :key="node.key" color="blue">
-        {{ node.proxy.tag }} · {{ node.subscription.name }}
-      </Tag>
+      <div v-for="node in resolution.nodes" :key="node.key" class="min-w-0 max-w-full">
+        <Tag color="blue">{{ node.proxy.tag }} · {{ node.subscription.name }}</Tag>
+        <div v-if="node.match" class="text-12 opacity-70 break-all" data-testid="node-group-match-reason">
+          {{ matchExplanation(node) }}
+        </div>
+      </div>
       <span v-if="resolution.nodes.length === 0" class="text-12 opacity-70">{{ t('common.none') }}</span>
     </div>
     <template v-if="resolution.issues.length">

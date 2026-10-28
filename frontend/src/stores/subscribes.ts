@@ -29,6 +29,7 @@ import {
   SubscriptionEncryptionHeader,
   deepClone,
 } from '@/utils'
+import { extractSubscriptionConfig, validateSubscriptionEntries } from '@/utils/subscriptionConfig'
 
 export const useSubscribesStore = defineStore('subscribes', () => {
   const subscribes = ref<App.Subscription[]>([])
@@ -195,6 +196,8 @@ export const useSubscribesStore = defineStore('subscribes', () => {
   }
 
   const _doUpdateSub = async (s: App.Subscription, options: Partial<App.Subscription> = {}) => {
+    const target = s
+    s = deepClone(s)
     const userInfo: Recordable = {}
     const previousMetadata = deepClone(s.proxies)
     const previousBody = await ignoredError(ReadFile, s.path)
@@ -202,13 +205,15 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     if (previousBody) {
       try {
         const parsed = JSON.parse(previousBody)
-        previousOutbounds = Array.isArray(parsed) ? parsed : parsed.outbounds || []
+        previousOutbounds = extractSubscriptionConfig(parsed).outbounds
       } catch {
         // A missing or legacy cache only disables content-based identity matching.
       }
     }
     let body = ''
     let proxies: Record<string, any>[] = []
+    let importedDns: App.Subscription['importedDns']
+    let preserveCachedDns = false
 
     if (s.type === 'Manual') {
       body = await ReadFile(s.path)
@@ -259,16 +264,24 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     }
 
     if (isValidSubJson(body)) {
-      proxies = JSON.parse(body).outbounds
+      const extracted = extractSubscriptionConfig(JSON.parse(body))
+      proxies = extracted.outbounds
+      importedDns = extracted.importedDns
     } else if (isValidSubYAML(body)) {
-      proxies = parse(body).proxies
+      const extracted = extractSubscriptionConfig(parse(body))
+      proxies = extracted.outbounds
+      importedDns = extracted.importedDns
     } else if (isValidBase64(body)) {
       proxies = [{ base64: body }]
     } else if (isSubscriptionShareLinkList(body)) {
       // Treat line-based share links the same as base64 subscriptions.
       proxies = [{ base64: body }]
-    } else if (s.type === 'Manual') {
-      proxies = JSON.parse(body)
+    } else if (s.type === 'Manual' || s.type === 'File') {
+      const parsed = JSON.parse(body)
+      const extracted = extractSubscriptionConfig(parsed)
+      proxies = extracted.outbounds
+      importedDns = extracted.importedDns
+      preserveCachedDns = Array.isArray(parsed) && (s.type === 'Manual' || s.url === s.path)
     } else {
       throw 'Not a valid subscription data'
     }
@@ -276,11 +289,17 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     const pluginStore = usePluginsStore()
 
     proxies = await pluginStore.onSubscribeTrigger(proxies, s)
-    proxies = await normalizeSubscriptionProxies(proxies)
+    proxies = await normalizeSubscriptionProxies(proxies, {
+      resolverTags: (importedDns || (preserveCachedDns ? s.importedDns : undefined))?.servers
+        .map((server) => server.tag)
+        .filter((tag): tag is string => typeof tag === 'string'),
+    })
 
     if (proxies.some((proxy) => proxy.name && !proxy.tag) || proxies[0]?.base64) {
       throw 'You need to install the [节点转换] plugin first'
     }
+
+    proxies = validateSubscriptionEntries(proxies)
 
     if (s.type !== 'Manual') {
       const r1 = s.include && buildSmartRegExp(s.include)
@@ -297,12 +316,26 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       })
 
       if (s.proxyPrefix) {
-        proxies.forEach((v) => {
-          v.tag = v.tag.startsWith(s.proxyPrefix) ? v.tag : s.proxyPrefix + v.tag
+        const renamed = new Map(
+          proxies.map((proxy) => [
+            proxy.tag,
+            proxy.tag.startsWith(s.proxyPrefix) ? proxy.tag : s.proxyPrefix + proxy.tag,
+          ]),
+        )
+        const reference = (tag: string) => renamed.get(tag) || tag
+        proxies.forEach((proxy) => {
+          proxy.tag = reference(proxy.tag)
+          if (proxy.detour) proxy.detour = reference(proxy.detour)
+          if (proxy.default) proxy.default = reference(proxy.default)
+          if (Array.isArray(proxy.outbounds)) proxy.outbounds = proxy.outbounds.map(reference)
+        })
+        importedDns?.servers.forEach((server) => {
+          if (server.detour) server.detour = reference(server.detour)
         })
       }
     }
 
+    if (!preserveCachedDns) s.importedDns = importedDns
     s.upload = userInfo.upload ?? 0
     s.download = userInfo.download ?? 0
     s.total = userInfo.total ?? 0
@@ -328,6 +361,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
 
     const { proxies: _proxies, subscription } = await fn(proxies, s)
 
+    validateSubscriptionEntries(_proxies)
     Object.assign(s, subscription)
     s.proxies = reconcileSubscriptionProxyIds(
       preScriptMetadata,
@@ -336,10 +370,11 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       sampleID,
     )
 
-    if (s.type === 'Http' || (s.type === 'File' && s.url !== s.path)) {
+    if (s.type !== 'File' || s.url !== s.path) {
       proxies = omitArray(_proxies, ['__id__', '__tmp__id__'])
       await WriteFile(s.path, JSON.stringify(proxies, null, 2))
     }
+    Object.assign(target, s)
   }
 
   const updateSubscribe = async (id: string, options: Partial<App.Subscription> = {}) => {
@@ -417,6 +452,8 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       url: options.url || '',
       website: '',
       decryptPassword: '',
+      preferOutboundDns: false,
+      outboundDns: [],
       path: `data/subscribes/${id}.json`,
       include: '',
       exclude: '',

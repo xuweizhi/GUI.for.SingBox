@@ -282,7 +282,10 @@ declare global {
       customProxy: string
       disabled: boolean
       inSecure: boolean
-      proxies: { id: string; tag: string; type: string }[]
+      preferOutboundDns?: boolean
+      outboundDns?: string[]
+      importedDns?: { servers: Recordable[]; resolver?: string }
+      proxies: { id: string; tag: string; type: string; kind?: 'endpoint' }[]
       requestMethod: RequestMethod
       requestTimeout: number
       header: {
@@ -350,6 +353,7 @@ declare global {
 
     type NodeGroupMode = 'manual' | 'filter'
     type NodeGroupSourceScope = 'all' | 'selected'
+    type NodeGroupMatchField = 'all' | 'name' | 'protocol' | 'subscription'
 
     interface NodeGroupMember {
       subscription_id: string
@@ -365,6 +369,7 @@ declare global {
       members: NodeGroupMember[]
       source_scope: NodeGroupSourceScope
       subscription_ids: string[]
+      match_field?: NodeGroupMatchField
       include: string
       exclude: string
       max_nodes: number
@@ -440,6 +445,10 @@ declare global {
       hidden: boolean
       // GUI-only marker for visible strategy outbounds created from a node-group outlet shortcut.
       source_node_group?: string
+      // Stable strategy ID used to dial the members through an upstream group.
+      pre_proxy?: string
+      // Additional native strategy fields retained by the JSON editor.
+      native?: Recordable
     }
 
     interface Rule {
@@ -534,6 +543,8 @@ declare global {
       name: string
       // GUI-only pointer to the selector opened by the home proxy-node picker.
       primary_proxy_outbound?: string
+      // Native entries retained when editing/importing a generated core configuration.
+      native?: { outbounds?: Recordable[]; endpoints?: Recordable[]; dnsServers?: Recordable[] }
       log: Log
       experimental: Experimental
       inbounds: Inbound[]

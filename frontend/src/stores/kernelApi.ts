@@ -50,6 +50,7 @@ import {
   resolveRuntimeInboundState,
 } from '@/stores/kernelApiRuntime'
 import { resolveCoreStopPid } from '@/stores/kernelProcess'
+import { explainCoreConfigCheckError } from '@/utils/coreConfigValidation'
 import {
   generateConfigFile,
   getKernelFileName,
@@ -128,6 +129,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
         })
         runtimeProfile.id = _profile.id
         runtimeProfile.outbounds = _profile.outbounds
+        runtimeProfile.native = _profile.native
         runtimeProfile.experimental = _profile.experimental
         runtimeProfile.dns = _profile.dns
         runtimeProfile.route = _profile.route
@@ -412,9 +414,13 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       const isAlpha = branch === Branch.Alpha
       const coreFilePath = `${CoreWorkingDirectory}/${getKernelFileName(isAlpha)}`
       await RemoveFile(CoreConfigStagedFilePath).catch(() => undefined)
+      let stagedConfig: unknown
       await generateConfigFile(
         profile,
-        (config) => pluginsStore.onBeforeCoreStartTrigger(config, profile),
+        async (config) => {
+          stagedConfig = await pluginsStore.onBeforeCoreStartTrigger(config, profile)
+          return stagedConfig
+        },
         CoreConfigStagedFilePath,
       )
       try {
@@ -432,7 +438,9 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
             Env: getKernelRuntimeEnv(isAlpha),
             WorkingDirectory: CoreWorkingDirectory,
           },
-        )
+        ).catch((error) => {
+          throw explainCoreConfigCheckError(error, stagedConfig)
+        })
         await replaceFileWithRollback(
           {
             activePath: CoreConfigFilePath,

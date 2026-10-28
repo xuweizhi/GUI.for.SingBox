@@ -8,6 +8,7 @@ export const DefaultNodeGroup = (): App.NodeGroup => ({
   members: [],
   source_scope: 'all',
   subscription_ids: [],
+  match_field: 'all',
   include: '',
   exclude: '',
   max_nodes: 0,

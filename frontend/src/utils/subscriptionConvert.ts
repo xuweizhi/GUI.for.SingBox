@@ -75,7 +75,9 @@ const withSubStoreGlobals = async <T>(fn: () => Promise<T>) => {
 const loadProxyUtilsModule = () => {
   if (!proxyUtilsModulePromise) {
     proxyUtilsModulePromise = withSubStoreGlobals(async () => {
-      return (await import(/* @vite-ignore */ toDataURL(browserProxyUtilsSource))) as ProxyUtilsModule
+      return (await import(
+        /* @vite-ignore */ toDataURL(browserProxyUtilsSource)
+      )) as ProxyUtilsModule
     })
   }
 
@@ -88,35 +90,34 @@ const needsNativeSubscriptionConvert = (proxies: Recordable[]) => {
   )
 }
 
-export const normalizeSubscriptionProxies = async (proxies: Recordable[]) => {
-  let next = proxies.map((proxy) => ({ ...proxy }))
-  if (!needsNativeSubscriptionConvert(next)) {
-    return next
-  }
+export const normalizeSubscriptionProxies = async (
+  proxies: Recordable[],
+  options: { resolverTags?: string[] } = {},
+) => {
+  const next = proxies.map((proxy) => ({ ...proxy }))
+  if (!needsNativeSubscriptionConvert(next)) return next
 
   const { parse, produce } = await loadProxyUtilsModule()
-
-  next = await withMutedConsole(async () => {
-    let converted = next
-
-    if (typeof converted[0]?.base64 === 'string') {
-      converted = parse(converted[0].base64)
-    }
-
-    if (converted.some((proxy) => proxy?.name && !proxy?.tag)) {
-      const produced = produce(converted, 'singbox', 'internal')
-      if (!Array.isArray(produced)) {
-        throw new Error('Failed to convert subscription data')
-      }
-      converted = produced
-    }
-
-    return converted
+  return withMutedConsole(async () => {
+    const parsed = typeof next[0]?.base64 === 'string' ? parse(next[0].base64) : next
+    const native = parsed.filter(
+      (proxy) => !proxy.name || proxy.tag || proxy._gui_kind === 'endpoint',
+    )
+    const toConvert = parsed.filter(
+      (proxy) => proxy.name && !proxy.tag && proxy._gui_kind !== 'endpoint',
+    )
+    if (!toConvert.length) return native
+    const produced = produce(toConvert, 'singbox', 'internal')
+    if (!Array.isArray(produced)) throw new Error('Failed to convert subscription data')
+    const knownResolvers = new Set(options.resolverTags || [])
+    produced.forEach((proxy: Recordable) => {
+      const resolver =
+        typeof proxy.domain_resolver === 'string'
+          ? proxy.domain_resolver
+          : proxy.domain_resolver?.server
+      // The converter synthesizes resolver references which have no server in share links.
+      if (!knownResolvers.has(resolver)) delete proxy.domain_resolver
+    })
+    return [...native, ...produced]
   })
-
-  next.forEach((proxy) => {
-    delete proxy.domain_resolver
-  })
-
-  return next
 }

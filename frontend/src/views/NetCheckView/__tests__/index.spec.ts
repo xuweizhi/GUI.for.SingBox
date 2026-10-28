@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
 
 const mocks = vi.hoisted(() => ({
   run: vi.fn(),
@@ -10,24 +10,24 @@ const mocks = vi.hoisted(() => ({
   prepareModal: vi.fn(),
   refresh: vi.fn(),
   running: { value: false },
-  groups: { value: [
-    {
-      id: 'overview',
-      title: 'netCheck.groups.overview',
-      status: 'success',
-      summary: '1 success, 1 failed',
-      items: [
-        { id: 'core', title: 'netCheck.results.core', status: 'success', summary: 'ok' },
-      ],
-    },
-    {
-      id: 'dns',
-      title: 'netCheck.groups.dns',
-      status: 'skipped',
-      summary: '0 items',
-      items: [],
-    },
-  ] },
+  groups: {
+    value: [
+      {
+        id: 'overview',
+        title: 'netCheck.groups.overview',
+        status: 'success',
+        summary: '1 success, 1 failed',
+        items: [{ id: 'core', title: 'netCheck.results.core', status: 'success', summary: 'ok' }],
+      },
+      {
+        id: 'dns',
+        title: 'netCheck.groups.dns',
+        status: 'skipped',
+        summary: '0 items',
+        items: [],
+      },
+    ],
+  },
 }))
 
 const mountView = () =>
@@ -65,6 +65,14 @@ vi.mock('@/views/NetCheckView/useRuntimeNetworkCheck', () => ({
   }),
 }))
 
+vi.mock('@/views/NetCheckView/useRuntimeNodeDetails', () => ({
+  useRuntimeNodeDetails: () => ({
+    details: ref(undefined),
+    unavailable: ref(false),
+    refresh: vi.fn(),
+  }),
+}))
+
 vi.mock('@/views/HomeView/useNodeController', () => ({
   useNodeController: () => ({
     startPolling: mocks.startPolling,
@@ -82,7 +90,14 @@ vi.mock('@/views/HomeView/useNodeController', () => ({
     selectedGroupName: ref(''),
     selectedGroup: ref(undefined),
     nodes: ref([]),
-    batch: ref({ running: false, cancelled: false, total: 0, completed: 0, success: 0, failure: 0 }),
+    batch: ref({
+      running: false,
+      cancelled: false,
+      total: 0,
+      completed: 0,
+      success: 0,
+      failure: 0,
+    }),
     stale: ref(false),
     refreshError: ref(''),
     readonlyMode: ref(false),

@@ -29,6 +29,7 @@ export class NodeGroupInUseError extends Error {
 const normalizeNodeGroup = (raw: Partial<App.NodeGroup>): App.NodeGroup => ({
   ...DefaultNodeGroup(),
   ...raw,
+  match_field: raw.match_field ?? 'all',
   members: Array.isArray(raw.members) ? raw.members : [],
   subscription_ids: Array.isArray(raw.subscription_ids) ? raw.subscription_ids : [],
 })
@@ -47,6 +48,9 @@ export const validateNodeGroup = (
   if (!['manual', 'filter'].includes(group.mode)) throw new Error('invalid node group mode')
   if (!['all', 'selected'].includes(group.source_scope)) {
     throw new Error('invalid node group source_scope')
+  }
+  if (!['all', 'name', 'protocol', 'subscription'].includes(group.match_field ?? 'all')) {
+    throw new Error('invalid node group match_field')
   }
   if (group.max_nodes < 0) throw new Error('node group max_nodes must not be negative')
   for (const field of ['include', 'exclude'] as const) {

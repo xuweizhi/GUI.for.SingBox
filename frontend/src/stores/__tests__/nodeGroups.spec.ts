@@ -19,6 +19,7 @@ import { NodeGroupsFilePath, ProfilesFilePath } from '@/constant/app'
 import { DefaultNodeGroup } from '@/constant/nodeGroup'
 import { useNodeGroupsStore, NodeGroupInUseError } from '@/stores/nodeGroups'
 import { useProfilesStore } from '@/stores/profiles'
+import { useSubscribesStore } from '@/stores/subscribes'
 
 const profileWithGroup = () =>
   ({
@@ -69,6 +70,49 @@ describe('node-groups store', () => {
     await expect(
       store.addNodeGroup(createGroup({ id: 'negative', max_nodes: -1 })),
     ).rejects.toThrow('max_nodes')
+    await expect(
+      store.addNodeGroup(createGroup({ id: 'invalid-field', match_field: 'server' as App.NodeGroupMatchField })),
+    ).rejects.toThrow('match_field')
+    expect(writeFile).not.toHaveBeenCalled()
+  })
+
+  it('loads existing groups without a match field using the original combined behavior', async () => {
+    readFile.mockResolvedValue(JSON.stringify([{ id: 'legacy', name: 'Legacy', mode: 'filter', include: 'HK' }]))
+    const store = useNodeGroupsStore()
+    useSubscribesStore().subscribes = [{
+      id: 'provider', name: 'HK Provider', disabled: false,
+      proxies: [{ id: 'jp', tag: 'JP 01', type: 'trojan' }],
+    }] as App.Subscription[]
+
+    await store.setupNodeGroups()
+
+    expect(store.nodeGroups[0]!.match_field).toBe('all')
+    expect(store.resolveGroup('legacy').nodes.map((node) => node.proxy.id)).toEqual(['jp'])
+  })
+
+  it('persists the selected field through create, edit and reload without widening the filter', async () => {
+    const subscriptions = [{
+      id: 'provider', name: 'HK Provider', disabled: false,
+      proxies: [
+        { id: 'hk', tag: 'HK 01', type: 'vless' },
+        { id: 'jp', tag: 'JP 01', type: 'trojan' },
+      ],
+    }] as App.Subscription[]
+    useSubscribesStore().subscribes = subscriptions
+    const store = useNodeGroupsStore()
+    await store.addNodeGroup(createGroup({ mode: 'filter', match_field: 'protocol', include: '^trojan$' }))
+    expect(store.resolveGroup('group-hk').nodes.map((node) => node.proxy.id)).toEqual(['jp'])
+
+    await store.editNodeGroup('group-hk', createGroup({ mode: 'filter', match_field: 'name', include: '^HK' }))
+    const saved = writeFile.mock.calls.findLast(([path]) => path === NodeGroupsFilePath)![1]
+    readFile.mockResolvedValue(saved)
+    setActivePinia(createPinia())
+    useSubscribesStore().subscribes = subscriptions
+    const reloaded = useNodeGroupsStore()
+    await reloaded.setupNodeGroups()
+
+    expect(reloaded.nodeGroups[0]!.match_field).toBe('name')
+    expect(reloaded.resolveGroup('group-hk').nodes.map((node) => node.proxy.id)).toEqual(['hk'])
   })
 
   it('propagates renames to profile display snapshots', async () => {

@@ -15,6 +15,7 @@ const props = defineProps<Props>()
 
 const loading = ref(false)
 const profileText = ref('')
+let baseline: Recordable | undefined
 
 const { t } = useI18n()
 const profilesStore = useProfilesStore()
@@ -32,7 +33,7 @@ const handleSave = async () => {
           nodeGroupsStore
             .resolveGroup(outbound.id)
             .nodes.forEach((node) => p.add(node.subscription.id))
-        } else if (outbound.type !== 'Built-in') {
+        } else if (outbound.type !== 'Built-in' && outbound.type !== 'Native') {
           const id = outbound.type === 'Subscription' ? outbound.id : outbound.type
           p.add(id)
         }
@@ -41,6 +42,7 @@ const handleSave = async () => {
     }, new Set<string>())
     const newProfile = restoreProfile(JSON.parse(profileText.value), props.profile.name, {
       profile: props.profile,
+      baseline,
       subscriptionIds: [...subscriptions],
     })
     newProfile.id = props.profile.id
@@ -62,6 +64,7 @@ onMounted(() => {
     enableMixinProcessing: false,
     enableScriptProcessing: false,
   }).then((text) => {
+    baseline = JSON.parse(JSON.stringify(text))
     profileText.value = JSON.stringify(text, null, 2)
   })
 })

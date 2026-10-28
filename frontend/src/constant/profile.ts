@@ -147,6 +147,7 @@ export const DefaultInbounds = (): App.Inbound[] => [
 ]
 
 export const DefaultOutbound = (): App.Outbound => ({
+  pre_proxy: '',
   id: sampleID(),
   tag: '',
   type: Outbound.Selector,

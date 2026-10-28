@@ -32,8 +32,13 @@ export const isValidSubYAML = (str: string) => {
 export const isValidSubJson = (str: string) => {
   if (typeof str !== 'string') return false
   try {
-    const { outbounds } = JSON.parse(str)
-    return !!outbounds
+    const value = JSON.parse(str)
+    return (
+      !!value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      (Array.isArray(value.outbounds) || Array.isArray(value.endpoints))
+    )
   } catch {
     return false
   }

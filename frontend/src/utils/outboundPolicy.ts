@@ -44,10 +44,12 @@ export const getPrimaryProxyOutbound = (
   )
 }
 
-const outboundReferences = (outbound: App.Outbound, allIds: Set<string>) =>
-  outbound.outbounds
+const outboundReferences = (outbound: App.Outbound, allIds: Set<string>) => [
+  ...outbound.outbounds
     .filter((member) => member.type === 'Built-in' && allIds.has(member.id))
-    .map((member) => member.id)
+    .map((member) => member.id),
+  ...(outbound.pre_proxy ? [outbound.pre_proxy] : []),
+]
 
 export const findOutboundGraphIssues = (
   outbounds: App.Outbound[],
@@ -59,6 +61,14 @@ export const findOutboundGraphIssues = (
   const nodeGroupIds = new Set(nodeGroups.map((group) => group.id))
 
   outbounds.forEach((outbound) => {
+    if (outbound.pre_proxy && !byId.has(outbound.pre_proxy)) {
+      issues.push({
+        type: 'missing',
+        groupId: outbound.id,
+        targetId: outbound.pre_proxy,
+        chain: [outbound.id, outbound.pre_proxy],
+      })
+    }
     outbound.outbounds.forEach((member) => {
       if (
         member.type === 'Built-in' &&

@@ -7,6 +7,11 @@ import { DraggableOptions } from '@/constant/app'
 import { useBool } from '@/hooks'
 import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
 import { buildSmartRegExp, deepClone, ignoredError, message, sampleID } from '@/utils'
+import {
+  extractSubscriptionConfig,
+  isSubscriptionEndpoint,
+  validateSubscriptionEntries,
+} from '@/utils/subscriptionConfig'
 
 import Button from '@/components/Button/index.vue'
 
@@ -166,7 +171,7 @@ const onEditEnd = async () => {
   try {
     proxy = JSON.parse(details.value)
 
-    if (typeof proxy !== 'object') throw 'wrong format'
+    validateSubscriptionEntries([proxy])
   } catch (error: any) {
     console.log(error)
     message.error(error.message || error)
@@ -181,10 +186,14 @@ const onEditEnd = async () => {
   const subProxiesIdx = sub.value.proxies.findIndex((v) => v.tag === editId)
 
   if (allFieldsProxiesIdx !== -1 && subProxiesIdx !== -1) {
+    if (isSubscriptionEndpoint(allFieldsProxies.value[allFieldsProxiesIdx]))
+      proxy._gui_kind = 'endpoint'
     allFieldsProxies.value.splice(allFieldsProxiesIdx, 1, proxy)
     sub.value.proxies.splice(subProxiesIdx, 1, {
       ...sub.value.proxies[subProxiesIdx]!,
       tag: proxy.tag,
+      type: proxy.type,
+      kind: isSubscriptionEndpoint(proxy) ? 'endpoint' : undefined,
     })
   } else {
     allFieldsProxies.value.push(proxy)
@@ -192,6 +201,7 @@ const onEditEnd = async () => {
       id: sampleID(),
       tag: proxy.tag,
       type: proxy.type,
+      ...(isSubscriptionEndpoint(proxy) ? { kind: 'endpoint' as const } : {}),
     })
   }
 }
@@ -199,7 +209,9 @@ const onEditEnd = async () => {
 const initAllFieldsProxies = async () => {
   if (allFieldsProxies.value.length) return
   const content = (await ignoredError(ReadFile, sub.value!.path)) || '[]'
-  allFieldsProxies.value = JSON.parse(content)
+  const extracted = extractSubscriptionConfig(JSON.parse(content))
+  allFieldsProxies.value = extracted.outbounds
+  if (extracted.importedDns) sub.value.importedDns = extracted.importedDns
 }
 
 const getProxyByTag = async (tag: string) => {
@@ -269,6 +281,9 @@ defineExpose({ modalSlots })
       >
         <div class="text-12">
           {{ proxy.type }}
+          <span v-if="proxy.kind === 'endpoint'" class="text-primary ml-4">{{
+            t('subscribe.endpoint')
+          }}</span>
         </div>
       </Card>
     </div>

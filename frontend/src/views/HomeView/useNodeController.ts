@@ -6,6 +6,7 @@ import {
   useKernelApiStore,
   useNodeGroupsStore,
   useProfilesStore,
+  useSubscribesStore,
 } from '@/stores'
 import { handleUseProxy } from '@/utils/helper'
 import { normalizeErrorMessage } from '@/utils/others'
@@ -54,6 +55,7 @@ export const useNodeController = () => {
   const kernelApiStore = useKernelApiStore()
   const profilesStore = useProfilesStore()
   const nodeGroupsStore = useNodeGroupsStore()
+  const subscribesStore = useSubscribesStore()
 
   const selectedGroupName = ref('')
   const query = ref('')
@@ -96,7 +98,9 @@ export const useNodeController = () => {
     const runtimeNames = selectedGroup.value?.all || []
     return new Map(
       nodeGroupsStore.nodeGroups.flatMap((group) => {
-        const names = getNodeGroupRuntimeNames(nodeGroupsStore.resolveGroup(group), runtimeNames)
+        const names = getNodeGroupRuntimeNames(
+          nodeGroupsStore.resolveGroup(group), runtimeNames, subscribesStore.subscribes,
+        )
         return names.size ? [[group.id, names] as const] : []
       }),
     )

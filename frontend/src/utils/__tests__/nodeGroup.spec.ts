@@ -109,6 +109,95 @@ describe('node-group resolution', () => {
       expect.objectContaining({ type: 'invalid-filter', field: 'include' }),
     ])
   })
+
+  const fieldSubscriptions = [
+    subscription('provider-a', [
+      { id: 'hk', tag: 'HK 01', type: 'vless' },
+      { id: 'jp', tag: 'JP 01', type: 'trojan' },
+      { id: 'hk-test', tag: 'HK Test', type: 'trojan' },
+    ], { name: 'HK trojan Provider' }),
+    subscription('provider-b', [{ id: 'other', tag: 'Other 01', type: 'trojan' }], {
+      name: 'Another Provider',
+    }),
+  ]
+
+  it('matches only node names when a subscription name contains the same region', () => {
+    const result = resolveNodeGroup(
+      group({ mode: 'filter', match_field: 'name', include: '^hk', exclude: 'test' }),
+      fieldSubscriptions,
+    )
+
+    expect(result.nodes.map((node) => node.proxy.id)).toEqual(['hk'])
+    expect(result.nodes[0]!.match).toEqual({ field: 'name', value: 'HK 01' })
+  })
+
+  it('matches and excludes only the selected protocol field', () => {
+    const result = resolveNodeGroup(
+      group({ mode: 'filter', match_field: 'protocol', include: 'trojan', exclude: 'HK' }),
+      fieldSubscriptions,
+    )
+
+    expect(result.nodes.map((node) => node.proxy.id)).toEqual(['jp', 'hk-test', 'other'])
+    expect(result.nodes[0]!.match).toEqual({ field: 'protocol', value: 'trojan' })
+    expect(resolveNodeGroup(
+      group({ mode: 'filter', match_field: 'protocol', exclude: '^TROJAN$' }),
+      fieldSubscriptions,
+    ).nodes.map((node) => node.proxy.id)).toEqual(['hk'])
+  })
+
+  it('matches only source subscription names with include and exclude filters', () => {
+    const result = resolveNodeGroup(
+      group({ mode: 'filter', match_field: 'subscription', include: 'provider$', exclude: '^hk' }),
+      fieldSubscriptions,
+    )
+
+    expect(result.nodes.map((node) => node.proxy.id)).toEqual(['other'])
+    expect(result.nodes[0]!.match).toEqual({ field: 'subscription', value: 'Another Provider' })
+    expect(resolveNodeGroup(
+      group({ mode: 'filter', match_field: 'subscription', include: 'JP' }),
+      fieldSubscriptions,
+    ).nodes).toEqual([])
+  })
+
+  it('preserves legacy combined text including regexes spanning multiple fields', () => {
+    const legacy = group({ mode: 'filter', include: 'provider JP 01 trojan$' })
+    const result = resolveNodeGroup(legacy, fieldSubscriptions)
+
+    expect(result.nodes.map((node) => node.proxy.id)).toEqual(['jp'])
+    expect(result.nodes[0]!.match).toEqual({ field: 'all', value: 'HK trojan Provider JP 01 trojan' })
+    expect(resolveNodeGroup({ ...legacy, match_field: 'all' }, fieldSubscriptions)).toEqual(result)
+  })
+
+  it('still restricts explicit-field matching to selected enabled sources and the node limit', () => {
+    const result = resolveNodeGroup(
+      group({
+        mode: 'filter',
+        match_field: 'protocol',
+        include: '^trojan$',
+        source_scope: 'selected',
+        subscription_ids: ['disabled', 'provider-a'],
+        max_nodes: 1,
+      }),
+      [
+        subscription('disabled', [{ id: 'disabled', tag: 'Disabled', type: 'trojan' }], {
+          disabled: true,
+        }),
+        ...fieldSubscriptions,
+      ],
+    )
+
+    expect(result.nodes.map((node) => node.proxy.id)).toEqual(['jp'])
+  })
+
+  it('reports invalid exclusions with an explicit field without returning partial matches', () => {
+    const result = resolveNodeGroup(
+      group({ mode: 'filter', match_field: 'name', exclude: '[' }),
+      fieldSubscriptions,
+    )
+
+    expect(result.nodes).toEqual([])
+    expect(result.issues).toEqual([{ type: 'invalid-filter', field: 'exclude', expression: '[' }])
+  })
 })
 
 describe('node-group dependencies', () => {
@@ -144,6 +233,11 @@ describe('node-group dependencies', () => {
 })
 
 describe('node-group runtime labels', () => {
+  const runtimeResolution = (tag = 'HK 01', provider = 'Provider') => resolveNodeGroup(
+    group({ members: [{ subscription_id: 'sub', node_id: 'node', last_known_tag: tag }] }),
+    [subscription('sub', [{ id: 'node', tag, type: 'socks' }], { name: provider })],
+  )
+
   it('maps duplicate tags to the subscription-qualified runtime tag', () => {
     const first = subscription('sub-a', [{ id: 'a', tag: 'Same Node', type: 'socks' }], {
       name: 'Provider A',
@@ -163,5 +257,71 @@ describe('node-group runtime labels', () => {
     expect(
       [...getNodeGroupRuntimeNames(resolution, ['Same Node', 'Same Node [Provider B]'])],
     ).toEqual(['Same Node [Provider B]'])
+  })
+
+  it('retains every direct and chained variant including numeric collision suffixes', () => {
+    const runtime = ['HK 01', 'HK 01 [via Upstream]', 'HK 01 [via Backup] 2', 'Unrelated']
+
+    expect([...getNodeGroupRuntimeNames(runtimeResolution(), runtime)]).toEqual(runtime.slice(0, 3))
+    expect([...getNodeGroupRuntimeNames(runtimeResolution(), ['HK 01 [via Upstream]'])]).toEqual([
+      'HK 01 [via Upstream]',
+    ])
+  })
+
+  it('recognizes subscription aliases and all their chained variants', () => {
+    const runtime = [
+      'HK 01',
+      'HK 01 [via Other provider upstream]',
+      'HK 01 [Provider]',
+      'HK 01 [Provider] [via Upstream]',
+      'HK 01 [Provider 2] [via Nested [via Outer]]',
+      'HK 01 [Provider] 2 [via Backup] 3',
+    ]
+
+    expect([...getNodeGroupRuntimeNames(runtimeResolution(), runtime)]).toEqual(runtime.slice(2))
+  })
+
+  it('does not confuse subscription-name prefixes or regular expression characters', () => {
+    expect([...getNodeGroupRuntimeNames(runtimeResolution(), [
+      'HK 01 [Provider Extra]', 'HK 01 [Provider Extra] [via Upstream]',
+    ])]).toEqual([])
+    expect([...getNodeGroupRuntimeNames(runtimeResolution('HK [A]+', 'Provider (1)'), [
+      'HK [A]+ [Provider (1)] [via Upstream]',
+      'HK A [Provider 1] [via Upstream]',
+    ])]).toEqual(['HK [A]+ [Provider (1)] [via Upstream]'])
+  })
+
+  it('preserves literal user tags containing a chain marker before matching further variants', () => {
+    const runtime = [
+      'HK [via Office]',
+      'HK [via Office] [via Upstream]',
+      'HK [via Office] [Provider] [via Upstream] 2',
+    ]
+    // Qualified names still take priority when a duplicate requires them.
+    expect([...getNodeGroupRuntimeNames(runtimeResolution('HK [via Office]'), runtime)]).toEqual([
+      runtime[2],
+    ])
+    expect([...getNodeGroupRuntimeNames(runtimeResolution('HK [via Office]'), runtime.slice(0, 2))]).toEqual(
+      runtime.slice(0, 2),
+    )
+  })
+
+  it('rejects partial or malformed chain suffixes', () => {
+    expect([...getNodeGroupRuntimeNames(runtimeResolution(), [
+      'HK 010 [via Upstream]', 'HK 01 [via ]', 'HK 01 [via Upstream', 'HK 01 [via Upstream] extra',
+    ])]).toEqual([])
+  })
+
+  it('uses complete source metadata to exclude another node with a literal chain marker', () => {
+    const literal = subscription('literal-source', [
+      { id: 'literal', tag: 'HK 01 [via Office]', type: 'trojan' },
+    ])
+    const runtime = [
+      'HK 01', 'HK 01 [via Upstream]',
+      'HK 01 [via Office]', 'HK 01 [via Office] [via Upstream]',
+    ]
+
+    expect([...getNodeGroupRuntimeNames(runtimeResolution(), runtime, [literal])]).toEqual(runtime.slice(0, 2))
+    expect([...getNodeGroupRuntimeNames(runtimeResolution('HK 01 [via Office]'), runtime, [literal])]).toEqual(runtime.slice(2))
   })
 })

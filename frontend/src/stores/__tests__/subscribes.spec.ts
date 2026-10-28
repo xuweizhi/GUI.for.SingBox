@@ -425,4 +425,192 @@ describe('subscribes store', () => {
       'Failed to update subscription [sub-fail]. Reason: network down',
     )
   })
+  it('persists mixed endpoint fields and imported DNS while preserving manual DNS overrides', async () => {
+    const store = useSubscribesStore()
+    const item = {
+      ...subscription('endpoint-dns'),
+      preferOutboundDns: true,
+      outboundDns: ['https://manual.example/dns-query'],
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }
+    store.subscribes = [item]
+    const endpoint = {
+      type: 'wireguard',
+      tag: 'WG',
+      private_key: 'private',
+      peers: [{ address: 'wg.example', port: 51820, public_key: 'public', reserved: [1, 2, 3] }],
+      mtu: 1420,
+    }
+    vi.mocked(Requests).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        outbounds: [
+          { type: 'vless', tag: 'VLESS', server: 'node.example', domain_resolver: 'provider' },
+        ],
+        endpoints: [endpoint],
+        dns: {
+          servers: [{ type: 'tls', tag: 'provider', server: '1.1.1.1' }],
+          final: 'provider',
+          rules: [{ domain: ['web.example'], server: 'provider' }],
+        },
+      }),
+    } as Awaited<ReturnType<typeof Requests>>)
+    await store.updateSubscribe(item.id)
+    const result = store.subscribes[0]!
+    expect(result.preferOutboundDns).toBe(true)
+    expect(result.outboundDns).toEqual(item.outboundDns)
+    expect(result.importedDns).toEqual({
+      servers: [{ type: 'tls', tag: 'provider', server: '1.1.1.1' }],
+      resolver: 'provider',
+    })
+    expect(result.proxies).toContainEqual(
+      expect.objectContaining({ type: 'wireguard', kind: 'endpoint', tag: 'WG' }),
+    )
+    const cached = JSON.parse(writeFile.mock.calls.find(([path]) => path === item.path)![1])
+    expect(cached).toContainEqual({ ...endpoint, _gui_kind: 'endpoint' })
+    expect(cached[0].domain_resolver).toBe('provider')
+  })
+
+  it('refreshes endpoint identities across name and credential changes and clears stale imported DNS', async () => {
+    const store = useSubscribesStore()
+    const previous = {
+      type: 'wireguard',
+      tag: 'old',
+      _gui_kind: 'endpoint',
+      private_key: 'old-key',
+      peers: [{ address: 'wg.example', port: 51820, public_key: 'old-public' }],
+    }
+    const item: Subscription = {
+      ...subscription('endpoint-refresh'),
+      preferOutboundDns: true,
+      outboundDns: ['1.1.1.1'],
+      importedDns: { servers: [{ type: 'local', tag: 'stale' }], resolver: 'stale' },
+      proxies: [{ id: 'stable', tag: 'old', type: 'wireguard', kind: 'endpoint' }],
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }
+    store.subscribes = [item]
+    vi.mocked(ReadFile).mockResolvedValueOnce(JSON.stringify([previous]))
+    vi.mocked(Requests).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        endpoints: [
+          {
+            ...previous,
+            tag: 'new',
+            private_key: 'rotated',
+            peers: [{ address: 'wg.example', port: 51820, public_key: 'rotated-public' }],
+          },
+        ],
+      }),
+    } as Awaited<ReturnType<typeof Requests>>)
+    await store.updateSubscribe(item.id)
+    expect(store.subscribes[0]!.proxies).toEqual([
+      { id: 'stable', tag: 'new', type: 'wireguard', kind: 'endpoint' },
+    ])
+    expect(store.subscribes[0]!.importedDns).toBeUndefined()
+    expect(store.subscribes[0]!.outboundDns).toEqual(['1.1.1.1'])
+  })
+
+  it('keeps cached manual subscription DNS across refreshes', async () => {
+    const store = useSubscribesStore()
+    const item: Subscription = {
+      ...subscription('manual-dns'),
+      type: 'Manual',
+      importedDns: { servers: [{ type: 'local', tag: 'provider' }], resolver: 'provider' },
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }
+    store.subscribes = [item]
+    vi.mocked(ReadFile).mockResolvedValue(
+      JSON.stringify([
+        {
+          type: 'tailscale',
+          tag: 'TS',
+          _gui_kind: 'endpoint',
+          auth_key: 'secret',
+          state_directory: 'data/ts',
+        },
+      ]),
+    )
+    await store.updateSubscribe(item.id)
+    expect(store.subscribes[0]!.importedDns).toEqual(item.importedDns)
+    expect(store.subscribes[0]!.proxies[0]!.kind).toBe('endpoint')
+  })
+
+  it('preserves the previous subscription and cache when endpoint validation fails', async () => {
+    const store = useSubscribesStore()
+    const item: Subscription = {
+      ...subscription('bad-endpoint'),
+      proxies: [{ id: 'old', tag: 'old', type: 'socks' }],
+      importedDns: { servers: [{ type: 'local', tag: 'old' }] },
+    }
+    store.subscribes = [item]
+    vi.mocked(Requests).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ endpoints: [null] }),
+    } as Awaited<ReturnType<typeof Requests>>)
+    await expect(store.updateSubscribe(item.id)).rejects.toContain('must have a protocol type')
+    expect(store.subscribes[0]!.proxies).toEqual(item.proxies)
+    expect(store.subscribes[0]!.importedDns).toEqual(item.importedDns)
+    expect(writeFile).not.toHaveBeenCalled()
+  })
+
+  it('prefixes node graph references and imported DNS detours together with their tags', async () => {
+    const store = useSubscribesStore()
+    const item = {
+      ...subscription('prefixed'),
+      proxyPrefix: 'Provider / ',
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }
+    store.subscribes = [item]
+    vi.mocked(Requests).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        outbounds: [
+          { type: 'socks', tag: 'entry', server: '1.2.3.4' },
+          { type: 'trojan', tag: 'exit', detour: 'entry' },
+          { type: 'selector', tag: 'choose', outbounds: ['entry', 'exit'], default: 'entry' },
+        ],
+        dns: { servers: [{ type: 'tls', tag: 'resolver', server: '1.1.1.1', detour: 'entry' }] },
+      }),
+    } as Awaited<ReturnType<typeof Requests>>)
+    await store.updateSubscribe(item.id)
+    const cache = JSON.parse(writeFile.mock.calls.find(([path]) => path === item.path)![1])
+    expect(cache[1]).toMatchObject({ tag: 'Provider / exit', detour: 'Provider / entry' })
+    expect(cache[2]).toMatchObject({
+      tag: 'Provider / choose',
+      default: 'Provider / entry',
+      outbounds: ['Provider / entry', 'Provider / exit'],
+    })
+    expect(store.subscribes[0]!.importedDns!.servers[0]!.detour).toBe('Provider / entry')
+  })
+  it('reloads edited file-backed flat endpoint caches while preserving discovered DNS', async () => {
+    const store = useSubscribesStore()
+    const item: Subscription = {
+      ...subscription('same-file'),
+      type: 'File',
+      url: 'data/subscribes/same-file.json',
+      importedDns: { servers: [{ type: 'local', tag: 'provider' }], resolver: 'provider' },
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }
+    store.subscribes = [item]
+    const endpoint = {
+      type: 'tailscale',
+      tag: 'TS',
+      _gui_kind: 'endpoint',
+      state_directory: 'data/ts',
+    }
+    vi.mocked(ReadFile).mockResolvedValue(JSON.stringify([endpoint]))
+    await store.updateSubscribe(item.id)
+    expect(store.subscribes[0]!.importedDns).toEqual(item.importedDns)
+    expect(store.subscribes[0]!.proxies[0]).toMatchObject({
+      type: 'tailscale',
+      tag: 'TS',
+      kind: 'endpoint',
+    })
+    expect(writeFile.mock.calls.some(([path]) => path === item.url)).toBe(false)
+  })
 })

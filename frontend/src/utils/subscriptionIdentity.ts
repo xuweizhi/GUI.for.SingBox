@@ -1,3 +1,5 @@
+import { isSubscriptionEndpoint } from './subscriptionConfig'
+
 interface PreviousProxyIdentity {
   id: string
   tag: string
@@ -24,6 +26,20 @@ const fingerprint = (outbound?: Recordable) =>
 const endpointKey = (outbound?: Recordable) => {
   if (!outbound) return ''
   const type = String(outbound.type || '')
+  if (isSubscriptionEndpoint(outbound)) {
+    if (type === 'wireguard' && Array.isArray(outbound.peers)) {
+      const peers = outbound.peers
+        .map((peer: Recordable) =>
+          peer.address && peer.port ? `${String(peer.address).toLowerCase()}:${peer.port}` : '',
+        )
+        .filter(Boolean)
+        .sort()
+      if (peers.length) return `endpoint\u0000${type}\u0000${peers.join('\u0000')}`
+    }
+    if (type === 'tailscale' && outbound.state_directory) {
+      return `endpoint\u0000${type}\u0000${outbound.state_directory}`
+    }
+  }
   const server = String(outbound.server || '')
   const port = String(outbound.server_port || outbound.port || '')
   return type && server && port ? `${type}\u0000${server.toLowerCase()}\u0000${port}` : ''
@@ -36,7 +52,9 @@ const uniqueCandidate = (
   nextKeyCounts: Map<string, number>,
 ) => {
   if (!nextKey || nextKeyCounts.get(nextKey) !== 1) return
-  const candidates = previous.filter((candidate) => !candidate.used && previousKey(candidate) === nextKey)
+  const candidates = previous.filter(
+    (candidate) => !candidate.used && previousKey(candidate) === nextKey,
+  )
   return candidates.length === 1 ? candidates[0] : undefined
 }
 
@@ -107,6 +125,7 @@ export const reconcileSubscriptionProxyIds = (
       id: matched?.id || createId(),
       tag: String(outbound.tag || ''),
       type: String(outbound.type || ''),
+      ...(isSubscriptionEndpoint(outbound) ? { kind: 'endpoint' as const } : {}),
     }
   })
 }

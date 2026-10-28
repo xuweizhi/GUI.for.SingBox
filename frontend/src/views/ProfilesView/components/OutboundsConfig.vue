@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { DraggableOptions } from '@/constant/app'
@@ -18,6 +18,7 @@ import {
 } from '@/utils'
 
 const model = defineModel<App.Profile['outbounds']>({ required: true })
+const props = defineProps<{ native?: App.Profile['native'] }>()
 
 let updateGroupId = 0
 const showEditModal = ref(false)
@@ -49,10 +50,28 @@ const proxyGroup = ref([
     })),
   },
   {
+    id: 'Native',
+    name: 'kernel.outbounds.nativeNodes',
+    proxies: [...(props.native?.outbounds || []), ...(props.native?.endpoints || [])].map(
+      (entry) => ({ id: entry.tag, tag: entry.tag, type: entry.type }),
+    ),
+  },
+  {
     id: 'Subscription',
     name: 'kernel.outbounds.subscriptions',
     proxies: [],
   },
+])
+
+const preProxyOptions = computed(() => [
+  { label: t('kernel.outbounds.noPreProxy'), value: '' },
+  ...model.value
+    .filter(
+      (outbound) =>
+        outbound.id !== fields.value.id &&
+        [Outbound.Selector, Outbound.Urltest].includes(outbound.type as Outbound),
+    )
+    .map((outbound) => ({ label: outbound.tag, value: outbound.id })),
 ])
 
 const handleAdd = () => {
@@ -65,6 +84,11 @@ defineExpose({ handleAdd })
 
 const handleDeleteGroup = (index: number) => {
   const id = model.value[index]!.id
+  const dependent = model.value.find((outbound) => outbound.pre_proxy === id)
+  if (dependent) {
+    message.error(t('kernel.outbounds.preProxyInUse', [dependent.tag]))
+    return
+  }
   model.value.splice(index, 1)
   proxyGroup.value = proxyGroup.value.map((v) => ({
     ...v,
@@ -74,8 +98,12 @@ const handleDeleteGroup = (index: number) => {
 
 const handleClearGroup = async (outbound: App.Outbound) => {
   const filtered = outbound.outbounds.filter(({ id, type }) => {
+    if (type === 'Native')
+      return proxyGroup.value
+        .find((group) => group.id === 'Native')!
+        .proxies.some((entry) => entry.id === id)
     if (type === 'Built-in') {
-      return model.value.some((v) => v.id === id)
+      return BuiltInOutbound.includes(id as Outbound) || model.value.some((v) => v.id === id)
     } else if (type === 'Subscription') {
       return subscribesStore.getSubscribeById(id)
     } else if (type === 'NodeGroup') {
@@ -84,6 +112,8 @@ const handleClearGroup = async (outbound: App.Outbound) => {
     const sub = subscribesStore.getSubscribeById(type)
     return sub && sub.proxies.some((v) => v.id === id)
   })
+  if (outbound.pre_proxy && !model.value.some((v) => v.id === outbound.pre_proxy))
+    outbound.pre_proxy = ''
   outbound.outbounds.splice(0)
   outbound.outbounds.push(...filtered)
 }
@@ -92,12 +122,12 @@ const handleAddEnd = () => {
   const { id, tag, type } = fields.value
   const next = model.value.map((outbound) => (outbound.id === id ? fields.value : outbound))
   if (updateGroupId === -1) next.unshift(fields.value)
-  const cycle = findOutboundGraphIssues(next, nodeGroupsStore.nodeGroups).find(
-    (issue) => issue.type === 'cycle',
-  )
+  const cycle = findOutboundGraphIssues(next, nodeGroupsStore.nodeGroups)[0]
   if (cycle) {
     message.error(
-      t('kernel.outbounds.cycle', [getOutboundChainLabels(cycle.chain, next).join(' → ')]),
+      t(cycle.type === 'cycle' ? 'kernel.outbounds.cycle' : 'kernel.outbounds.missingReference', [
+        getOutboundChainLabels(cycle.chain, next).join(' → '),
+      ]),
     )
     return false
   }
@@ -144,8 +174,13 @@ const isInuse = (groupID: string, proxyID: string) => {
 }
 
 const hasLost = (outbound: App.Outbound) => {
+  if (outbound.pre_proxy && !model.value.some((v) => v.id === outbound.pre_proxy)) return true
   if ([Outbound.Selector, Outbound.Urltest].includes(outbound.type as any)) {
     return outbound.outbounds.some(({ id, type }) => {
+      if (type === 'Native')
+        return !proxyGroup.value
+          .find((group) => group.id === 'Native')!
+          .proxies.some((entry) => entry.id === id)
       if (type === 'Built-in') {
         if (BuiltInOutbound.includes(id as Outbound)) {
           return false
@@ -192,9 +227,8 @@ const clacNodeGroupsCount = (outbound: App.Outbound) => {
 
 const clacOutboundsCount = (outbound: App.Outbound) => {
   if ([Outbound.Selector, Outbound.Urltest].includes(outbound.type as any)) {
-    return outbound.outbounds.filter(
-      (v) => v.type !== 'Subscription' && v.type !== 'NodeGroup',
-    ).length
+    return outbound.outbounds.filter((v) => v.type !== 'Subscription' && v.type !== 'NodeGroup')
+      .length
   }
   return 0
 }
@@ -221,11 +255,13 @@ const showLost = () => message.warn('kernel.outbounds.notFound')
 const showNeedToAdd = () => message.error('kernel.outbounds.needToAdd')
 
 subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
-  proxyGroup.value.find((group) => group.id === 'Subscription')!.proxies.push({
-    id,
-    tag: name,
-    type: 'Subscribe',
-  })
+  proxyGroup.value
+    .find((group) => group.id === 'Subscription')!
+    .proxies.push({
+      id,
+      tag: name,
+      type: 'Subscribe',
+    })
   proxyGroup.value.push({ id, name, proxies })
   SubscribesNameMap.value[id] = name
 })
@@ -324,6 +360,11 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
     </div>
     <template v-if="Outbound.Selector === fields.type || Outbound.Urltest === fields.type">
       <div class="form-item">
+        {{ t('kernel.outbounds.preProxy') }}
+        <Select v-model="fields.pre_proxy" :options="preProxyOptions" />
+      </div>
+      <div class="text-12 opacity-70 mb-12">{{ t('kernel.outbounds.preProxyHint') }}</div>
+      <div class="form-item">
         {{ t('kernel.outbounds.hidden') }}
         <Switch v-model="fields.hidden" />
       </div>
@@ -366,7 +407,9 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
     </template>
     <template v-if="[Outbound.Selector, Outbound.Urltest].includes(fields.type as any)">
       <Divider>
-        {{ t('kernel.outbounds.refsOutbound') }}、{{ t('kernel.outbounds.refsSubscription') }}、{{ t('router.nodeGroups') }}
+        {{ t('kernel.outbounds.refsOutbound') }}、{{ t('kernel.outbounds.refsSubscription') }}、{{
+          t('router.nodeGroups')
+        }}
       </Divider>
 
       <div v-for="group in proxyGroup" :key="group.id" class="group">
