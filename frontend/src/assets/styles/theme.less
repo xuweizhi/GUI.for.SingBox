@@ -11,6 +11,10 @@
 .set-theme(@theme) {
   --color: ~'var(--color-@{theme})';
   --bg-color: ~'var(--bg-color-@{theme})';
+  --border-color: ~'var(--border-color-@{theme})';
+  --muted-color: ~'var(--muted-color-@{theme})';
+  --accent-text: ~'var(--accent-text-@{theme})';
+  --accent-soft: color-mix(in srgb, var(--primary-color) 10%, var(--card-bg));
 
   // Scrollbar
   --scrollbar-track-bg: ~'var(--scrollbar-track-bg-@{theme})';

@@ -30,11 +30,11 @@ const onThemeClick = (e: MouseEvent) => {
   <div class="px-8 py-12 text-18 font-bold">{{ $t('settings.personalization') }}</div>
 
   <Card>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">{{ $t('settings.theme.name') }}</div>
       <Radio v-model="appSettings.app.theme" :options="ThemeOptions" @click="onThemeClick" />
     </div>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">{{ $t('settings.color.name') }}</div>
       <div class="flex items-center">
         <div v-if="appSettings.app.color === Color.Custom" class="flex items-center mr-4">
@@ -52,7 +52,7 @@ const onThemeClick = (e: MouseEvent) => {
         <Radio v-model="appSettings.app.color" :options="ColorOptions" />
       </div>
     </div>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="flex items-center text-16 font-bold">
         <div class="mr-4">{{ $t('settings.lang.name') }}</div>
         <Button type="text" icon="link" @click="BrowserOpenURL(APP_LOCALES_URL)" />
@@ -66,7 +66,7 @@ const onThemeClick = (e: MouseEvent) => {
       </div>
       <Radio v-model="appSettings.app.lang" :options="appStore.locales" />
     </div>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">{{ $t('settings.fontFamily') }}</div>
       <Input v-model="appSettings.app.fontFamily" editable class="text-14">
         <template #suffix>
@@ -80,7 +80,7 @@ const onThemeClick = (e: MouseEvent) => {
         </template>
       </Input>
     </div>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">{{ $t('settings.pages.name') }}</div>
       <CheckBox v-model="appSettings.app.pages" :options="pages" />
     </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, computed, h } from 'vue'
+import { ref, inject, computed, h, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { GetSystemProxy, HttpGet } from '@/bridge'
@@ -24,6 +24,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const { t } = useI18n()
+const advancedId = useId()
 const [showMore, toggleShowMore] = useBool(false)
 const subscribeStore = useSubscribesStore()
 const appSettingsStore = useAppSettingsStore()
@@ -146,7 +147,7 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div>
+  <div class="subscription-form">
     <div class="form-item">
       {{ t('subscribes.subtype') }}
       <Radio
@@ -161,7 +162,7 @@ defineExpose({ modalSlots })
     <div class="form-item">
       {{ t('subscribe.name') }} *
       <div class="min-w-[75%]">
-        <Input v-model="sub.name" autofocus class="w-full" />
+        <Input v-model="sub.name" :label="t('subscribe.name')" autofocus class="w-full" />
       </div>
     </div>
     <div v-if="!isManual" class="form-item">
@@ -169,149 +170,174 @@ defineExpose({ modalSlots })
       <div class="min-w-[75%]">
         <Input
           v-model="sub.url"
+          :label="t(sub.type === 'Http' ? 'subscribe.url' : 'subscribe.localPath')"
           :placeholder="sub.type === 'Http' ? 'http(s)://' : 'data/local/{filename}.json'"
           allow-paste
           class="w-full"
         />
       </div>
     </div>
-    <div v-if="isRemote" class="form-item">
-      {{ t('subscribe.decryptPassword') }}
-      <div class="min-w-[75%]">
-        <Input v-model="sub.decryptPassword" type="password" allow-paste class="w-full" />
-      </div>
-    </div>
-    <div class="form-item">
-      {{ t('subscribe.path') }} *
-      <div class="min-w-[75%]">
-        <Input v-model="sub.path" placeholder="data/subscribes/{filename}.json" class="w-full" />
-      </div>
-    </div>
-    <div class="form-item">
-      {{ t('subscribe.preferOutboundDns') }}
-      <Switch v-model="sub.preferOutboundDns" />
-    </div>
-    <div class="text-12 text-secondary mb-8">{{ t('subscribe.outboundDnsHint') }}</div>
-    <div v-if="sub.preferOutboundDns" class="form-item items-start">
-      {{ t('subscribe.outboundDns') }}
-      <div class="min-w-[75%]">
-        <textarea
-          v-model="dnsAddresses"
-          rows="3"
-          class="w-full bg-transparent border rounded-4 p-8"
-          :aria-label="t('subscribe.outboundDns')"
-          :placeholder="t('subscribe.outboundDnsPlaceholder')"
-        />
-        <div class="text-12 text-secondary mt-4">{{ t('subscribe.outboundDnsOverrideHint') }}</div>
-      </div>
-    </div>
-    <div class="text-12 text-secondary mb-8 break-all">
-      {{ t('subscribe.importedDns') }}: {{ importedDnsSummary || t('subscribe.noImportedDns') }}
-    </div>
-    <Divider v-if="!isManual">
-      <Button type="text" size="small" @click="toggleShowMore">
-        {{ t('common.more') }}
+    <Divider>
+      <Button
+        type="text"
+        :aria-expanded="showMore"
+        :aria-controls="advancedId"
+        icon="arrowDown"
+        @click="toggleShowMore"
+      >
+        {{ t('common.advancedSettings') }}
       </Button>
     </Divider>
-    <div v-if="showMore && !isManual">
-      <div class="form-item">
-        {{ t('subscribe.include') }}
+    <div v-show="showMore" :id="advancedId">
+      <div v-if="isRemote" class="form-item">
+        {{ t('subscribe.decryptPassword') }}
         <div class="min-w-[75%]">
-          <Input v-model="sub.include" placeholder="keyword1|keyword2" class="w-full" />
+          <Input v-model="sub.decryptPassword" type="password" allow-paste class="w-full" />
         </div>
       </div>
       <div class="form-item">
-        {{ t('subscribe.exclude') }}
+        {{ t('subscribe.path') }} *
         <div class="min-w-[75%]">
-          <Input v-model="sub.exclude" placeholder="keyword1|keyword2" class="w-full" />
+          <Input v-model="sub.path" placeholder="data/subscribes/{filename}.json" class="w-full" />
         </div>
       </div>
       <div class="form-item">
-        {{ t('subscribe.includeProtocol') }}
+        {{ t('subscribe.preferOutboundDns') }}
+        <Switch v-model="sub.preferOutboundDns" />
+      </div>
+      <div class="text-12 text-secondary mb-8">{{ t('subscribe.outboundDnsHint') }}</div>
+      <div v-if="sub.preferOutboundDns" class="form-item items-start">
+        {{ t('subscribe.outboundDns') }}
         <div class="min-w-[75%]">
-          <Input
-            v-model="sub.includeProtocol"
-            placeholder="direct|mixed|socks|http..."
-            class="w-full"
+          <textarea
+            v-model="dnsAddresses"
+            rows="3"
+            class="w-full bg-transparent border rounded-4 p-8"
+            :aria-label="t('subscribe.outboundDns')"
+            :placeholder="t('subscribe.outboundDnsPlaceholder')"
           />
+          <div class="text-12 text-secondary mt-4">
+            {{ t('subscribe.outboundDnsOverrideHint') }}
+          </div>
         </div>
       </div>
-      <div class="form-item">
-        {{ t('subscribe.excludeProtocol') }}
-        <div class="min-w-[75%]">
-          <Input
-            v-model="sub.excludeProtocol"
-            placeholder="direct|mixed|socks|http..."
-            class="w-full"
-          />
-        </div>
+      <div class="text-12 text-secondary mb-8 break-all">
+        {{ t('subscribe.importedDns') }}: {{ importedDnsSummary || t('subscribe.noImportedDns') }}
       </div>
-      <div class="form-item">
-        {{ t('subscribe.proxyPrefix') }}
-        <div class="min-w-[75%]">
-          <Input v-model="sub.proxyPrefix" class="w-full" />
-        </div>
-      </div>
-      <template v-if="isRemote">
+      <template v-if="!isManual">
         <div class="form-item">
-          {{ t('subscribe.website') }}
+          {{ t('subscribe.include') }}
           <div class="min-w-[75%]">
-            <Input v-model="sub.website" placeholder="http(s)://" class="w-full" />
+            <Input v-model="sub.include" placeholder="keyword1|keyword2" class="w-full" />
           </div>
         </div>
         <div class="form-item">
-          {{ t('subscribe.inSecure') }}
-          <Switch v-model="sub.inSecure" />
-        </div>
-        <div class="form-item">
-          {{ t('subscribe.requestTimeout') }}
-          <Input v-model="sub.requestTimeout" type="number" :min="3" :max="180" />
-        </div>
-        <div class="form-item">
-          {{ t('subscribe.requestMethod') }}
-          <Radio v-model="sub.requestMethod" :options="RequestMethodOptions" />
-        </div>
-        <div class="form-item">
-          {{ t('settings.requestProxy.name') }}
-          <div class="flex items-center gap-4">
-            <Button
-              v-if="showProxyTest"
-              :loading="proxyTesting"
-              type="primary"
-              size="small"
-              @click="handleTestProxy"
-            >
-              {{ t('settings.requestProxy.test') }}
-            </Button>
-            <Radio v-model="sub.requestProxyMode" :options="SubscriptionRequestProxyModeOptions" />
+          {{ t('subscribe.exclude') }}
+          <div class="min-w-[75%]">
+            <Input v-model="sub.exclude" placeholder="keyword1|keyword2" class="w-full" />
           </div>
         </div>
-        <div v-if="isCustomProxy" class="form-item">
-          {{ t('settings.requestProxy.custom') }}
+        <div class="form-item">
+          {{ t('subscribe.includeProtocol') }}
           <div class="min-w-[75%]">
             <Input
-              v-model="sub.customProxy"
-              placeholder="scheme://username:password@host:port"
-              clearable
+              v-model="sub.includeProtocol"
+              placeholder="direct|mixed|socks|http..."
               class="w-full"
             />
           </div>
         </div>
-        <div
-          :class="{ 'items-start': Object.keys(sub.header.request).length !== 0 }"
-          class="form-item"
-        >
-          {{ t('subscribe.header.request') }}
-          <KeyValueEditor v-model="sub.header.request" />
+        <div class="form-item">
+          {{ t('subscribe.excludeProtocol') }}
+          <div class="min-w-[75%]">
+            <Input
+              v-model="sub.excludeProtocol"
+              placeholder="direct|mixed|socks|http..."
+              class="w-full"
+            />
+          </div>
         </div>
-        <div
-          :class="{ 'items-start': Object.keys(sub.header.response).length !== 0 }"
-          class="form-item"
-        >
-          {{ t('subscribe.header.response') }}
-          <KeyValueEditor v-model="sub.header.response" />
+        <div class="form-item">
+          {{ t('subscribe.proxyPrefix') }}
+          <div class="min-w-[75%]">
+            <Input v-model="sub.proxyPrefix" class="w-full" />
+          </div>
         </div>
+        <template v-if="isRemote">
+          <div class="form-item">
+            {{ t('subscribe.website') }}
+            <div class="min-w-[75%]">
+              <Input v-model="sub.website" placeholder="http(s)://" class="w-full" />
+            </div>
+          </div>
+          <div class="form-item">
+            {{ t('subscribe.inSecure') }}
+            <Switch v-model="sub.inSecure" />
+          </div>
+          <div class="form-item">
+            {{ t('subscribe.requestTimeout') }}
+            <Input v-model="sub.requestTimeout" type="number" :min="3" :max="180" />
+          </div>
+          <div class="form-item">
+            {{ t('subscribe.requestMethod') }}
+            <Radio v-model="sub.requestMethod" :options="RequestMethodOptions" />
+          </div>
+          <div class="form-item">
+            {{ t('settings.requestProxy.name') }}
+            <div class="flex items-center gap-4">
+              <Button
+                v-if="showProxyTest"
+                :loading="proxyTesting"
+                type="primary"
+                size="small"
+                @click="handleTestProxy"
+              >
+                {{ t('settings.requestProxy.test') }}
+              </Button>
+              <Radio
+                v-model="sub.requestProxyMode"
+                :options="SubscriptionRequestProxyModeOptions"
+              />
+            </div>
+          </div>
+          <div v-if="isCustomProxy" class="form-item">
+            {{ t('settings.requestProxy.custom') }}
+            <div class="min-w-[75%]">
+              <Input
+                v-model="sub.customProxy"
+                placeholder="scheme://username:password@host:port"
+                clearable
+                class="w-full"
+              />
+            </div>
+          </div>
+          <div
+            :class="{ 'items-start': Object.keys(sub.header.request).length !== 0 }"
+            class="form-item"
+          >
+            {{ t('subscribe.header.request') }}
+            <KeyValueEditor v-model="sub.header.request" />
+          </div>
+          <div
+            :class="{ 'items-start': Object.keys(sub.header.response).length !== 0 }"
+            class="form-item"
+          >
+            {{ t('subscribe.header.response') }}
+            <KeyValueEditor v-model="sub.header.response" />
+          </div>
+        </template>
       </template>
     </div>
   </div>
 </template>
+
+<style scoped>
+.subscription-form {
+  padding: 4px 0 12px;
+}
+.subscription-form textarea {
+  color: var(--color);
+  border-color: var(--border-color);
+  resize: vertical;
+}
+</style>

@@ -99,6 +99,24 @@ describe('webui auth store', () => {
     expect(store.token).toBe('')
   })
 
+  it('opens an anonymous session without reporting an invalid token', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401 }))
+    const store = useWebuiAuthStore()
+
+    expect(await store.ensureAuthenticated()).toBe(false)
+    expect(store.status).toBe('idle')
+    expect(store.lastError).toBe('')
+  })
+
+  it('keeps an expired-session error when the login route checks the empty session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401 }))
+    const store = useWebuiAuthStore()
+    await store.handleUnauthorized()
+
+    expect(await store.ensureAuthenticated()).toBe(false)
+    expect(store.lastError).toBe('auth.invalidToken')
+  })
+
   it('rejects an unauthorized token during verification', async () => {
     vi.stubGlobal(
       'fetch',

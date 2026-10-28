@@ -50,6 +50,8 @@ const mountForm = (id: string) =>
     global: {
       provide: { cancel: vi.fn(), submit: vi.fn() },
       stubs: {
+        Icon: true,
+        Empty: true,
         Input: { template: '<input />' },
         Radio: { template: '<div class="radio"><slot /></div>' },
         Select: {

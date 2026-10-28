@@ -133,7 +133,7 @@ const generateMenus = (subscription: App.Subscription) => {
 const handleShowSubForm = (id?: string) => {
   const m = modal({
     title: id ? 'common.edit' : 'common.add',
-    minWidth: '70',
+    class: 'subscription-dialog',
   })
   m.setContent(SubscribeForm, { id }).open()
 }
@@ -220,20 +220,22 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
     </Empty>
   </div>
 
-  <div v-else class="grid-list-header">
+  <div v-else class="grid-list-header subscriptions-toolbar">
     <Radio v-model="appSettingsStore.app.subscribesView" :options="ViewOptions" class="mr-auto" />
-    <CustomAction :actions="appStore.customActions.subscriptions_header" />
-    <Button
-      :disabled="noUpdateNeeded"
-      :type="noUpdateNeeded ? 'text' : 'link'"
-      @click="handleUpdateSubs"
-    >
-      {{ t('common.updateAll') }}
-    </Button>
-    <Button type="link" @click="handleSyncOutboundRefs">
-      {{ t('subscribes.syncOutboundRefs') }}
-    </Button>
-    <Button type="primary" icon="add" class="ml-16" @click="handleShowSubForm()">
+    <div class="subscriptions-actions">
+      <CustomAction :actions="appStore.customActions.subscriptions_header" />
+      <Button
+        :disabled="noUpdateNeeded"
+        :type="noUpdateNeeded ? 'text' : 'link'"
+        @click="handleUpdateSubs"
+      >
+        {{ t('common.updateAll') }}
+      </Button>
+      <Button type="link" @click="handleSyncOutboundRefs">
+        {{ t('subscribes.syncOutboundRefs') }}
+      </Button>
+    </div>
+    <Button type="primary" icon="add" class="subscriptions-add" @click="handleShowSubForm()">
       {{ t('common.add') }}
     </Button>
   </div>
@@ -269,7 +271,12 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
 
       <template v-if="appSettingsStore.app.subscribesView === View.Grid" #extra>
         <Dropdown>
-          <Button type="link" size="small" icon="more" />
+          <Button
+            type="link"
+            size="small"
+            icon="more"
+            :aria-label="t('common.more') + ' · ' + s.name"
+          />
           <template #overlay>
             <div class="flex flex-col gap-4 min-w-64 p-4">
               <Button
@@ -347,28 +354,33 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         </div>
       </template>
       <template v-else>
-        <div>
-          {{ s.upload + s.download ? formatBytes(s.upload + s.download) : '--' }}
-          /
-          {{ s.total ? formatBytes(s.total) : '--' }}
-        </div>
-        <div class="traffic-diagram">
-          <Progress
-            :percent="clacTrafficPercent(s)"
-            :status="clacTrafficStatus(s)"
-            type="circle"
-            :radius="20"
-          />
-        </div>
-        <div>
-          {{ t('subscribes.expire') }}
-          :
-          {{ s.expire ? formatRelativeTime(s.expire) : '--' }}
-        </div>
-        <div>
-          {{ t('common.updateTime') }}
-          :
-          {{ s.updateTime ? formatRelativeTime(s.updateTime) : '--' }}
+        <div class="subscription-summary">
+          <div class="subscription-traffic">
+            {{ s.upload + s.download ? formatBytes(s.upload + s.download) : '--' }}
+            /
+            {{ s.total ? formatBytes(s.total) : '--' }}
+          </div>
+          <div class="traffic-diagram">
+            <Progress
+              :percent="clacTrafficPercent(s)"
+              :status="clacTrafficStatus(s)"
+              type="circle"
+              :radius="20"
+            />
+          </div>
+          <div class="subscription-meta">
+            {{ t('subscribes.expire') }}
+            :
+            {{ s.expire ? formatRelativeTime(s.expire) : '--' }}
+          </div>
+          <div class="subscription-meta">
+            {{ t('common.updateTime') }}
+            :
+            {{ s.updateTime ? formatRelativeTime(s.updateTime) : '--' }}
+          </div>
+          <div class="subscription-meta">
+            {{ t('subscribes.proxyCount') }}: {{ s.proxies.length }}
+          </div>
         </div>
       </template>
     </Card>
@@ -378,7 +390,48 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
 <style lang="less" scoped>
 .traffic-diagram {
   position: absolute;
-  top: 40px;
-  right: 12px;
+  top: 4px;
+  right: 0;
+}
+.subscription-summary {
+  position: relative;
+  padding-right: 56px;
+}
+.subscription-traffic {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.subscription-meta {
+  font-size: 13px;
+  color: var(--muted-color);
+  line-height: 1.8;
+}
+.subscriptions-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+@media (max-width: 700px) {
+  .subscriptions-toolbar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+  .subscriptions-add {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 40px;
+  }
+  .subscriptions-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+</style>
+
+<style>
+.subscription-dialog.gui-modal-modal:not(.is-maximized) {
+  width: 720px !important;
+  min-width: 0 !important;
 }
 </style>

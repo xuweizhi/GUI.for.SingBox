@@ -28,27 +28,37 @@ const handleSelect = (val: string | number | boolean) => {
 </script>
 
 <template>
-  <div :class="[size]" class="gui-radio inline-flex rounded-full text-12 overflow-hidden">
-    <div
+  <div :class="[size]" class="gui-radio inline-flex rounded-8 text-12">
+    <button
       v-for="o in options"
       :key="o.value.toString()"
       v-tips.slow="o.label"
+      type="button"
+      :aria-pressed="o.value === model"
       :class="{ active: o.value === model }"
-      class="gui-radio-button cursor-pointer px-12 py-6 duration-200 line-clamp-1 break-all"
+      class="gui-radio-button cursor-pointer px-12 py-6 duration-200"
       @click="handleSelect(o.value)"
     >
       {{ t(o.label) }}
-    </div>
+    </button>
   </div>
 </template>
 
 <style lang="less" scoped>
 .gui-radio {
-  border: 1px solid var(--primary-color);
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px;
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
   &-button {
     color: var(--radio-normal-color);
     background-color: var(--radio-normal-bg);
-    border-left: 1px solid var(--primary-color);
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 5px;
+    white-space: nowrap;
     &:nth-child(1) {
       border-left: none;
     }

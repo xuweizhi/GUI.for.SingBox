@@ -74,7 +74,7 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
           status.value = 'idle'
           if (isUnauthorizedStatus(response.status)) {
             clearToken()
-            lastError.value = 'auth.invalidToken'
+            if (nextToken) lastError.value = 'auth.invalidToken'
             return false
           }
           throw new Error(`Unexpected auth status: ${response.status}`)

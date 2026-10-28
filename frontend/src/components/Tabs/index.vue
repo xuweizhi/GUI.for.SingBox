@@ -60,7 +60,10 @@ const currentComponent = computed(() => {
       <slot name="extra"></slot>
     </div>
 
-    <div class="flex flex-col overflow-y-auto" :style="{ width: isTop ? 'auto' : contentWidth }">
+    <div
+      class="gui-tabs-content flex flex-col overflow-y-auto"
+      :style="{ width: isTop ? 'auto' : contentWidth }"
+    >
       <KeepAlive>
         <component :is="currentComponent" />
       </KeepAlive>

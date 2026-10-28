@@ -21,7 +21,7 @@ const hasTitle = computed(() => {
 
 <template>
   <div :class="{ 'is-selected': selected }" class="gui-card rounded-8 relative flex flex-col">
-    <div v-if="hasTitle" class="gui-card__header card-header flex items-center break-all p-8">
+    <div v-if="hasTitle" class="gui-card__header card-header flex items-center break-all">
       <slot name="title-prefix"></slot>
       <div
         v-if="title"
@@ -31,14 +31,14 @@ const hasTitle = computed(() => {
         {{ title }}
       </div>
       <slot name="title-suffix"></slot>
-      <div class="card-header_extra flex items-center ml-auto">
+      <div class="card-header_extra flex items-center ml-auto shrink-0">
         <slot name="extra"></slot>
       </div>
     </div>
     <div v-if="subtitle" class="card-header_subtitle mx-8">
       {{ $t(subtitle) }}
     </div>
-    <div class="flex-1 px-8" :class="hasTitle ? 'pb-8' : ''">
+    <div class="gui-card__body flex-1" :class="{ 'has-title': hasTitle }">
       <slot></slot>
     </div>
     <Icon
@@ -60,13 +60,16 @@ const hasTitle = computed(() => {
 
 <style lang="less" scoped>
 .gui-card {
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   color: var(--card-color);
   background-color: var(--card-bg);
   transition:
     box-shadow 0.2s,
     background 0.2s;
   &:hover {
-    box-shadow: 0 8px 8px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 3px 12px rgba(20, 40, 70, 0.05);
     background-color: var(--card-hover-bg);
   }
   &:active {
@@ -77,5 +80,22 @@ const hasTitle = computed(() => {
       color: var(--card-color);
     }
   }
+  &.is-selected {
+    border-color: var(--accent-text);
+  }
+}
+.gui-card__header {
+  padding: 14px 16px 10px;
+  gap: 6px;
+}
+.gui-card__title {
+  min-width: 0;
+}
+.gui-card__body {
+  min-width: 0;
+  padding: 0 16px;
+}
+.gui-card__body.has-title {
+  padding-bottom: 16px;
 }
 </style>

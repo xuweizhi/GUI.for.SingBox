@@ -33,11 +33,10 @@ const removeGroup = async (group: App.NodeGroup) => {
       const lines = dependencies
         .map((dependency) => `${dependency.profileName} / ${dependency.outboundName}`)
         .join('\n')
-      await confirm(
-        t('common.delete'),
-        t('nodeGroups.deleteReferenced', [lines]),
-        { type: 'text', okText: 'common.delete' },
-      )
+      await confirm(t('common.delete'), t('nodeGroups.deleteReferenced', [lines]), {
+        type: 'text',
+        okText: 'common.delete',
+      })
     } else {
       await confirm(t('common.delete'), group.name, { type: 'text', okText: 'common.delete' })
     }
@@ -51,7 +50,7 @@ const removeGroup = async (group: App.NodeGroup) => {
 
 <template>
   <div class="grid-list-header">
-    <div class="mr-auto font-bold">{{ t('nodeGroups.title') }}</div>
+    <div class="mr-auto text-14">{{ t('nodeGroups.title') }} · {{ groupCards.length }}</div>
     <Button type="primary" icon="add" @click="openForm()">{{ t('common.add') }}</Button>
   </div>
 
@@ -93,7 +92,7 @@ const removeGroup = async (group: App.NodeGroup) => {
         />
       </template>
       <div class="flex flex-col gap-8 text-12">
-        <div class="flex gap-6">
+        <div class="flex flex-wrap gap-6">
           <Tag color="blue">{{ t(`nodeGroups.${card.group.mode}`) }}</Tag>
           <Tag>{{ t('nodeGroups.resolved') }} {{ card.resolution.nodes.length }}</Tag>
           <Tag v-if="card.resolution.issues.length" color="orange">
@@ -103,7 +102,11 @@ const removeGroup = async (group: App.NodeGroup) => {
         <div>
           {{ t('nodeGroups.dependencies') }}:
           <template v-if="card.dependencies.length">
-            {{ card.dependencies.map((item) => `${item.profileName} / ${item.outboundName}`).join('、') }}
+            {{
+              card.dependencies
+                .map((item) => `${item.profileName} / ${item.outboundName}`)
+                .join('、')
+            }}
           </template>
           <span v-else class="opacity-60">{{ t('nodeGroups.noDependencies') }}</span>
         </div>

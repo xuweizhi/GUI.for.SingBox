@@ -5,9 +5,10 @@ import { useI18n } from 'vue-i18n'
 import { DefaultNodeGroup } from '@/constant/nodeGroup'
 import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
 import { deepClone, message, nodeGroupNodeKey, resolveNodeGroup } from '@/utils'
-import type { ResolvedNodeGroupNode } from '@/utils/nodeGroup'
 
 import Button from '@/components/Button/index.vue'
+
+import type { ResolvedNodeGroupNode } from '@/utils/nodeGroup'
 
 const props = defineProps<{ id?: string }>()
 
@@ -44,7 +45,10 @@ const subscriptionOptions = computed(() =>
   })),
 )
 const selectedKeys = computed(
-  () => new Set(group.value.members.map((member) => nodeGroupNodeKey(member.subscription_id, member.node_id))),
+  () =>
+    new Set(
+      group.value.members.map((member) => nodeGroupNodeKey(member.subscription_id, member.node_id)),
+    ),
 )
 const availableNodes = computed(() => {
   const query = keywords.value.trim().toLowerCase()
@@ -58,11 +62,14 @@ const availableNodes = computed(() => {
 const resolution = computed(() => resolveNodeGroup(group.value, subscribesStore.subscribes))
 const matchExplanation = (node: ResolvedNodeGroupNode) => {
   if (!node.match) return ''
-  const reason = t(group.value.include ? 'nodeGroups.matchIncluded' : 'nodeGroups.matchUnrestricted', {
-    field: t(`nodeGroups.matchFields.${node.match.field}`),
-    value: node.match.value,
-    expression: group.value.include,
-  })
+  const reason = t(
+    group.value.include ? 'nodeGroups.matchIncluded' : 'nodeGroups.matchUnrestricted',
+    {
+      field: t(`nodeGroups.matchFields.${node.match.field}`),
+      value: node.match.value,
+      expression: group.value.include,
+    },
+  )
   return group.value.exclude
     ? `${reason} · ${t('nodeGroups.matchNotExcluded', { expression: group.value.exclude })}`
     : reason
@@ -100,12 +107,11 @@ const handleSave = async () => {
 }
 
 const modalSlots = {
-  cancel: () => h(Button, { disabled: loading.value, onClick: handleCancel }, () => t('common.cancel')),
+  cancel: () =>
+    h(Button, { disabled: loading.value, onClick: handleCancel }, () => t('common.cancel')),
   submit: () =>
-    h(
-      Button,
-      { type: 'primary', loading: loading.value, onClick: handleSave },
-      () => t('common.save'),
+    h(Button, { type: 'primary', loading: loading.value, onClick: handleSave }, () =>
+      t('common.save'),
     ),
 }
 
@@ -130,23 +136,41 @@ defineExpose({ modalSlots })
     </div>
 
     <template v-if="group.mode === 'manual'">
+      <div class="text-14" aria-live="polite">
+        {{ t('common.selectedCount', [group.members.length]) }}
+      </div>
       <Input v-model="keywords" :placeholder="t('nodeGroups.search')" clearable />
       <div class="node-member-grid grid gap-8 overflow-y-auto min-h-128">
         <Button
           v-for="item in availableNodes"
           :key="nodeGroupNodeKey(item.subscription.id, item.proxy.id)"
-          :type="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id)) ? 'link' : 'text'"
+          :type="
+            selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))
+              ? 'link'
+              : 'text'
+          "
           :data-member="item.proxy.id"
           :data-selected="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))"
-          class="justify-start"
+          :aria-pressed="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))"
+          class="node-member justify-start"
           @click="toggleMember(item.subscription, item.proxy)"
         >
+          <span class="node-member__check" aria-hidden="true">
+            <Icon
+              v-if="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))"
+              icon="selected"
+              :size="16"
+            />
+          </span>
           <div class="text-left min-w-0">
             <div class="line-clamp-1">{{ item.proxy.tag }}</div>
-            <div class="text-10 opacity-70 line-clamp-1">{{ item.subscription.name }} · {{ item.proxy.type }}</div>
+            <div class="text-12 opacity-70 line-clamp-1">
+              {{ item.subscription.name }} · {{ item.proxy.type }}
+            </div>
           </div>
         </Button>
       </div>
+      <Empty v-if="availableNodes.length === 0" />
     </template>
 
     <template v-else>
@@ -187,11 +211,17 @@ defineExpose({ modalSlots })
     <div class="flex flex-wrap gap-6">
       <div v-for="node in resolution.nodes" :key="node.key" class="min-w-0 max-w-full">
         <Tag color="blue">{{ node.proxy.tag }} · {{ node.subscription.name }}</Tag>
-        <div v-if="node.match" class="text-12 opacity-70 break-all" data-testid="node-group-match-reason">
+        <div
+          v-if="node.match"
+          class="text-12 opacity-70 break-all"
+          data-testid="node-group-match-reason"
+        >
           {{ matchExplanation(node) }}
         </div>
       </div>
-      <span v-if="resolution.nodes.length === 0" class="text-12 opacity-70">{{ t('common.none') }}</span>
+      <span v-if="resolution.nodes.length === 0" class="text-12 opacity-70">{{
+        t('common.none')
+      }}</span>
     </div>
     <template v-if="resolution.issues.length">
       <Divider>{{ t('nodeGroups.unresolved') }} · {{ resolution.issues.length }}</Divider>
@@ -207,6 +237,25 @@ defineExpose({ modalSlots })
 <style scoped>
 .node-member-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.node-member {
+  border: 1px solid var(--border-color);
+  padding: 12px;
+  gap: 10px;
+}
+.node-member[data-selected='true'] {
+  border-color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.node-member__check {
+  display: flex;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
 }
 
 @media (max-width: 900px) {

@@ -372,7 +372,9 @@ defineExpose({ handleCancel, handleDestroy })
       >
         <div
           :style="contentStyle"
-          :class="props.class"
+          :class="[props.class, { 'is-maximized': isMaximize }]"
+          role="dialog"
+          :aria-label="title ? $t(title) : undefined"
           class="gui-modal-modal transition duration-200 flex flex-col rounded-8 shadow"
         >
           <div
@@ -387,20 +389,34 @@ defineExpose({ handleCancel, handleDestroy })
               <slot name="toolbar"></slot>
               <Button
                 v-if="toolbar.minimize"
+                :aria-label="$t('common.minimize')"
                 icon="minimize2"
                 type="text"
                 @click="handleMinimize"
               />
-              <Button v-if="toolbar.maximize" type="text" @click="toggleMaximize">
+              <Button
+                v-if="toolbar.maximize"
+                :aria-label="$t('common.resize')"
+                type="text"
+                @click="toggleMaximize"
+              >
                 <Icon
                   :class="{ maximize: isMaximize }"
                   icon="arrowDown"
                   class="maximize-normal origin-center duration-200"
                 />
               </Button>
+              <Button
+                v-if="toolbar.close !== false"
+                icon="close"
+                type="text"
+                :aria-label="$t('common.close')"
+                :loading="cancelLoading"
+                @click="handleCancel"
+              />
             </div>
           </div>
-          <div class="flex-1 overflow-auto mx-16">
+          <div class="gui-modal-content flex-1 overflow-auto mx-16">
             <slot></slot>
           </div>
           <div v-if="footer" class="flex items-center justify-end py-8 px-16 gap-8">
@@ -446,6 +462,16 @@ defineExpose({ handleCancel, handleDestroy })
 
   .gui-modal-modal {
     background-color: var(--modal-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+  }
+}
+.gui-modal-content {
+  min-height: 0;
+}
+@media (max-width: 700px) {
+  .gui-modal-mask .gui-modal-modal {
+    max-width: calc(100% - 24px) !important;
   }
 }
 .maximize-normal {

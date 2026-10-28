@@ -1,9 +1,16 @@
 export default {
+  navigation: {
+    main: '主导航',
+    menu: '菜单',
+    toggle: '展开或收起导航',
+  },
   common: {
     grid: '网格',
     list: '列表',
     add: '添加',
     added: '已添加',
+    paste: '粘贴',
+    advancedSettings: '高级设置',
     more: '更多',
     edit: '编辑',
     clear: '清理',
@@ -54,6 +61,8 @@ export default {
     pressAgainToClose: '再按一次关闭弹窗',
     modalList: '模态框列表',
     openAll: '打开所有',
+    minimize: '最小化',
+    resize: '切换窗口大小',
     minimizeAll: '最小化所有',
     retry: '重试',
     bootstrapFailed: '初始化失败，请检查日志后重试',
@@ -133,7 +142,8 @@ export default {
       nativeNodes: '配置内置节点',
       preProxy: '前置代理策略',
       noPreProxy: '无',
-      preProxyHint: '通过所选策略连接组内节点，自动测速覆盖整条链路。成员请勿包含直连或拦截；有独立状态的端点用于不同链路时需要分别配置。',
+      preProxyHint:
+        '通过所选策略连接组内节点，自动测速覆盖整条链路。成员请勿包含直连或拦截；有独立状态的端点用于不同链路时需要分别配置。',
       preProxyInUse: '此策略正在作为 {0} 的前置代理，请先移除引用再删除。',
       missingReference: '策略或节点组引用缺失：{0}',
       name: '出站',
@@ -479,6 +489,7 @@ export default {
     invalidTarget: '目标地址无效',
   },
   auth: {
+    signOut: '退出登录',
     title: '连接 WebUI',
     description: '请输入服务端配置的访问 Token。',
     tokenPlaceholder: '输入 Token',
@@ -621,11 +632,13 @@ export default {
     outboundDnsHint: '仅解析本订阅内的节点服务器域名，网站 DNS 继续使用配置中的设置。',
     outboundDns: '自定义节点 DNS',
     outboundDnsPlaceholder: '每行一个地址，例如 1.1.1.1 或 https://dns.example/dns-query',
-    outboundDnsOverrideHint: '使用第一条自定义地址解析节点，优先于订阅自带 DNS；其余地址仅保存，不会自动切换。留空使用订阅 DNS，订阅未提供时沿用配置解析器。',
+    outboundDnsOverrideHint:
+      '使用第一条自定义地址解析节点，优先于订阅自带 DNS；其余地址仅保存，不会自动切换。留空使用订阅 DNS，订阅未提供时沿用配置解析器。',
     importedDns: '订阅中发现的 DNS',
     noImportedDns: '无（更新订阅后可发现 DNS）',
     endpoint: '端点',
-    endpointEditorHint: '分别编辑标准 outbounds 和 endpoints。端点协议字段会完整保留，不支持的类型将在生成配置时提示。',
+    endpointEditorHint:
+      '分别编辑标准 outbounds 和 endpoints。端点协议字段会完整保留，不支持的类型将在生成配置时提示。',
     manual: '手动管理',
     name: '名称',
     url: '远程链接',
@@ -662,7 +675,7 @@ export default {
     updateDirect: '直连更新',
     updateSystemProxy: '系统代理更新',
     updateKernelProxy: '核心代理更新',
-    syncOutboundRefs: '同步出站引用',
+    syncOutboundRefs: '同步到配置',
     editProxies: '编辑节点',
     editSourceFile: '编辑节点(源文件)',
     copySub: '复制订阅链接',

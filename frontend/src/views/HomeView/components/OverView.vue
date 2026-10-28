@@ -269,6 +269,27 @@ onUnmounted(() => {
 .overview-cards {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
+.home-stat-card__value {
+  font-size: 18px;
+  font-weight: 600;
+  flex-wrap: wrap;
+}
+.overview-toolbar {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 760px) {
+  .home-dashboard {
+    flex-direction: column;
+  }
+  .traffic-panel {
+    width: 100%;
+  }
+  .mode-panel {
+    margin-left: 0;
+  }
+}
 
 @media (max-width: 1100px) {
   .overview-cards {

@@ -14,7 +14,10 @@ const messages: Recordable = {
 
 const i18n = createI18n({
   legacy: false,
-  locale: 'en',
+  locale:
+    typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('zh')
+      ? 'zh'
+      : 'en',
   fallbackWarn: false,
   missingWarn: false,
   messages,

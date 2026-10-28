@@ -22,6 +22,8 @@ export interface Props {
   disabled?: boolean
   border?: boolean
   delay?: number
+  inputId?: string
+  label?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -41,6 +43,8 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   border: true,
   delay: 0,
+  inputId: undefined,
+  label: undefined,
 })
 
 const emits = defineEmits(['change', 'update:modelValue', 'submit'])
@@ -125,7 +129,7 @@ defineExpose({
       disabled,
     }"
     :style="{
-      height: type === 'code' ? '' : size === 'small' ? '26px' : '30px',
+      height: type === 'code' ? '' : size === 'small' ? '30px' : '36px',
     }"
     class="gui-input inline-flex items-center rounded-4 cursor-pointer px-4"
   >
@@ -155,7 +159,9 @@ defineExpose({
       />
       <input
         v-else
+        :id="inputId"
         ref="inputRef"
+        :aria-label="label"
         :value="modelValue"
         :placeholder="placeholder"
         :type="type"
@@ -170,12 +176,20 @@ defineExpose({
       <Button
         v-if="innerClearable"
         icon="clear2"
+        :aria-label="t('common.clear')"
         type="text"
         size="small"
         @mousedown.prevent
         @click="handleClear"
       />
-      <Button v-if="innerAllowPaste" icon="paste" type="text" size="small" @click="handlePaste" />
+      <Button
+        v-if="innerAllowPaste"
+        icon="paste"
+        :aria-label="t('common.paste')"
+        type="text"
+        size="small"
+        @click="handlePaste"
+      />
     </template>
     <div v-if="$slots.suffix" class="flex items-center shrink-0">
       <slot name="suffix" v-bind="{ showInput }"></slot>
@@ -185,7 +199,8 @@ defineExpose({
 
 <style lang="less" scoped>
 .gui-input {
-  min-width: 220px;
+  min-width: min(220px, 100%);
+  max-width: 100%;
   border: 1px solid transparent;
   input {
     color: var(--input-color);
@@ -219,7 +234,21 @@ defineExpose({
 }
 
 .border {
-  border: 1px solid var(--primary-color);
+  border: 1px solid var(--border-color);
+  &:focus-within {
+    border-color: var(--accent-text);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}
+
+@media (max-width: 700px) {
+  .gui-input:not(.auto-size) {
+    min-width: 0;
+    width: 100%;
+  }
+  .gui-input input {
+    font-size: 16px;
+  }
 }
 
 .small {

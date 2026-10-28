@@ -62,7 +62,7 @@ const handleClearGithubMirror = () => {
   <div class="px-8 py-12 text-18 font-bold">{{ $t('settings.network') }}</div>
 
   <Card>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">{{ $t('settings.requestProxy.name') }}</div>
       <div class="flex items-center gap-4">
         <Button
@@ -77,7 +77,7 @@ const handleClearGithubMirror = () => {
         <Radio v-model="appSettings.app.requestProxyMode" :options="RequestProxyModeOptions" />
       </div>
     </div>
-    <div v-if="isCustomProxy" class="px-8 py-12 flex items-center justify-between">
+    <div v-if="isCustomProxy" class="settings-row">
       <div class="text-16 font-bold">{{ $t('settings.requestProxy.custom') }}</div>
       <Input
         v-model.lazy="appSettings.app.customProxy"
@@ -98,7 +98,7 @@ const handleClearGithubMirror = () => {
         </template>
       </Input>
     </div>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">
         {{ $t('settings.userAgent.name') }}
         <span class="font-normal text-12">({{ $t('settings.userAgent.tips') }})</span>
@@ -121,7 +121,7 @@ const handleClearGithubMirror = () => {
         </template>
       </Input>
     </div>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">
         {{ $t('settings.githubapi.name') }}
         <span class="font-normal text-12">({{ $t('settings.githubapi.tips') }})</span>
@@ -143,7 +143,7 @@ const handleClearGithubMirror = () => {
         </template>
       </Input>
     </div>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">
         {{ $t('settings.githubDownloadAcceleration.name') }}
         <span class="font-normal text-12">
@@ -152,10 +152,7 @@ const handleClearGithubMirror = () => {
       </div>
       <Switch v-model="appSettings.app.githubDownloadAcceleration" />
     </div>
-    <div
-      v-if="appSettings.app.githubDownloadAcceleration"
-      class="px-8 py-12 flex items-center justify-between"
-    >
+    <div v-if="appSettings.app.githubDownloadAcceleration" class="settings-row">
       <div class="text-16 font-bold">{{ $t('settings.githubDownloadAcceleration.mirror') }}</div>
       <Input
         v-model.lazy="appSettings.app.githubDownloadMirror"

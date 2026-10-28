@@ -93,7 +93,7 @@ watch(showController, (v) => {
       </template>
 
       <template v-else>
-        <div class="flex gap-8 mb-32">
+        <div class="home-profile-options flex flex-wrap justify-center gap-8 mb-32">
           <Card
             v-for="p in profilesStore.profiles.slice(0, profilesStore.profiles.length > 4 ? 3 : 4)"
             :key="p.id"
@@ -176,3 +176,28 @@ watch(showController, (v) => {
     </template>
   </div>
 </template>
+
+<style scoped>
+.home-profile-options {
+  max-width: 800px;
+}
+@media (max-width: 700px) {
+  .home-view {
+    overflow-y: auto;
+  }
+  .home-view > .w-full {
+    height: auto;
+    min-height: 100%;
+    padding: 16px 0;
+  }
+  .home-profile-options {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .home-profile-options :deep(.w-128) {
+    width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+</style>

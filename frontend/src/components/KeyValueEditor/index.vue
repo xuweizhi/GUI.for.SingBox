@@ -58,7 +58,13 @@ const emitUpdate = () => {
         class="flex-1"
         @submit="emitUpdate"
       />
-      <Button type="text" :icon-size="12" icon="close" @click="handleDel(i)" />
+      <Button
+        type="text"
+        :icon-size="12"
+        icon="close"
+        :aria-label="$t('common.delete')"
+        @click="handleDel(i)"
+      />
       <Input
         v-model="entry[1]"
         :placeholder="placeholder[1]"
@@ -67,12 +73,14 @@ const emitUpdate = () => {
         @submit="emitUpdate"
       />
     </div>
-    <Button type="primary" icon="add" @click="handleAdd" />
+    <Button type="primary" icon="add" :aria-label="$t('common.add')" @click="handleAdd" />
   </div>
 </template>
 
 <style lang="less" scoped>
 .gui-kv-editor {
-  min-width: 400px;
+  width: 400px;
+  max-width: 100%;
+  min-width: 0;
 }
 </style>

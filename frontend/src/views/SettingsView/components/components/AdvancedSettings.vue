@@ -8,18 +8,18 @@ const appSettings = useAppSettingsStore()
   <div class="px-8 py-12 text-18 font-bold">{{ $t('settings.advanced') }}</div>
 
   <Card>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">{{ $t('settings.realMemoryUsage') }}</div>
       <Switch v-model="appSettings.app.kernel.realMemoryUsage" />
     </div>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">
         {{ $t('settings.logRetentionDays.name') }}
         <span class="font-normal text-12">({{ $t('settings.logRetentionDays.tips') }})</span>
       </div>
       <Input v-model="appSettings.app.log.retentionDays" :min="1" type="number" />
     </div>
-    <div class="px-8 py-12 flex items-center justify-between">
+    <div class="settings-row">
       <div class="text-16 font-bold">
         {{ $t('settings.autoRestartKernel.name') }}
         <span class="font-normal text-12">({{ $t('settings.autoRestartKernel.tips') }})</span>

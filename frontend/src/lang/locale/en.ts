@@ -1,9 +1,16 @@
 export default {
+  navigation: {
+    main: 'Main navigation',
+    menu: 'Menu',
+    toggle: 'Toggle navigation',
+  },
   common: {
     grid: 'Grid',
     list: 'List',
     add: 'Add',
     added: 'Added',
+    paste: 'Paste',
+    advancedSettings: 'Advanced settings',
     more: 'More',
     edit: 'Edit',
     clear: 'Clear',
@@ -54,6 +61,8 @@ export default {
     pressAgainToClose: 'Press again to close the modal',
     modalList: 'Modal List',
     openAll: 'Open all',
+    minimize: 'Minimize',
+    resize: 'Toggle window size',
     minimizeAll: 'Minimize all',
     retry: 'Retry',
     bootstrapFailed: 'Initialization failed. Check the logs and retry.',
@@ -133,8 +142,10 @@ export default {
       nativeNodes: 'Imported configuration nodes',
       preProxy: 'Pre-proxy strategy',
       noPreProxy: 'None',
-      preProxyHint: 'Connect to each member through this strategy. Automatic tests measure the full chain. Avoid direct/block members; stateful endpoints require separate definitions for different chains.',
-      preProxyInUse: 'This strategy is the pre-proxy for {0}. Remove that reference before deleting it.',
+      preProxyHint:
+        'Connect to each member through this strategy. Automatic tests measure the full chain. Avoid direct/block members; stateful endpoints require separate definitions for different chains.',
+      preProxyInUse:
+        'This strategy is the pre-proxy for {0}. Remove that reference before deleting it.',
       missingReference: 'Missing strategy or node group: {0}',
       name: 'Outbound',
       tag: 'Tag',
@@ -391,7 +402,8 @@ export default {
       protocol: 'Protocol',
       subscription: 'Source subscription name',
     },
-    matchFieldHint: 'Include and exclude expressions both match this field, ignoring case. Combined matching preserves existing filters.',
+    matchFieldHint:
+      'Include and exclude expressions both match this field, ignoring case. Combined matching preserves existing filters.',
     matchIncluded: '{field}: “{value}” matches /{expression}/i',
     matchUnrestricted: '{field}: “{value}” (no include filter)',
     matchNotExcluded: 'Does not match exclude /{expression}/i',
@@ -403,7 +415,8 @@ export default {
     unresolved: 'Unresolved members',
     dependencies: 'Used by',
     noDependencies: 'Not referenced by a strategy group',
-    deleteReferenced: 'This node group is referenced by:\n{0}\n\nContinuing also removes these references.',
+    deleteReferenced:
+      'This node group is referenced by:\n{0}\n\nContinuing also removes these references.',
     addNode: 'Add to node group',
     noManualGroups: 'Create a manual node group first',
     source: 'Node-group source',
@@ -472,16 +485,19 @@ export default {
       coreUnavailable: 'The core is unavailable, so node diagnostics cannot be loaded.',
       endpoint: 'Node kind: Endpoint',
       nodeDns: 'Node domain DNS:',
-      upstreamDns: 'Connection is dialed through {0}; local DNS settings on this node do not control that dial.',
+      upstreamDns:
+        'Connection is dialed through {0}; local DNS settings on this node do not control that dial.',
       transportChain: 'Transport path:',
       unknownResolver: 'Cannot determine from the running configuration',
       incompleteChain: 'Some upstream selections are unavailable; the path is incomplete.',
-      runtimeUnavailable: 'The running configuration cannot be read; node DNS and upstream details are unavailable.',
+      runtimeUnavailable:
+        'The running configuration cannot be read; node DNS and upstream details are unavailable.',
       testGroup: 'Test Group',
     },
     invalidTarget: 'Invalid target address',
   },
   auth: {
+    signOut: 'Sign out',
     title: 'Connect to WebUI',
     description: 'Enter the access token configured on the server.',
     tokenPlaceholder: 'Enter token',
@@ -624,14 +640,17 @@ export default {
   },
   subscribe: {
     preferOutboundDns: 'Use subscription DNS for nodes',
-    outboundDnsHint: 'Only resolves node server names in this subscription. Website DNS continues to use the profile settings.',
+    outboundDnsHint:
+      'Only resolves node server names in this subscription. Website DNS continues to use the profile settings.',
     outboundDns: 'Custom node DNS',
     outboundDnsPlaceholder: 'One address per line, e.g. 1.1.1.1 or https://dns.example/dns-query',
-    outboundDnsOverrideHint: 'The first custom address is used for node resolution and overrides imported DNS; additional addresses are saved without automatic failover. Leave empty to use subscription DNS, or the profile resolver when none is provided.',
+    outboundDnsOverrideHint:
+      'The first custom address is used for node resolution and overrides imported DNS; additional addresses are saved without automatic failover. Leave empty to use subscription DNS, or the profile resolver when none is provided.',
     importedDns: 'DNS discovered in subscription',
     noImportedDns: 'None (refresh the subscription to discover DNS)',
     endpoint: 'Endpoint',
-    endpointEditorHint: 'Edit standard outbounds and endpoints separately. Endpoint protocol fields are retained. Unsupported types are reported when generating the profile.',
+    endpointEditorHint:
+      'Edit standard outbounds and endpoints separately. Endpoint protocol fields are retained. Unsupported types are reported when generating the profile.',
     manual: 'MANUAL',
     name: 'Name',
     url: 'Remote Url',
@@ -668,7 +687,7 @@ export default {
     updateDirect: 'Update directly',
     updateSystemProxy: 'Update via system proxy',
     updateKernelProxy: 'Update via core proxy',
-    syncOutboundRefs: 'Sync outbound refs',
+    syncOutboundRefs: 'Sync to profiles',
     editProxies: 'Edit Proxies',
     editSourceFile: 'Edit Proxies(Source)',
     copySub: 'Copy Link',

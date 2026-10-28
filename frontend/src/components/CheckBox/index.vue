@@ -50,26 +50,36 @@ const handleSelect = (val: string) => {
 </script>
 
 <template>
-  <div :class="[size]" class="gui-checkbox inline-flex rounded-8 overflow-hidden text-12">
-    <div
+  <div :class="[size]" class="gui-checkbox inline-flex rounded-8 text-12">
+    <button
       v-for="o in props.options"
       :key="o.value"
+      type="button"
+      :aria-pressed="isActive(o.value)"
       :class="{ active: isActive(o.value) }"
-      class="gui-checkbox-button cursor-pointer px-12 py-6 transition duration-200 line-clamp-1 break-all"
+      class="gui-checkbox-button cursor-pointer px-12 py-6 transition duration-200"
       @click="handleSelect(o.value)"
     >
       {{ t(o.label) }}
-    </div>
+    </button>
   </div>
 </template>
 
 <style lang="less" scoped>
 .gui-checkbox {
-  border: 1px solid var(--primary-color);
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px;
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
   &-button {
     color: var(--radio-normal-color);
     background-color: var(--radio-normal-bg);
-    border-left: 1px solid var(--primary-color);
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 5px;
+    white-space: nowrap;
     &:nth-child(1) {
       border-left: none;
     }
