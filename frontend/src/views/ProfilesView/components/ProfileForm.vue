@@ -106,6 +106,10 @@ const handleNextStep = () => currentStep.value++
 
 const handleSave = async () => {
   const graphIssues = findOutboundGraphIssues(profile.value.outbounds, nodeGroupsStore.nodeGroups)
+  if (graphIssues.some((issue) => issue.type === 'reserved-tag')) {
+    message.error('Strategy names direct and block are reserved.')
+    return
+  }
   const cycle = graphIssues.find((issue) => issue.type === 'cycle')
   if (cycle) {
     message.error(

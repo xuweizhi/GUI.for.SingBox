@@ -7,6 +7,7 @@ import { ProfilesFilePath } from '@/constant/app'
 import { DefaultOutboundIds } from '@/constant/outbound'
 import * as Defaults from '@/constant/profile'
 import { ignoredError, eventBus, stringifyNoFolding, migrateProfiles, sampleID } from '@/utils'
+import { withConfigMutation } from '@/utils/configPersistence'
 
 import { useAppSettingsStore } from './appSettings'
 
@@ -23,50 +24,44 @@ export const useProfilesStore = defineStore('profiles', () => {
     await migrateProfiles(profiles.value, saveProfiles)
   }
 
-  const saveProfiles = () => {
-    return WriteFile(ProfilesFilePath, stringifyNoFolding(profiles.value))
-  }
+  const saveProfiles = () =>
+    withConfigMutation(() => WriteFile(ProfilesFilePath, stringifyNoFolding(profiles.value)))
 
-  const addProfile = async (p: App.Profile) => {
-    profiles.value.push(p)
-    try {
-      await saveProfiles()
-    } catch (error) {
-      const idx = profiles.value.indexOf(p)
-      if (idx !== -1) {
-        profiles.value.splice(idx, 1)
-      }
-      throw error
-    }
-  }
+  const reloadFromDisk = (options: { emitChanges?: boolean } = {}) =>
+    withConfigMutation(async () => {
+      const parsed = parse(await ReadFile(ProfilesFilePath))
+      if (!Array.isArray(parsed)) throw new Error('Profiles file must contain an array')
+      const changed = new Set([...profiles.value, ...parsed].map((profile) => profile.id))
+      profiles.value = parsed
+      if (options.emitChanges) changed.forEach((id) => eventBus.emit('profileChange', { id }))
+    })
 
-  const deleteProfile = async (id: string) => {
-    const idx = profiles.value.findIndex((v) => v.id === id)
-    if (idx === -1) return
-    const backup = profiles.value.splice(idx, 1)[0]!
-    try {
-      await saveProfiles()
-    } catch (error) {
-      profiles.value.splice(idx, 0, backup)
-      throw error
-    }
+  const addProfile = (p: App.Profile) =>
+    withConfigMutation(async () => {
+      const next = [...profiles.value, p]
+      await WriteFile(ProfilesFilePath, stringifyNoFolding(next))
+      profiles.value.push(p)
+    })
 
-    eventBus.emit('profileChange', { id })
-  }
+  const deleteProfile = (id: string) =>
+    withConfigMutation(async () => {
+      const idx = profiles.value.findIndex((v) => v.id === id)
+      if (idx === -1) return
+      const next = profiles.value.filter((v) => v.id !== id)
+      await WriteFile(ProfilesFilePath, stringifyNoFolding(next))
+      profiles.value.splice(idx, 1)
+      eventBus.emit('profileChange', { id })
+    })
 
-  const editProfile = async (id: string, p: App.Profile) => {
-    const idx = profiles.value.findIndex((v) => v.id === id)
-    if (idx === -1) return
-    const backup = profiles.value.splice(idx, 1, p)[0]!
-    try {
-      await saveProfiles()
-    } catch (error) {
-      profiles.value.splice(idx, 1, backup)
-      throw error
-    }
-
-    eventBus.emit('profileChange', { id })
-  }
+  const editProfile = (id: string, p: App.Profile) =>
+    withConfigMutation(async () => {
+      const idx = profiles.value.findIndex((v) => v.id === id)
+      if (idx === -1) return
+      const next = profiles.value.map((profile, index) => (index === idx ? p : profile))
+      await WriteFile(ProfilesFilePath, stringifyNoFolding(next))
+      profiles.value.splice(idx, 1, p)
+      eventBus.emit('profileChange', { id })
+    })
 
   const getProfileById = (id: string) => profiles.value.find((v) => v.id === id)
 
@@ -90,6 +85,7 @@ export const useProfilesStore = defineStore('profiles', () => {
     profiles,
     currentProfile,
     setupProfiles,
+    reloadFromDisk,
     saveProfiles,
     addProfile,
     editProfile,

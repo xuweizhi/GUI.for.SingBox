@@ -41,9 +41,12 @@ export interface ScheduledTaskWorkerStatus {
   available: boolean
   nodePath: string
   supportedTypes: string[]
+  managedTaskIds?: string[]
 }
 
 export interface ScheduledTaskWorkerLogRecord {
+  source?: 'backend' | 'frontend'
+  type?: string
   id?: string
   name: string
   startTime: number

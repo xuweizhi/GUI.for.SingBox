@@ -2,8 +2,8 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { parse } from 'yaml'
 
-import { ReadFile, WriteFile, Requests } from '@/bridge'
-import { DefaultSubscribeScript, SubscribesFilePath } from '@/constant/app'
+import { ReadFile, WriteFile, Requests, GetSystemProxy } from '@/bridge'
+import { DefaultSubscribeScript, SubscribesFilePath, ProfilesFilePath } from '@/constant/app'
 import { DefaultExcludeProtocols } from '@/constant/kernel'
 import { PluginTriggerEvent, RequestMethod, RequestProxyMode } from '@/enums/app'
 import { useAppSettingsStore, usePluginsStore, useProfilesStore } from '@/stores'
@@ -29,7 +29,10 @@ import {
   SubscriptionEncryptionHeader,
   deepClone,
 } from '@/utils'
+import { persistConfigFiles, withConfigMutation } from '@/utils/configPersistence'
 import { extractSubscriptionConfig, validateSubscriptionEntries } from '@/utils/subscriptionConfig'
+
+import type { ConfigFileWrite } from '@/utils/fileTransaction'
 
 export const useSubscribesStore = defineStore('subscribes', () => {
   const subscribes = ref<App.Subscription[]>([])
@@ -43,10 +46,21 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     await migrateSubscribes(subscribes.value, saveSubscribes)
   }
 
-  const saveSubscribes = () => {
-    const s = omitArray(subscribes.value, ['updating'])
-    return WriteFile(SubscribesFilePath, stringifyNoFolding(s))
-  }
+  const serialize = (subscriptions: App.Subscription[]) =>
+    stringifyNoFolding(omitArray(subscriptions, ['updating']))
+  const saveSubscribes = () =>
+    withConfigMutation(() => WriteFile(SubscribesFilePath, serialize(subscribes.value)))
+
+  const reloadFromDisk = (options: { emitChanges?: boolean } = {}) =>
+    withConfigMutation(async () => {
+      const parsed = parse(await ReadFile(SubscribesFilePath))
+      if (!Array.isArray(parsed)) throw new Error('Subscriptions file must contain an array')
+      const ids = [
+        ...new Set([...subscribes.value, ...parsed].map((subscription) => subscription.id)),
+      ]
+      subscribes.value = parsed
+      if (options.emitChanges) eventBus.emit('subscriptionsChange', { ids })
+    })
 
   const resolveSubscribeRequestProxy = async (
     requestProxyMode: App.RequestProxyMode,
@@ -67,137 +81,136 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       return proxy
     }
 
+    if (await GetSystemProxy().catch(() => '')) return ''
     return GetRequestProxy(RequestProxyMode.Kernel)
   }
 
-  const addSubscribeToDefaultOutbounds = async (s: App.Subscription) => {
-    const profilesStore = useProfilesStore()
-    const profile = profilesStore.currentProfile
-    if (!profile) return
-
+  const addSubscribeToDefaultOutbounds = (s: App.Subscription, profile?: App.Profile) => {
+    if (!profile) return false
     let changed = false
-    const ref = { id: s.id, tag: s.id, type: 'Subscription' as const }
-
     defaultOutboundIds.forEach((id) => {
       const outbound = profile.outbounds.find((item) => item.id === id)
       if (!outbound || !['selector', 'urltest'].includes(outbound.type)) return
-      if (outbound.outbounds.some((item) => item.type === 'Subscription' && item.id === s.id)) {
+      if (outbound.outbounds.some((item) => item.type === 'Subscription' && item.id === s.id))
         return
-      }
-      outbound.outbounds.push({ ...ref })
+      outbound.outbounds.push({ id: s.id, tag: s.id, type: 'Subscription' })
       changed = true
     })
-
-    if (changed) await profilesStore.saveProfiles()
+    return changed
   }
 
-  const removeSubscribeFromOutbounds = async (id: string) => {
-    const profilesStore = useProfilesStore()
-    let changed = false
+  const publishProfiles = (profiles: App.Profile[]) => {
+    const store = useProfilesStore()
+    profiles.forEach((profile, index) => Object.assign(store.profiles[index]!, profile))
+  }
 
-    profilesStore.profiles.forEach((profile) => {
-      profile.outbounds.forEach((outbound) => {
-        const next = outbound.outbounds.filter(
-          (item) => !(item.type === 'Subscription' && item.id === id),
+  const syncSubscribeOutboundRefs = () =>
+    withConfigMutation(async () => {
+      const profilesStore = useProfilesStore()
+      const profiles = deepClone(profilesStore.profiles)
+      const currentProfile = profiles.find(
+        (profile) => profile.id === profilesStore.currentProfile?.id,
+      )
+      const subscriptionIds = new Set(subscribes.value.map((item) => item.id))
+      const changed = new Set<string>()
+      let added = 0
+      let removed = 0
+      profiles.forEach((profile) =>
+        profile.outbounds.forEach((outbound) => {
+          outbound.outbounds = outbound.outbounds.filter((item) => {
+            if (item.type !== 'Subscription' || subscriptionIds.has(item.id)) return true
+            removed++
+            changed.add(profile.id)
+            return false
+          })
+        }),
+      )
+      if (currentProfile) {
+        const before = currentProfile.outbounds.reduce(
+          (n, outbound) => n + outbound.outbounds.length,
+          0,
         )
-        if (next.length === outbound.outbounds.length) return
-        outbound.outbounds = next
-        changed = true
-      })
-    })
-
-    if (changed) await profilesStore.saveProfiles()
-  }
-
-  const syncSubscribeOutboundRefs = async () => {
-    const profilesStore = useProfilesStore()
-    const currentProfile = profilesStore.currentProfile
-    const subscriptionIds = new Set(subscribes.value.map((item) => item.id))
-    let added = 0
-    let removed = 0
-
-    profilesStore.profiles.forEach((profile) => {
-      profile.outbounds.forEach((outbound) => {
-        const next = outbound.outbounds.filter((item) => {
-          const remove = item.type === 'Subscription' && !subscriptionIds.has(item.id)
-          if (remove) removed += 1
-          return !remove
-        })
-        if (next.length !== outbound.outbounds.length) {
-          outbound.outbounds = next
-        }
-      })
-    })
-
-    if (currentProfile) {
-      defaultOutboundIds.forEach((id) => {
-        const outbound = currentProfile.outbounds.find((item) => item.id === id)
-        if (!outbound || !['selector', 'urltest'].includes(outbound.type)) return
-        subscribes.value.forEach((s) => {
-          if (outbound.outbounds.some((item) => item.type === 'Subscription' && item.id === s.id)) {
-            return
-          }
-          outbound.outbounds.push({ id: s.id, tag: s.id, type: 'Subscription' })
-          added += 1
-        })
-      })
-    }
-
-    if (added || removed) await profilesStore.saveProfiles()
-
-    return { added, removed }
-  }
-
-  const addSubscribe = async (s: App.Subscription) => {
-    subscribes.value.push(s)
-    try {
-      await saveSubscribes()
-      await addSubscribeToDefaultOutbounds(s)
-    } catch (error) {
-      const idx = subscribes.value.indexOf(s)
-      if (idx !== -1) {
-        subscribes.value.splice(idx, 1)
+        subscribes.value.forEach((subscription) =>
+          addSubscribeToDefaultOutbounds(subscription, currentProfile),
+        )
+        added =
+          currentProfile.outbounds.reduce((n, outbound) => n + outbound.outbounds.length, 0) -
+          before
+        if (added) changed.add(currentProfile.id)
       }
-      throw error
-    }
-  }
+      if (added || removed) {
+        await WriteFile(ProfilesFilePath, stringifyNoFolding(profiles))
+        publishProfiles(profiles)
+        changed.forEach((id) => eventBus.emit('profileChange', { id }))
+      }
+      return { added, removed }
+    })
+
+  const addSubscribe = (s: App.Subscription) =>
+    withConfigMutation(async () => {
+      const profilesStore = useProfilesStore()
+      const profiles = deepClone(profilesStore.profiles)
+      const current = profiles.find((profile) => profile.id === profilesStore.currentProfile?.id)
+      const changed = addSubscribeToDefaultOutbounds(s, current)
+      await persistConfigFiles([
+        { path: SubscribesFilePath, content: serialize([...subscribes.value, s]) },
+        ...(changed ? [{ path: ProfilesFilePath, content: stringifyNoFolding(profiles) }] : []),
+      ])
+      subscribes.value.push(s)
+      if (changed) publishProfiles(profiles)
+      // A new HTTP subscription has no runtime nodes until its first successful refresh.
+      if (s.proxies.length) eventBus.emit('subscriptionChange', { id: s.id })
+    })
 
   const importSubscribe = async (name: string, url: string) => {
     await addSubscribe(getSubscribeTemplate(name, { url }))
   }
 
-  const deleteSubscribe = async (id: string) => {
-    const idx = subscribes.value.findIndex((v) => v.id === id)
-    if (idx === -1) return
-    const backup = subscribes.value.splice(idx, 1)[0]!
-    try {
-      await saveSubscribes()
-      await removeSubscribeFromOutbounds(id)
-    } catch (error) {
-      subscribes.value.splice(idx, 0, backup)
-      throw error
-    }
+  const deleteSubscribe = (id: string) =>
+    withConfigMutation(async () => {
+      const idx = subscribes.value.findIndex((v) => v.id === id)
+      if (idx === -1) return
+      const profilesStore = useProfilesStore()
+      const profiles = deepClone(profilesStore.profiles)
+      const changed = new Set<string>()
+      profiles.forEach((profile) =>
+        profile.outbounds.forEach((outbound) => {
+          outbound.outbounds = outbound.outbounds.filter((item) => {
+            if (item.type !== 'Subscription' || item.id !== id) return true
+            changed.add(profile.id)
+            return false
+          })
+        }),
+      )
+      await persistConfigFiles([
+        {
+          path: SubscribesFilePath,
+          content: serialize(subscribes.value.filter((s) => s.id !== id)),
+        },
+        ...(changed.size
+          ? [{ path: ProfilesFilePath, content: stringifyNoFolding(profiles) }]
+          : []),
+      ])
+      subscribes.value.splice(idx, 1)
+      if (changed.size) publishProfiles(profiles)
+      changed.forEach((id) => eventBus.emit('profileChange', { id }))
+      eventBus.emit('subscriptionChange', { id })
+    })
 
-    eventBus.emit('subscriptionChange', { id })
-  }
-
-  const editSubscribe = async (id: string, s: App.Subscription) => {
-    const idx = subscribes.value.findIndex((v) => v.id === id)
-    if (idx === -1) return
-    const backup = subscribes.value.splice(idx, 1, s)[0]!
-    try {
-      await saveSubscribes()
-    } catch (error) {
-      subscribes.value.splice(idx, 1, backup)
-      throw error
-    }
-
-    eventBus.emit('subscriptionChange', { id })
-  }
+  const editSubscribe = (id: string, s: App.Subscription) =>
+    withConfigMutation(async () => {
+      const idx = subscribes.value.findIndex((v) => v.id === id)
+      if (idx === -1) return
+      const next = subscribes.value.map((value, index) => (index === idx ? s : value))
+      await WriteFile(SubscribesFilePath, serialize(next))
+      subscribes.value.splice(idx, 1, s)
+      eventBus.emit('subscriptionChange', { id })
+    })
 
   const _doUpdateSub = async (s: App.Subscription, options: Partial<App.Subscription> = {}) => {
-    const target = s
     s = deepClone(s)
+    const expected = serialize([s])
+    const originalPath = s.path
     const userInfo: Recordable = {}
     const previousMetadata = deepClone(s.proxies)
     const previousBody = await ignoredError(ReadFile, s.path)
@@ -370,11 +383,30 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       sampleID,
     )
 
-    if (s.type !== 'File' || s.url !== s.path) {
-      proxies = omitArray(_proxies, ['__id__', '__tmp__id__'])
-      await WriteFile(s.path, JSON.stringify(proxies, null, 2))
-    }
-    Object.assign(target, s)
+    const cache: ConfigFileWrite[] =
+      s.type !== 'File' || s.url !== s.path
+        ? [
+            {
+              path: s.path,
+              content: JSON.stringify(omitArray(_proxies, ['__id__', '__tmp__id__']), null, 2),
+            },
+          ]
+        : []
+    return { subscription: s, cache, expected, originalPath, previousBody }
+  }
+
+  const assertUnchanged = async (
+    id: string,
+    prepared: Awaited<ReturnType<typeof _doUpdateSub>>,
+  ) => {
+    const current = subscribes.value.find((subscription) => subscription.id === id)
+    if (
+      !current ||
+      serialize([current]) !== prepared.expected ||
+      (await ignoredError(ReadFile, prepared.originalPath)) !== prepared.previousBody
+    )
+      throw new Error('Subscription changed while updating; retry the refresh')
+    return current
   }
 
   const updateSubscribe = async (id: string, options: Partial<App.Subscription> = {}) => {
@@ -383,28 +415,36 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     if (s.disabled) throw s.name + ' Disabled'
     try {
       s.updating = true
-      await _doUpdateSub(s, options)
-      await saveSubscribes()
+      const prepared = await _doUpdateSub(s, options)
+      await withConfigMutation(async () => {
+        const current = await assertUnchanged(id, prepared)
+        const next = subscribes.value.map((value) =>
+          value.id === id ? prepared.subscription : value,
+        )
+        await persistConfigFiles([
+          ...prepared.cache,
+          { path: SubscribesFilePath, content: serialize(next) },
+        ])
+        Object.assign(current, prepared.subscription)
+        eventBus.emit('subscriptionChange', { id })
+      })
     } catch (error: any) {
       throw `Failed to update subscription [${s.name}]. Reason: ${error.message || error}`
     } finally {
       s.updating = false
+      const current = subscribes.value.find((subscription) => subscription.id === id)
+      if (current) current.updating = false
     }
-
-    eventBus.emit('subscriptionChange', { id })
-
     return `Subscription [${s.name}] updated successfully.`
   }
 
   const updateSubscribes = async (options: { throwOnFailure?: boolean } = {}) => {
-    let needSave = false
-
+    const prepared = new Map<string, Awaited<ReturnType<typeof _doUpdateSub>>>()
     const update = async (s: App.Subscription) => {
       const result = { ok: true, id: s.id, name: s.name, result: '' }
       try {
         s.updating = true
-        await _doUpdateSub(s)
-        needSave = true
+        prepared.set(s.id, await _doUpdateSub(s))
         result.result = `Subscription [${s.name}] updated successfully.`
       } catch (error: any) {
         result.ok = false
@@ -414,25 +454,30 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       }
       return result
     }
-
     const result = await asyncPool(
       5,
       subscribes.value.filter((v) => !v.disabled),
       update,
     )
-
-    if (needSave) await saveSubscribes()
-
-    eventBus.emit('subscriptionsChange', undefined)
-
+    if (prepared.size)
+      await withConfigMutation(async () => {
+        for (const [id, value] of prepared) await assertUnchanged(id, value)
+        const next = subscribes.value.map((s) => prepared.get(s.id)?.subscription || s)
+        await persistConfigFiles([
+          ...[...prepared.values()].flatMap((value) => value.cache),
+          { path: SubscribesFilePath, content: serialize(next) },
+        ])
+        subscribes.value.forEach((s) => {
+          const updated = prepared.get(s.id)
+          if (updated) Object.assign(s, updated.subscription, { updating: false })
+        })
+        eventBus.emit('subscriptionsChange', { ids: [...prepared.keys()] })
+      })
     const output = result.flatMap((v) => (v.ok && v.value) || [])
     if (options.throwOnFailure) {
       const failed = output.filter((item) => !item.ok)
-      if (failed.length !== 0) {
-        throw new Error(failed.map((item) => item.result).join('\n'))
-      }
+      if (failed.length) throw new Error(failed.map((item) => item.result).join('\n'))
     }
-
     return output
   }
 
@@ -480,6 +525,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
   return {
     subscribes,
     setupSubscribes,
+    reloadFromDisk,
     saveSubscribes,
     addSubscribe,
     editSubscribe,

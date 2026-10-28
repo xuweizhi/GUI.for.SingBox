@@ -58,76 +58,83 @@ var subscriptionShareLinkPattern = regexp.MustCompile(`(?i)^(?:ss|ssr|vmess|vles
 var scheduledTasksFileMu sync.Mutex
 
 type scheduledTaskConfig struct {
-	ID            string   `json:"id" yaml:"id"`
-	Name          string   `json:"name" yaml:"name"`
-	Type          string   `json:"type" yaml:"type"`
-	Subscriptions []string `json:"subscriptions" yaml:"subscriptions"`
-	Rulesets      []string `json:"rulesets" yaml:"rulesets"`
-	Plugins       []string `json:"plugins" yaml:"plugins"`
-	Script        string   `json:"script" yaml:"script"`
-	Cron          string   `json:"cron" yaml:"cron"`
-	Notification  bool     `json:"notification" yaml:"notification"`
-	Disabled      bool     `json:"disabled" yaml:"disabled"`
-	LastTime      int64    `json:"lastTime" yaml:"lastTime"`
+	Extra         map[string]any `json:"-" yaml:",inline"`
+	ID            string         `json:"id" yaml:"id"`
+	Name          string         `json:"name" yaml:"name"`
+	Type          string         `json:"type" yaml:"type"`
+	Subscriptions []string       `json:"subscriptions" yaml:"subscriptions"`
+	Rulesets      []string       `json:"rulesets" yaml:"rulesets"`
+	Plugins       []string       `json:"plugins" yaml:"plugins"`
+	Script        string         `json:"script" yaml:"script"`
+	Cron          string         `json:"cron" yaml:"cron"`
+	Notification  bool           `json:"notification" yaml:"notification"`
+	Disabled      bool           `json:"disabled" yaml:"disabled"`
+	LastTime      int64          `json:"lastTime" yaml:"lastTime"`
 }
 
 type rulesetConfig struct {
-	ID         string `json:"id" yaml:"id"`
-	Name       string `json:"name" yaml:"name"`
-	UpdateTime int64  `json:"updateTime" yaml:"updateTime"`
-	Disabled   bool   `json:"disabled" yaml:"disabled"`
-	Type       string `json:"type" yaml:"type"`
-	Format     string `json:"format" yaml:"format"`
-	Path       string `json:"path" yaml:"path"`
-	URL        string `json:"url" yaml:"url"`
-	Count      int    `json:"count" yaml:"count"`
+	Extra      map[string]any `json:"-" yaml:",inline"`
+	ID         string         `json:"id" yaml:"id"`
+	Name       string         `json:"name" yaml:"name"`
+	UpdateTime int64          `json:"updateTime" yaml:"updateTime"`
+	Disabled   bool           `json:"disabled" yaml:"disabled"`
+	Type       string         `json:"type" yaml:"type"`
+	Format     string         `json:"format" yaml:"format"`
+	Path       string         `json:"path" yaml:"path"`
+	URL        string         `json:"url" yaml:"url"`
+	Count      int            `json:"count" yaml:"count"`
 }
 
 type subscriptionProxyConfig struct {
-	ID   string `json:"id" yaml:"id"`
-	Tag  string `json:"tag" yaml:"tag"`
-	Type string `json:"type" yaml:"type"`
+	Kind  string         `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Extra map[string]any `json:"-" yaml:",inline"`
+	ID    string         `json:"id" yaml:"id"`
+	Tag   string         `json:"tag" yaml:"tag"`
+	Type  string         `json:"type" yaml:"type"`
 }
 
 type subscriptionConfig struct {
-	ID               string                    `json:"id" yaml:"id"`
-	Name             string                    `json:"name" yaml:"name"`
-	Upload           int64                     `json:"upload" yaml:"upload"`
-	Download         int64                     `json:"download" yaml:"download"`
-	Total            int64                     `json:"total" yaml:"total"`
-	Expire           int64                     `json:"expire" yaml:"expire"`
-	UpdateTime       int64                     `json:"updateTime" yaml:"updateTime"`
-	Type             string                    `json:"type" yaml:"type"`
-	URL              string                    `json:"url" yaml:"url"`
-	Website          string                    `json:"website" yaml:"website"`
-	DecryptPassword  string                    `json:"decryptPassword" yaml:"decryptPassword"`
-	Path             string                    `json:"path" yaml:"path"`
-	Include          string                    `json:"include" yaml:"include"`
-	Exclude          string                    `json:"exclude" yaml:"exclude"`
-	IncludeProtocol  string                    `json:"includeProtocol" yaml:"includeProtocol"`
-	ExcludeProtocol  string                    `json:"excludeProtocol" yaml:"excludeProtocol"`
-	ProxyPrefix      string                    `json:"proxyPrefix" yaml:"proxyPrefix"`
-	RequestProxyMode string                    `json:"requestProxyMode" yaml:"requestProxyMode"`
-	CustomProxy      string                    `json:"customProxy" yaml:"customProxy"`
-	Disabled         bool                      `json:"disabled" yaml:"disabled"`
-	InSecure         bool                      `json:"inSecure" yaml:"inSecure"`
-	Proxies          []subscriptionProxyConfig `json:"proxies" yaml:"proxies"`
-	RequestMethod    string                    `json:"requestMethod" yaml:"requestMethod"`
-	RequestTimeout   int                       `json:"requestTimeout" yaml:"requestTimeout"`
-	Header           struct {
-		Request  map[string]string `json:"request" yaml:"request"`
-		Response map[string]string `json:"response" yaml:"response"`
-	} `json:"header" yaml:"header"`
-	Script string `json:"script" yaml:"script"`
+	PreferOutboundDns bool                      `json:"preferOutboundDns,omitempty" yaml:"preferOutboundDns,omitempty"`
+	OutboundDns       []string                  `json:"outboundDns,omitempty" yaml:"outboundDns,omitempty"`
+	ImportedDns       *subscriptionDNSConfig    `json:"importedDns,omitempty" yaml:"importedDns,omitempty"`
+	Extra             map[string]any            `json:"-" yaml:",inline"`
+	ID                string                    `json:"id" yaml:"id"`
+	Name              string                    `json:"name" yaml:"name"`
+	Upload            int64                     `json:"upload" yaml:"upload"`
+	Download          int64                     `json:"download" yaml:"download"`
+	Total             int64                     `json:"total" yaml:"total"`
+	Expire            int64                     `json:"expire" yaml:"expire"`
+	UpdateTime        int64                     `json:"updateTime" yaml:"updateTime"`
+	Type              string                    `json:"type" yaml:"type"`
+	URL               string                    `json:"url" yaml:"url"`
+	Website           string                    `json:"website" yaml:"website"`
+	DecryptPassword   string                    `json:"decryptPassword" yaml:"decryptPassword"`
+	Path              string                    `json:"path" yaml:"path"`
+	Include           string                    `json:"include" yaml:"include"`
+	Exclude           string                    `json:"exclude" yaml:"exclude"`
+	IncludeProtocol   string                    `json:"includeProtocol" yaml:"includeProtocol"`
+	ExcludeProtocol   string                    `json:"excludeProtocol" yaml:"excludeProtocol"`
+	ProxyPrefix       string                    `json:"proxyPrefix" yaml:"proxyPrefix"`
+	RequestProxyMode  string                    `json:"requestProxyMode" yaml:"requestProxyMode"`
+	CustomProxy       string                    `json:"customProxy" yaml:"customProxy"`
+	Disabled          bool                      `json:"disabled" yaml:"disabled"`
+	InSecure          bool                      `json:"inSecure" yaml:"inSecure"`
+	Proxies           []subscriptionProxyConfig `json:"proxies" yaml:"proxies"`
+	RequestMethod     string                    `json:"requestMethod" yaml:"requestMethod"`
+	RequestTimeout    int                       `json:"requestTimeout" yaml:"requestTimeout"`
+	Header            subscriptionHeaderConfig  `json:"header" yaml:"header"`
+	Script            string                    `json:"script" yaml:"script"`
 }
 
 type profileOutboundRefConfig struct {
-	ID   string `json:"id" yaml:"id"`
-	Tag  string `json:"tag" yaml:"tag"`
-	Type string `json:"type" yaml:"type"`
+	Extra map[string]any `json:"-" yaml:",inline"`
+	ID    string         `json:"id" yaml:"id"`
+	Tag   string         `json:"tag" yaml:"tag"`
+	Type  string         `json:"type" yaml:"type"`
 }
 
 type profileOutboundConfig struct {
+	Extra     map[string]any             `json:"-" yaml:",inline"`
 	ID        string                     `json:"id" yaml:"id"`
 	Tag       string                     `json:"tag" yaml:"tag"`
 	Type      string                     `json:"type" yaml:"type"`
@@ -135,22 +142,24 @@ type profileOutboundConfig struct {
 }
 
 type profileConfig struct {
-	Extra     map[string]any          `json:",inline" yaml:",inline"`
+	Extra     map[string]any          `json:"-" yaml:",inline"`
 	ID        string                  `json:"id" yaml:"id"`
 	Outbounds []profileOutboundConfig `json:"outbounds" yaml:"outbounds"`
 }
 
 type pluginConfigurationConfig struct {
-	ID          string `json:"id" yaml:"id"`
-	Title       string `json:"title" yaml:"title"`
-	Description string `json:"description" yaml:"description"`
-	Key         string `json:"key" yaml:"key"`
-	Component   string `json:"component" yaml:"component"`
-	Value       any    `json:"value" yaml:"value"`
-	Options     any    `json:"options" yaml:"options"`
+	Extra       map[string]any `json:"-" yaml:",inline"`
+	ID          string         `json:"id" yaml:"id"`
+	Title       string         `json:"title" yaml:"title"`
+	Description string         `json:"description" yaml:"description"`
+	Key         string         `json:"key" yaml:"key"`
+	Component   string         `json:"component" yaml:"component"`
+	Value       any            `json:"value" yaml:"value"`
+	Options     any            `json:"options" yaml:"options"`
 }
 
 type pluginConfig struct {
+	Extra         map[string]any               `json:"-" yaml:",inline"`
 	ID            string                       `json:"id" yaml:"id"`
 	Version       string                       `json:"version" yaml:"version"`
 	Name          string                       `json:"name" yaml:"name"`
@@ -183,6 +192,8 @@ type scheduledTaskWorkerResultItem struct {
 }
 
 type scheduledTaskWorkerLogRecord struct {
+	Source    string                          `json:"source,omitempty"`
+	Type      string                          `json:"type,omitempty"`
 	ID        string                          `json:"id"`
 	Name      string                          `json:"name"`
 	StartTime int64                           `json:"startTime"`
@@ -194,6 +205,7 @@ type scheduledTaskWorkerInfo struct {
 	Available      bool     `json:"available"`
 	NodePath       string   `json:"nodePath"`
 	SupportedTypes []string `json:"supportedTypes"`
+	ManagedTaskIDs []string `json:"managedTaskIds"`
 }
 
 type scheduledTaskWorkerMessage struct {
@@ -219,6 +231,10 @@ type scheduledTaskWorkerSupervisor struct {
 	app *App
 
 	startMu        sync.Mutex
+	reloadMu       sync.Mutex
+	writeMu        sync.Mutex
+	processDone    chan struct{}
+	managedTaskIDs []string
 	mu             sync.Mutex
 	cmd            *exec.Cmd
 	stdin          io.WriteCloser
@@ -297,6 +313,17 @@ func (a *App) RecordScheduledTaskLog(payload string) FlagResult {
 			return FlagResult{false, err.Error()}
 		}
 	}
+	record.Source = "frontend"
+	if record.Type == "" {
+		if tasks, err := loadScheduledTasks(); err == nil {
+			for _, task := range tasks {
+				if task.ID == record.ID {
+					record.Type = task.Type
+					break
+				}
+			}
+		}
+	}
 	a.taskWorker().recordLog(record)
 	return FlagResult{true, "Success"}
 }
@@ -355,6 +382,7 @@ func (w *scheduledTaskWorkerSupervisor) info() scheduledTaskWorkerInfo {
 		Available:      len(supportedTypes) > 0,
 		NodePath:       w.nodePath,
 		SupportedTypes: supportedTypes,
+		ManagedTaskIDs: append([]string{}, w.managedTaskIDs...),
 	}
 }
 
@@ -533,11 +561,13 @@ func (w *scheduledTaskWorkerSupervisor) ensureStarted() error {
 	w.pending = map[string]chan scheduledTaskWorkerResponse{}
 	w.nodePath = nodePath
 	w.available = false
+	done := make(chan struct{})
+	w.processDone = done
 	w.mu.Unlock()
 
-	go w.readLoop(stdout)
+	go w.readLoop(stdout, cmd)
 	go w.readStderr(stderr)
-	go w.waitLoop(cmd)
+	go w.waitLoop(cmd, done)
 
 	initPayload := map[string]any{
 		"basePath": Env.BasePath,
@@ -552,19 +582,19 @@ func (w *scheduledTaskWorkerSupervisor) ensureStarted() error {
 	}
 
 	if _, err := w.callProcess("worker.init", initPayload, 10*time.Second); err != nil {
-		w.stopWithStartMuHeld()
+		w.failProcess(cmd, errors.New("scheduled task worker initialization failed"))
 		return err
 	}
 
 	rawInfo, err := w.callProcess("worker.info", map[string]any{}, 10*time.Second)
 	if err != nil {
-		w.stopWithStartMuHeld()
+		w.failProcess(cmd, errors.New("scheduled task worker initialization failed"))
 		return err
 	}
 
 	var info scheduledTaskWorkerInfo
 	if err := json.Unmarshal(rawInfo, &info); err != nil {
-		w.stopWithStartMuHeld()
+		w.failProcess(cmd, errors.New("scheduled task worker initialization failed"))
 		return err
 	}
 
@@ -574,6 +604,10 @@ func (w *scheduledTaskWorkerSupervisor) ensureStarted() error {
 	}
 
 	w.mu.Lock()
+	if w.cmd != cmd {
+		w.mu.Unlock()
+		return errors.New("scheduled task worker exited during initialization")
+	}
 	w.available = true
 	w.supportedTypes = supportedTypes
 	w.mu.Unlock()
@@ -588,20 +622,22 @@ func (w *scheduledTaskWorkerSupervisor) stop() {
 }
 
 func (w *scheduledTaskWorkerSupervisor) stopWithStartMuHeld() {
+	w.reloadMu.Lock()
 	w.stopScheduler()
-
+	w.reloadMu.Unlock()
 	w.mu.Lock()
-	cmd := w.cmd
-	w.available = false
-	w.supportedTypes = map[string]struct{}{}
+	cmd, done := w.cmd, w.processDone
 	w.mu.Unlock()
 	if cmd == nil {
+		if done != nil {
+			<-done
+		}
 		return
 	}
-
 	_, _ = w.callProcess("worker.shutdown", map[string]any{}, 2*time.Second)
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
+	w.failProcess(cmd, errors.New("scheduled task worker stopped"))
+	if done != nil {
+		<-done
 	}
 }
 
@@ -612,7 +648,9 @@ func (w *scheduledTaskWorkerSupervisor) reloadFromDisk() error {
 
 	tasks, err := loadScheduledTasks()
 	if err != nil {
+		w.reloadMu.Lock()
 		w.stopScheduler()
+		w.reloadMu.Unlock()
 		return err
 	}
 
@@ -620,7 +658,10 @@ func (w *scheduledTaskWorkerSupervisor) reloadFromDisk() error {
 }
 
 func (w *scheduledTaskWorkerSupervisor) reloadTasks(tasks []scheduledTaskConfig) error {
+	w.reloadMu.Lock()
+	defer w.reloadMu.Unlock()
 	w.stopScheduler()
+	managed := []string{}
 
 	scheduler := cron.New(
 		cron.WithSeconds(),
@@ -651,12 +692,14 @@ func (w *scheduledTaskWorkerSupervisor) reloadTasks(tasks []scheduledTaskConfig)
 			log.Printf("Failed to register scheduled task [%s]: %v", task.Name, err)
 			continue
 		}
+		managed = append(managed, task.ID)
 	}
 
 	scheduler.Start()
 
 	w.mu.Lock()
 	w.scheduler = scheduler
+	w.managedTaskIDs = managed
 	w.mu.Unlock()
 
 	return nil
@@ -669,6 +712,7 @@ func (w *scheduledTaskWorkerSupervisor) stopScheduler() {
 		w.scheduler.Stop()
 	}
 	w.scheduler = nil
+	w.managedTaskIDs = nil
 }
 
 func (w *scheduledTaskWorkerSupervisor) executeTask(task scheduledTaskConfig) ([]scheduledTaskWorkerResultItem, error) {
@@ -716,6 +760,8 @@ func (w *scheduledTaskWorkerSupervisor) executeTask(task scheduledTaskConfig) ([
 
 finalize:
 	record := scheduledTaskWorkerLogRecord{
+		Source:    "backend",
+		Type:      task.Type,
 		ID:        task.ID,
 		Name:      task.Name,
 		StartTime: startTime,
@@ -768,101 +814,114 @@ func (w *scheduledTaskWorkerSupervisor) call(method string, params any, timeout 
 	return w.callProcess(method, params, timeout)
 }
 
-func (w *scheduledTaskWorkerSupervisor) callProcess(
-	method string,
-	params any,
-	timeout time.Duration,
-) (json.RawMessage, error) {
+const scheduledTaskWorkerMaxResponse = 16 << 20
+
+func (w *scheduledTaskWorkerSupervisor) callProcess(method string, params any, timeout time.Duration) (json.RawMessage, error) {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-
 	requestID := fmt.Sprintf("worker-%d", atomic.AddUint64(&w.requestCounter, 1))
-	resultCh := make(chan scheduledTaskWorkerResponse, 1)
-
-	var payload json.RawMessage
-	if params != nil {
-		bytes, err := json.Marshal(params)
-		if err != nil {
-			return nil, err
-		}
-		payload = bytes
-	}
-
-	message := scheduledTaskWorkerMessage{
-		Type:   "request",
-		ID:     requestID,
-		Method: method,
-		Params: payload,
-	}
-
-	line, err := json.Marshal(message)
+	payload, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
 	}
-
+	line, err := json.Marshal(scheduledTaskWorkerMessage{Type: "request", ID: requestID, Method: method, Params: payload})
+	if err != nil {
+		return nil, err
+	}
+	resultCh := make(chan scheduledTaskWorkerResponse, 1)
 	w.mu.Lock()
-	if w.stdin == nil {
+	cmd, stdin := w.cmd, w.stdin
+	if cmd == nil || stdin == nil {
 		w.mu.Unlock()
 		return nil, errors.New("scheduled task worker is not running")
 	}
 	w.pending[requestID] = resultCh
-	_, writeErr := w.stdin.Write(append(line, '\n'))
 	w.mu.Unlock()
-
-	if writeErr != nil {
-		w.mu.Lock()
-		delete(w.pending, requestID)
-		w.mu.Unlock()
-		return nil, writeErr
-	}
-
+	// A full stdin pipe must not hold the state mutex or prevent timeout/recovery.
+	go func() {
+		w.writeMu.Lock()
+		_, err := stdin.Write(append(line, '\n'))
+		w.writeMu.Unlock()
+		if err != nil {
+			w.failProcess(cmd, fmt.Errorf("scheduled task worker write failed: %w", err))
+		}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case response := <-resultCh:
 		if response.Error != "" {
 			return nil, errors.New(response.Error)
 		}
 		return response.Result, nil
-	case <-time.After(timeout):
-		w.mu.Lock()
-		delete(w.pending, requestID)
-		w.mu.Unlock()
-		return nil, fmt.Errorf("scheduled task worker timed out on %s", method)
+	case <-timer.C:
+		err := fmt.Errorf("scheduled task worker timed out on %s", method)
+		w.failProcess(cmd, err)
+		return nil, err
 	}
 }
 
-func (w *scheduledTaskWorkerSupervisor) readLoop(stdout io.ReadCloser) {
+// Only detach the process owning this reader/request. A late exit from an old
+// worker must never clear a replacement's stdin, availability, or pending calls.
+func (w *scheduledTaskWorkerSupervisor) failProcess(cmd *exec.Cmd, cause error) {
+	w.mu.Lock()
+	if w.cmd != cmd {
+		w.mu.Unlock()
+		return
+	}
+	pending, stdin := w.pending, w.stdin
+	w.cmd = nil
+	w.stdin = nil
+	w.available = false
+	w.supportedTypes = map[string]struct{}{}
+	w.pending = map[string]chan scheduledTaskWorkerResponse{}
+	w.mu.Unlock()
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	if stdin != nil {
+		_ = stdin.Close()
+	}
+	for _, ch := range pending {
+		select {
+		case ch <- scheduledTaskWorkerResponse{Error: cause.Error()}:
+		default:
+		}
+	}
+}
+
+func (w *scheduledTaskWorkerSupervisor) readLoop(stdout io.ReadCloser, cmd *exec.Cmd) {
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), scheduledTaskWorkerMaxResponse)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-
 		var message scheduledTaskWorkerMessage
 		if err := json.Unmarshal([]byte(line), &message); err != nil {
-			log.Printf("Invalid scheduled task worker message: %s", line)
 			continue
 		}
-
 		if message.Type != "response" {
 			continue
 		}
-
 		w.mu.Lock()
-		resultCh := w.pending[message.ID]
-		delete(w.pending, message.ID)
+		var resultCh chan scheduledTaskWorkerResponse
+		if w.cmd == cmd {
+			resultCh = w.pending[message.ID]
+			delete(w.pending, message.ID)
+		}
 		w.mu.Unlock()
-
 		if resultCh != nil {
 			resultCh <- scheduledTaskWorkerResponse{Result: message.Result, Error: message.Error}
 		}
 	}
-
+	cause := errors.New("scheduled task worker stdout closed")
 	if err := scanner.Err(); err != nil {
-		log.Printf("Scheduled task worker stdout error: %v", err)
+		cause = fmt.Errorf("scheduled task worker response failed (limit %d bytes): %w", scheduledTaskWorkerMaxResponse, err)
 	}
+	w.failProcess(cmd, cause)
 }
 
 func (w *scheduledTaskWorkerSupervisor) readStderr(stderr io.ReadCloser) {
@@ -879,25 +938,14 @@ func (w *scheduledTaskWorkerSupervisor) readStderr(stderr io.ReadCloser) {
 	}
 }
 
-func (w *scheduledTaskWorkerSupervisor) waitLoop(cmd *exec.Cmd) {
-	if err := cmd.Wait(); err != nil {
-		log.Printf("Scheduled task worker exited: %v", err)
+func (w *scheduledTaskWorkerSupervisor) waitLoop(cmd *exec.Cmd, done chan struct{}) {
+	defer close(done)
+	err := cmd.Wait()
+	cause := errors.New("scheduled task worker exited")
+	if err != nil {
+		cause = fmt.Errorf("scheduled task worker exited: %w", err)
 	}
-
-	w.mu.Lock()
-	if w.cmd == cmd {
-		w.cmd = nil
-		w.stdin = nil
-		w.available = false
-		pending := w.pending
-		w.pending = map[string]chan scheduledTaskWorkerResponse{}
-		w.mu.Unlock()
-		for _, ch := range pending {
-			ch <- scheduledTaskWorkerResponse{Error: "scheduled task worker exited"}
-		}
-		return
-	}
-	w.mu.Unlock()
+	w.failProcess(cmd, cause)
 }
 
 func findNodeBinary() (string, error) {
@@ -1471,14 +1519,15 @@ func (w *scheduledTaskWorkerSupervisor) runAllSubscriptionsTask() ([]scheduledTa
 	}
 
 	output := make([]scheduledTaskWorkerResultItem, 0, len(subscribes))
-	needSave := false
+	updates := []preparedSubscriptionUpdate{}
 	for index := range subscribes {
 		subscribe := &subscribes[index]
 		if subscribe.Disabled {
 			continue
 		}
 
-		if err := w.doUpdateSubscription(subscribe, settings); err != nil {
+		update, err := w.prepareSubscriptionUpdate(*subscribe, settings)
+		if err != nil {
 			output = append(output, scheduledTaskWorkerResultItem{
 				OK:     false,
 				Result: fmt.Sprintf("Failed to update subscription [%s]. Reason: %v", subscribe.Name, err),
@@ -1486,15 +1535,16 @@ func (w *scheduledTaskWorkerSupervisor) runAllSubscriptionsTask() ([]scheduledTa
 			continue
 		}
 
-		needSave = true
+		*subscribe = update.Subscription
+		updates = append(updates, update)
 		output = append(output, scheduledTaskWorkerResultItem{
 			OK:     true,
 			Result: fmt.Sprintf("Subscription [%s] updated successfully.", subscribe.Name),
 		})
 	}
 
-	if needSave {
-		if err := saveSubscriptions(subscribes); err != nil {
+	if len(updates) > 0 {
+		if err := commitSubscriptionUpdates(updates, func() error { return saveSubscriptions(subscribes) }); err != nil {
 			return nil, err
 		}
 	}
@@ -1779,80 +1829,18 @@ func (w *scheduledTaskWorkerSupervisor) updateSubscriptionByID(
 		if subscribe.Disabled {
 			return "", fmt.Errorf("%s Disabled", subscribe.Name)
 		}
-		if err := w.doUpdateSubscription(subscribe, settings); err != nil {
+		update, err := w.prepareSubscriptionUpdate(*subscribe, settings)
+		if err != nil {
 			return "", fmt.Errorf("Failed to update subscription [%s]. Reason: %v", subscribe.Name, err)
 		}
-		if err := saveSubscriptions(subscribes); err != nil {
+		*subscribe = update.Subscription
+		if err := commitSubscriptionUpdates([]preparedSubscriptionUpdate{update}, func() error { return saveSubscriptions(subscribes) }); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Subscription [%s] updated successfully.", subscribe.Name), nil
 	}
 
 	return "", fmt.Errorf("%s Not Found", id)
-}
-
-func (w *scheduledTaskWorkerSupervisor) doUpdateSubscription(
-	subscribe *subscriptionConfig,
-	settings backendNetworkSettings,
-) error {
-	body, userInfo, err := w.loadSubscriptionBody(subscribe, settings)
-	if err != nil {
-		return err
-	}
-
-	proxies, err := parseSubscriptionProxies(body, subscribe.Type)
-	if err != nil {
-		return err
-	}
-
-	proxies, err = w.applySubscriptionPluginsWithWorker(*subscribe, proxies)
-	if err != nil {
-		return err
-	}
-
-	if needsNativeSubscriptionConvert(proxies) {
-		proxies, err = w.normalizeSubscriptionProxiesWithWorker(proxies)
-		if err != nil {
-			return err
-		}
-	}
-
-	proxies, err = applySubscriptionFilters(proxies, subscribe)
-	if err != nil {
-		return err
-	}
-
-	subscribe.Upload = userInfo["upload"]
-	subscribe.Download = userInfo["download"]
-	subscribe.Total = userInfo["total"]
-	subscribe.Expire = userInfo["expire"] * 1000
-	subscribe.UpdateTime = time.Now().UnixMilli()
-	subscribe.Proxies = mapSubscriptionProxies(proxies, subscribe.Proxies)
-
-	if !isDefaultSubscribeScript(subscribe.Script) {
-		nextProxies, nextSubscription, err := w.runSubscriptionScriptWithWorker(*subscribe, proxies)
-		if err != nil {
-			return err
-		}
-		proxies = nextProxies
-		*subscribe = nextSubscription
-		subscribe.Proxies = mapSubscriptionProxies(proxies, subscribe.Proxies)
-	}
-
-	if subscribe.Type == "Http" || (subscribe.Type == "File" && subscribe.URL != subscribe.Path) {
-		payload, err := json.MarshalIndent(proxies, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(resolvePath(subscribe.Path)), 0o700); err != nil {
-			return err
-		}
-		if err := atomicWriteFile(resolvePath(subscribe.Path), payload, 0o600); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (w *scheduledTaskWorkerSupervisor) applySubscriptionPluginsWithWorker(
@@ -1894,9 +1882,17 @@ func (w *scheduledTaskWorkerSupervisor) applySubscriptionPluginsWithWorker(
 
 func (w *scheduledTaskWorkerSupervisor) normalizeSubscriptionProxiesWithWorker(
 	proxies []map[string]any,
+	dns *subscriptionDNSConfig,
 ) ([]map[string]any, error) {
+	resolverTags := []string{}
+	if dns != nil {
+		for _, server := range dns.Servers {
+			resolverTags = append(resolverTags, stringValue(server["tag"]))
+		}
+	}
 	rawResult, err := w.call("subscription.normalizeNative", map[string]any{
-		"proxies": proxies,
+		"proxies":      proxies,
+		"resolverTags": resolverTags,
 	}, 2*time.Minute)
 	if err != nil {
 		return nil, err
@@ -2009,11 +2005,11 @@ func (w *scheduledTaskWorkerSupervisor) resolveSubscriptionProxy(
 	mode := resolveSubscriptionProxyMode(*subscribe, settings)
 	switch mode {
 	case "", "none":
-		return "", nil
+		return "direct", nil
 	case "custom":
 		return normalizeRequestProxyGo(firstNonEmpty(subscribe.CustomProxy, settings.CustomProxy)), nil
 	case "system":
-		return w.getSystemProxy()
+		return "", nil
 	case "kernel":
 		return "", errors.New("kernel proxy mode is not supported by the backend executor")
 	default:
@@ -2026,11 +2022,11 @@ func (w *scheduledTaskWorkerSupervisor) resolveGlobalRequestProxy(
 ) (string, error) {
 	switch settings.RequestProxyMode {
 	case "", "none":
-		return "", nil
+		return "direct", nil
 	case "custom":
 		return normalizeRequestProxyGo(settings.CustomProxy), nil
 	case "system":
-		return w.getSystemProxy()
+		return "", nil
 	case "kernel":
 		return "", errors.New("kernel proxy mode is not supported by the backend executor")
 	default:
@@ -2124,58 +2120,15 @@ func unpadPKCS7(payload []byte, blockSize int) ([]byte, error) {
 	return payload[:len(payload)-padding], nil
 }
 
-func parseSubscriptionProxies(body string, subscriptionType string) ([]map[string]any, error) {
-	if outbounds, ok := parseSubscriptionJSONOutbounds(body); ok {
-		return outbounds, nil
-	}
-	if proxies, ok := parseSubscriptionYAMLProxies(body); ok {
-		return proxies, nil
+func parseSubscriptionProxies(body string, _ string) ([]map[string]any, error) {
+	extracted, err := extractSubscription(body)
+	if err == nil {
+		return extracted.Proxies, nil
 	}
 	if looksLikeBase64(body) || looksLikeSubscriptionShareLinkList(body) {
 		return []map[string]any{{"base64": body}}, nil
 	}
-	if subscriptionType == "Manual" {
-		var proxies []map[string]any
-		if err := json.Unmarshal([]byte(body), &proxies); err != nil {
-			return nil, err
-		}
-		return proxies, nil
-	}
-	return nil, errors.New("Not a valid subscription data")
-}
-
-func parseSubscriptionJSONOutbounds(body string) ([]map[string]any, bool) {
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(body), &payload); err != nil {
-		return nil, false
-	}
-	items, ok := payload["outbounds"].([]any)
-	if !ok {
-		return nil, false
-	}
-	return anySliceToMapSlice(items), true
-}
-
-func parseSubscriptionYAMLProxies(body string) ([]map[string]any, bool) {
-	var payload map[string]any
-	if err := yaml.Unmarshal([]byte(body), &payload); err != nil {
-		return nil, false
-	}
-	items, ok := payload["proxies"].([]any)
-	if !ok {
-		return nil, false
-	}
-	return anySliceToMapSlice(items), true
-}
-
-func anySliceToMapSlice(items []any) []map[string]any {
-	output := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		if mapping, ok := item.(map[string]any); ok {
-			output = append(output, mapping)
-		}
-	}
-	return output
+	return nil, err
 }
 
 func needsNativeSubscriptionConvert(proxies []map[string]any) bool {
@@ -2240,11 +2193,6 @@ func applySubscriptionFilters(
 			continue
 		}
 
-		if subscribe.ProxyPrefix != "" && tag != "" && !strings.HasPrefix(tag, subscribe.ProxyPrefix) {
-			tag = subscribe.ProxyPrefix + tag
-			proxy["tag"] = tag
-		}
-
 		output = append(output, proxy)
 	}
 
@@ -2263,34 +2211,8 @@ func compileSmartRegexp(pattern string) (*regexp.Regexp, error) {
 	return regexp.Compile(regexp.QuoteMeta(trimmed))
 }
 
-func mapSubscriptionProxies(
-	proxies []map[string]any,
-	previous []subscriptionProxyConfig,
-) []subscriptionProxyConfig {
-	output := make([]subscriptionProxyConfig, 0, len(proxies))
-	for index, proxy := range proxies {
-		tag := stringValue(proxy["tag"])
-		proxyType := stringValue(proxy["type"])
-		if tag == "" {
-			tag = fmt.Sprintf("proxy-%d-%d", time.Now().UnixNano(), index)
-		}
-		id := ""
-		for _, item := range previous {
-			if item.Tag == tag {
-				id = item.ID
-				break
-			}
-		}
-		if id == "" {
-			id = fmt.Sprintf("proxy-%d-%d", time.Now().UnixNano(), index)
-		}
-		output = append(output, subscriptionProxyConfig{
-			ID:   id,
-			Tag:  tag,
-			Type: proxyType,
-		})
-	}
-	return output
+func mapSubscriptionProxies(proxies []map[string]any, previous []subscriptionProxyConfig) []subscriptionProxyConfig {
+	return reconcileSubscriptionIDs(previous, nil, proxies)
 }
 
 func looksLikeBase64(content string) bool {

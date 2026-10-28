@@ -213,7 +213,7 @@ func TestRecordScheduledTaskLogPersistsToDiskAndHydratesNewWorker(t *testing.T) 
 	if !logsResult.Flag {
 		t.Fatalf("GetScheduledTaskWorkerLogs failed: %s", logsResult.Data)
 	}
-	if logsResult.Data != `[{"id":"task-1","name":"Example","startTime":111,"endTime":222,"result":[{"ok":true,"result":"ok"}]}]` {
+	if logsResult.Data != `[{"source":"frontend","id":"task-1","name":"Example","startTime":111,"endTime":222,"result":[{"ok":true,"result":"ok"}]}]` {
 		t.Fatalf("unexpected persisted logs: %s", logsResult.Data)
 	}
 }
@@ -578,10 +578,7 @@ func TestDoUpdateSubscriptionHTTPConvertsShareLinksWithoutPlugin(t *testing.T) {
 		RequestMethod:    "GET",
 		RequestTimeout:   15,
 		RequestProxyMode: "none",
-		Header: struct {
-			Request  map[string]string `json:"request" yaml:"request"`
-			Response map[string]string `json:"response" yaml:"response"`
-		}{
+		Header: subscriptionHeaderConfig{
 			Request:  map[string]string{},
 			Response: map[string]string{},
 		},
@@ -636,10 +633,10 @@ func TestDoUpdateSubscriptionManualPurePath(t *testing.T) {
 	if subscribe.UpdateTime == 0 {
 		t.Fatal("expected UpdateTime to be set")
 	}
-	if len(subscribe.Proxies) != 2 {
-		t.Fatalf("expected 2 proxies after filtering, got %d", len(subscribe.Proxies))
+	if len(subscribe.Proxies) != 3 {
+		t.Fatalf("expected 3 unfiltered manual proxies, got %d", len(subscribe.Proxies))
 	}
-	if subscribe.Proxies[0].Tag != "PRE-us-a" {
+	if subscribe.Proxies[0].Tag != "us-a" {
 		t.Fatalf("unexpected first proxy tag: %s", subscribe.Proxies[0].Tag)
 	}
 }
@@ -677,10 +674,7 @@ func TestDoUpdateSubscriptionHTTPFollowsRedirect(t *testing.T) {
 		RequestMethod:    "GET",
 		RequestTimeout:   15,
 		RequestProxyMode: "none",
-		Header: struct {
-			Request  map[string]string `json:"request" yaml:"request"`
-			Response map[string]string `json:"response" yaml:"response"`
-		}{
+		Header: subscriptionHeaderConfig{
 			Request:  map[string]string{},
 			Response: map[string]string{},
 		},
@@ -729,10 +723,7 @@ func TestDoUpdateSubscriptionHTTPDecryptsEncryptedPayload(t *testing.T) {
 		RequestMethod:    "GET",
 		RequestTimeout:   15,
 		RequestProxyMode: "none",
-		Header: struct {
-			Request  map[string]string `json:"request" yaml:"request"`
-			Response map[string]string `json:"response" yaml:"response"`
-		}{
+		Header: subscriptionHeaderConfig{
 			Request:  map[string]string{},
 			Response: map[string]string{},
 		},

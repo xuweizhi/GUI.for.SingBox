@@ -2,7 +2,7 @@
 import { ref, inject, computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { HttpGet } from '@/bridge'
+import { GetSystemProxy, HttpGet } from '@/bridge'
 import {
   DefaultTestTimeout,
   DefaultTestURL,
@@ -90,7 +90,13 @@ const handleTestProxy = async () => {
     sub.value.requestProxyMode === RequestProxyMode.Global
       ? await GetRequestProxy()
       : await GetRequestProxy(sub.value.requestProxyMode, sub.value.customProxy)
-  if (!proxy) {
+  const mode =
+    sub.value.requestProxyMode === RequestProxyMode.Global
+      ? appSettingsStore.app.requestProxyMode
+      : sub.value.requestProxyMode
+  const hasSystemProxy =
+    mode === RequestProxyMode.System && !!(await GetSystemProxy().catch(() => ''))
+  if (!proxy && !hasSystemProxy) {
     message.error('settings.requestProxy.empty')
     return
   }

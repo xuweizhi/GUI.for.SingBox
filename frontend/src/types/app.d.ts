@@ -376,6 +376,8 @@ declare global {
     }
 
     interface ProfileRuleSet {
+      // Original local path retained when a raw rule-set has no GUI resource ID.
+      native_path?: string
       id: string
       type: RuleSetType
       tag: string

@@ -17,6 +17,16 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
   const hydrated = ref(false)
   const bootstrapped = ref(false)
   const lastError = ref('')
+  let verificationRevision = 0
+  let verificationController: AbortController | undefined
+  let pendingVerification: Promise<boolean> | undefined
+
+  const invalidateVerification = () => {
+    verificationRevision += 1
+    verificationController?.abort()
+    verificationController = undefined
+    pendingVerification = undefined
+  }
 
   const hydrate = () => {
     if (hydrated.value) return
@@ -40,44 +50,62 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
     localStorage.removeItem(WEBUI_TOKEN_STORAGE_KEY)
   }
 
-  const verifyToken = async (candidate = token.value) => {
+  const verifyToken = (candidate = token.value) => {
+    invalidateVerification()
+    const revision = verificationRevision
+    const controller = new AbortController()
+    verificationController = controller
     const nextToken = candidate.trim()
     status.value = 'checking'
-
-    const response = await fetch(
-      WEBUI_SESSION_ENDPOINT,
-      nextToken
-        ? {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: nextToken }),
+    const verification = (async () => {
+      try {
+        const response = await fetch(WEBUI_SESSION_ENDPOINT, {
+          ...(nextToken
+            ? {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: nextToken }),
+              }
+            : { method: 'GET' }),
+          signal: controller.signal,
+        })
+        if (revision !== verificationRevision) return false
+        if (!response.ok) {
+          status.value = 'idle'
+          if (isUnauthorizedStatus(response.status)) {
+            clearToken()
+            lastError.value = 'auth.invalidToken'
+            return false
           }
-        : { method: 'GET' },
-    )
-
-    if (!response.ok) {
-      status.value = 'idle'
-      if (isUnauthorizedStatus(response.status)) {
-        clearToken()
-        lastError.value = 'auth.invalidToken'
-        return false
+          throw new Error(`Unexpected auth status: ${response.status}`)
+        }
+        setToken(nextToken)
+        status.value = 'authenticated'
+        lastError.value = ''
+        return true
+      } catch (error) {
+        if (revision !== verificationRevision) return false
+        status.value = 'idle'
+        throw error
+      } finally {
+        if (revision === verificationRevision) {
+          pendingVerification = undefined
+          verificationController = undefined
+        }
       }
-      throw new Error(`Unexpected auth status: ${response.status}`)
-    }
-
-    setToken(nextToken)
-    status.value = 'authenticated'
-    lastError.value = ''
-    return true
+    })()
+    pendingVerification = verification
+    return verification
   }
 
   const ensureAuthenticated = async () => {
     hydrate()
     if (status.value === 'authenticated') return true
-    return verifyToken(token.value)
+    return pendingVerification || verifyToken(token.value)
   }
 
   const handleUnauthorized = async () => {
+    invalidateVerification()
     clearToken()
     status.value = 'idle'
     bootstrapped.value = false
@@ -90,14 +118,18 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
   }
 
   const logout = async () => {
+    invalidateVerification()
+    const revision = verificationRevision
     try {
       await fetch(WEBUI_SESSION_ENDPOINT, { method: 'DELETE' })
     } finally {
-      clearToken()
-      status.value = 'idle'
-      bootstrapped.value = false
-      lastError.value = ''
-      await router.replace('/login')
+      if (revision === verificationRevision) {
+        clearToken()
+        status.value = 'idle'
+        bootstrapped.value = false
+        lastError.value = ''
+        await router.replace('/login')
+      }
     }
   }
 

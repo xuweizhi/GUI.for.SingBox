@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/http/httpproxy"
 )
 
 type requestTransportKey struct {
@@ -83,7 +85,20 @@ func sanitizedURLForLog(rawURL string) string {
 }
 
 func requestProxy(proxyAddr string) func(*http.Request) (*url.URL, error) {
-	proxy := http.ProxyFromEnvironment
+	if strings.EqualFold(strings.TrimSpace(proxyAddr), "direct") {
+		return nil
+	}
+	// Apply standard HTTP(S)/NO_PROXY rules, with the documented ALL_PROXY fallback.
+	config := httpproxy.FromEnvironment()
+	fallback := firstNonEmpty(os.Getenv("ALL_PROXY"), os.Getenv("all_proxy"))
+	if config.HTTPProxy == "" {
+		config.HTTPProxy = fallback
+	}
+	if config.HTTPSProxy == "" {
+		config.HTTPSProxy = fallback
+	}
+	resolve := config.ProxyFunc()
+	proxy := func(req *http.Request) (*url.URL, error) { return resolve(req.URL) }
 
 	if proxyAddr != "" {
 		proxyUrl, err := url.Parse(proxyAddr)

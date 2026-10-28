@@ -28,7 +28,7 @@ func isCoreExecRequest(path string, options ExecOptions) bool {
 }
 
 func (a *App) reuseExistingCoreProcess(path string, args []string, endEvent string, pidPath string) (FlagResult, bool) {
-	if pid, ok := existingCorePIDFromFile(path, pidPath); ok {
+	if pid, ok := existingCorePIDFromFile(path, pidPath, args); ok {
 		log.Printf("Reusing existing core from pid file with PID %d", pid)
 		if endEvent != "" {
 			watchExistingCoreExit(a, pid, endEvent, pidPath)
@@ -50,7 +50,7 @@ func (a *App) reuseExistingCoreProcess(path string, args []string, endEvent stri
 	return FlagResult{}, false
 }
 
-func existingCorePIDFromFile(path string, pidPath string) (int, bool) {
+func existingCorePIDFromFile(path string, pidPath string, args []string) (int, bool) {
 	if strings.TrimSpace(pidPath) == "" {
 		return 0, false
 	}
@@ -75,7 +75,7 @@ func existingCorePIDFromFile(path string, pidPath string) (int, bool) {
 		return 0, false
 	}
 
-	if !processMatchesExecutable(int32(pid), path) {
+	if !processMatchesCore(int32(pid), path, args) {
 		return 0, false
 	}
 
@@ -103,7 +103,7 @@ func (a *App) existingCorePIDFromController(path string, args []string) (int, bo
 		return 0, false
 	}
 
-	if !processMatchesExecutable(int32(pid), path) {
+	if !processMatchesCore(int32(pid), path, args) {
 		return 0, false
 	}
 
@@ -111,12 +111,17 @@ func (a *App) existingCorePIDFromController(path string, args []string) (int, bo
 }
 
 func coreConfigPathFromArgs(args []string) string {
-	for index := 0; index < len(args); index++ {
-		switch args[index] {
-		case "-c", "--config":
-			if index+1 < len(args) {
-				return resolvePath(args[index+1])
-			}
+	base, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	identity, ok := coreProcessIdentity(args, base)
+	if !ok {
+		return ""
+	}
+	for _, value := range identity {
+		if path, found := strings.CutPrefix(value, "config="); found {
+			return path
 		}
 	}
 
@@ -137,56 +142,150 @@ func controllerPortFromConfig(configPath string, fallback uint32) uint32 {
 	return parseControllerPort(coreConfig.Experimental.ClashAPI.ExternalController, fallback)
 }
 
+// A process name is not ownership evidence: another installation can use the
+// same basename, or the same binary with a different configuration.
 func processMatchesExecutable(pid int32, expectedPath string) bool {
 	proc, err := process.NewProcess(pid)
 	if err != nil {
 		return false
 	}
+	expectedPath = canonicalProcessPath(resolvePath(expectedPath), "")
+	if exe, err := proc.Exe(); err == nil && exe != "" {
+		return canonicalProcessPath(exe, "") == expectedPath
+	}
+	// Some platforms cannot expose the executable. Only argv[0] with a complete
+	// path is a usable fallback; never search arbitrary arguments or a basename.
+	args, err := proc.CmdlineSlice()
+	if err != nil || len(args) == 0 || !filepath.IsAbs(args[0]) {
+		return false
+	}
+	return canonicalProcessPath(args[0], "") == expectedPath
+}
 
-	expectedPath = normalizeProcessPath(resolvePath(expectedPath))
-	expectedBase := normalizeProcessPath(filepath.Base(expectedPath))
-
-	matches := func(value string) bool {
-		normalized := normalizeProcessPath(value)
-		if normalized == "" {
-			return false
+func canonicalProcessPath(value, base string) string {
+	if value == "" {
+		return ""
+	}
+	if !filepath.IsAbs(value) {
+		if base == "" {
+			return ""
 		}
+		value = filepath.Join(base, value)
+	}
+	value = filepath.Clean(value)
+	if resolved, err := filepath.EvalSymlinks(value); err == nil {
+		value = resolved
+	}
+	return filepath.ToSlash(value)
+}
 
-		if normalized == expectedPath || normalized == expectedBase {
-			return true
+// Identity includes every supplied config file/directory and the core data
+// directory. Unidentified or extra configuration must not be silently adopted.
+func coreProcessIdentity(args []string, base string) ([]string, bool) {
+	values := map[string][]string{}
+	names := map[string]string{"-c": "config", "--config": "config", "-C": "config-directory", "--config-directory": "config-directory", "-D": "directory", "--directory": "directory"}
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			break
 		}
-
-		return normalizeProcessPath(filepath.Base(normalized)) == expectedBase
+		option, value, assigned := strings.Cut(args[i], "=")
+		// pflag also accepts -c/path and -C/path; ignoring these could hide
+		// extra configuration belonging to another installation.
+		if len(args[i]) > 2 && args[i][0] == '-' && args[i][1] != '-' {
+			if _, known := names[args[i][:2]]; known {
+				option = args[i][:2]
+				value = strings.TrimPrefix(args[i][2:], "=")
+				assigned = true
+			}
+		}
+		name, ok := names[option]
+		if !ok {
+			continue
+		}
+		if !assigned {
+			i++
+			if i >= len(args) {
+				return nil, false
+			}
+			value = args[i]
+		}
+		if value == "" || (name == "config" && value == "stdin") {
+			return nil, false
+		}
+		values[name] = append(values[name], value)
 	}
-
-	if name, err := proc.Name(); err == nil && matches(name) {
-		return true
+	if len(values["directory"]) > 1 {
+		return nil, false
 	}
-
-	if exePath, err := proc.Exe(); err == nil && matches(exePath) {
-		return true
+	directory := base
+	if len(values["directory"]) == 1 {
+		directory = canonicalProcessPath(values["directory"][0], base)
 	}
+	identity := []string{}
+	if len(values["directory"]) == 1 {
+		identity = append(identity, "directory="+directory)
+	}
+	for _, name := range []string{"config", "config-directory"} {
+		for _, value := range values[name] {
+			path := canonicalProcessPath(value, directory)
+			if path == "" {
+				return nil, false
+			}
+			identity = append(identity, name+"="+path)
+		}
+	}
+	return identity, len(identity) > 0
+}
 
-	cmdline, err := proc.CmdlineSlice()
+func processMatchesCore(pid int32, expectedPath string, expectedArgs []string) bool {
+	if !processMatchesExecutable(pid, expectedPath) {
+		return false
+	}
+	proc, err := process.NewProcess(pid)
 	if err != nil {
 		return false
 	}
-
-	for _, value := range cmdline {
-		if matches(value) {
-			return true
+	args, err := proc.CmdlineSlice()
+	if err != nil || len(args) < 2 {
+		return false
+	}
+	cwd, err := proc.Cwd()
+	if err != nil {
+		cwd = ""
+	}
+	base, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	expected, ok := coreProcessIdentity(expectedArgs, base)
+	if !ok {
+		return false
+	}
+	actual, ok := coreProcessIdentity(args[1:], cwd)
+	match := func(actual []string, valid bool) bool {
+		if !valid || len(expected) != len(actual) {
+			return false
+		}
+		for i := range expected {
+			if expected[i] != actual[i] {
+				return false
+			}
+		}
+		return true
+	}
+	if match(actual, ok) {
+		return true
+	}
+	// sing-box chdirs before loading its config. A relative -D in argv must
+	// not be applied twice to the resulting /proc cwd. Only retry against our
+	// launch base when the process is already in the expected data directory.
+	for _, identity := range expected {
+		if directory, found := strings.CutPrefix(identity, "directory="); found && canonicalProcessPath(cwd, "") == directory {
+			actual, ok = coreProcessIdentity(args[1:], base)
+			return match(actual, ok)
 		}
 	}
-
 	return false
-}
-
-func normalizeProcessPath(value string) string {
-	trimmed := strings.TrimSpace(strings.Trim(value, `"'`))
-	if trimmed == "" {
-		return ""
-	}
-	return filepath.ToSlash(filepath.Clean(trimmed))
 }
 
 func watchExistingCoreExit(a *App, pid int, endEvent string, pidPath string) {

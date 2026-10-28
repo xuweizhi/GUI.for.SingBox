@@ -42,22 +42,25 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const { promise: editorReady, resolve: markEditorReady } = Promise.withResolvers()
-let internalUpdate = true
+let applyingExternalUpdate = false
+let disposed = false
 
 watch(
   () => props.modelValue,
   async (val) => {
     await editorReady
+    if (disposed || val !== props.modelValue) return
     const view = editorView || mergeView?.b
     if (view && val != view.state.doc.toString()) {
-      internalUpdate = false
-      view.dispatch({
-        changes: {
-          from: 0,
-          to: view.state.doc.length,
-          insert: val,
-        },
-      })
+      notifyChange.cancel()
+      applyingExternalUpdate = true
+      try {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: val },
+        })
+      } finally {
+        applyingExternalUpdate = false
+      }
     }
   },
 )
@@ -68,13 +71,13 @@ const themeCompartment = new Compartment()
 const domRef = useTemplateRef('domRef')
 const appSettings = useAppSettingsStore()
 
-const onChange = debounce((content: string) => {
-  if (internalUpdate) {
-    emit('update:modelValue', content)
-    emit('change', content)
-  }
-  internalUpdate = true
-}, 300)
+const notifyChange = debounce((content: string) => emit('change', content), 300)
+const onChange = (content: string) => {
+  if (applyingExternalUpdate || disposed) return
+  // Save actions must always observe the document currently shown in the editor.
+  emit('update:modelValue', content)
+  void notifyChange(content)
+}
 
 const formatDoc = async (view: EditorView) => {
   const content = view.state.doc.toString()
@@ -125,6 +128,8 @@ watch(
 let timer: ReturnType<typeof setTimeout>
 onMounted(() => (timer = setTimeout(() => initEditor(), inject(IS_IN_MODAL, false) ? 100 : 0)))
 onUnmounted(() => {
+  disposed = true
+  notifyChange.cancel()
   clearTimeout(timer)
   const view = editorView || mergeView
   view?.destroy()

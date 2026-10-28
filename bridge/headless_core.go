@@ -104,8 +104,9 @@ func (a *App) findExistingHeadlessCore(port uint32) (int, bool) {
 		return 0, false
 	}
 
-	processInfo := a.ProcessInfo(int32(pid))
-	if !processInfo.Flag || !strings.HasPrefix(processInfo.Data, "sing-box") {
+	path := headlessCoreWorkingDirectory + "/" + getHeadlessCoreFileName()
+	args := processHeadlessCoreArgs(getHeadlessKernelRuntimeConfig().Args)
+	if !processMatchesCore(int32(pid), path, args) {
 		return 0, false
 	}
 

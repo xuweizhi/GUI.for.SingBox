@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
 
-import { HttpGet } from '@/bridge'
+import { GetSystemProxy, HttpGet } from '@/bridge'
 import { DefaultTestTimeout, DefaultTestURL, RequestProxyModeOptions } from '@/constant/app'
 import { RequestProxyMode } from '@/enums/app'
 import { useAppSettingsStore } from '@/stores'
@@ -22,7 +22,10 @@ const getCurrentProxy = async () => {
 
 const handleTestProxy = async () => {
   const proxy = await getCurrentProxy()
-  if (!proxy) {
+  const hasSystemProxy =
+    appSettings.app.requestProxyMode === RequestProxyMode.System &&
+    !!(await GetSystemProxy().catch(() => ''))
+  if (!proxy && !hasSystemProxy) {
     message.error('settings.requestProxy.empty')
     return
   }

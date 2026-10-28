@@ -18,6 +18,7 @@ import {
   readonly,
   base64Encode,
 } from '@/utils'
+import { persistConfigFiles, withConfigMutation } from '@/utils/configPersistence'
 
 type PluginRuntimeCache = {
   plugin: App.Plugin
@@ -344,7 +345,13 @@ export const usePluginsStore = defineStore('plugins', () => {
       const userSettings = appSettingsStore.app.pluginSettings[plugin.id]
       if (userSettings) {
         for (const key in userSettings) {
-          configuration[key] = userSettings[key]
+          const value = userSettings[key]
+          const fallback = configuration[key]
+          const type = (item: unknown) => (Array.isArray(item) ? 'array' : typeof item)
+          // Keep persisted overrides intact, but changed schema types use the new default.
+          if (!Object.hasOwn(configuration, key) || type(value) === type(fallback)) {
+            configuration[key] = value
+          }
         }
       }
 
@@ -435,15 +442,22 @@ export const usePluginsStore = defineStore('plugins', () => {
     }
   }
 
-  const savePlugins = () => {
-    const p = omitArray(plugins.value, ['updating', 'loading', 'running'])
-    return WriteFile(PluginsFilePath, stringifyNoFolding(p))
-  }
+  const persistPlugins = (items: App.Plugin[]) =>
+    persistConfigFiles([
+      {
+        path: PluginsFilePath,
+        content: stringifyNoFolding(omitArray(items, ['updating', 'loading', 'running'])),
+      },
+    ])
+  const savePlugins = () => withConfigMutation(() => persistPlugins(plugins.value))
 
   const addPlugin = async (plugin: App.Plugin) => {
-    plugins.value.push(plugin)
-    upsertPluginCache(plugin)
-    syncPluginObservers(plugin, !plugin.disabled)
+    await withConfigMutation(async () => {
+      await persistPlugins([...plugins.value, plugin])
+      plugins.value.push(plugin)
+      upsertPluginCache(plugin)
+      syncPluginObservers(plugin, !plugin.disabled)
+    })
     await _doUpdatePlugin(plugin).catch(() => {})
     await runPluginEvent(plugin.id, PluginTriggerEvent.OnInstall, [], {
       allowDisabled: true,
@@ -472,10 +486,12 @@ export const usePluginsStore = defineStore('plugins', () => {
       allowUndefined: true,
     })
 
-    plugins.value.splice(idx, 1)
-
-    syncPluginObservers(plugin, false)
-    releasePluginRuntimeCache(id)
+    await withConfigMutation(async () => {
+      await persistPlugins(plugins.value.filter((item) => item.id !== id))
+      plugins.value = plugins.value.filter((item) => item.id !== id)
+      syncPluginObservers(plugin, false)
+      releasePluginRuntimeCache(id)
+    })
 
     if (plugin.path.startsWith('data')) {
       await RemoveFile(plugin.path).catch(() => {})
@@ -506,20 +522,21 @@ export const usePluginsStore = defineStore('plugins', () => {
       await disposePluginInstance(id)
     }
 
-    plugins.value.splice(idx, 1, newPlugin)
-    syncPluginObservers(newPlugin, !newPlugin.disabled)
-
-    if (shouldDisable) {
-      releasePluginRuntimeCache(id)
-    } else {
-      if (shouldResetModule) {
-        await disposePluginInstance(id)
+    if (shouldResetModule && !shouldDisable) await disposePluginInstance(id)
+    await withConfigMutation(async () => {
+      const index = plugins.value.findIndex((item) => item.id === id)
+      if (index === -1) throw new Error(`${id} Not Found`)
+      const next = plugins.value.map((item, i) => (i === index ? newPlugin : item))
+      await persistPlugins(next)
+      plugins.value.splice(index, 1, newPlugin)
+      syncPluginObservers(newPlugin, !newPlugin.disabled)
+      if (shouldDisable) {
+        releasePluginRuntimeCache(id)
+      } else {
+        upsertPluginCache(newPlugin)
+        if (shouldResetModule) resetPluginModuleCache(id)
       }
-      upsertPluginCache(newPlugin)
-      if (shouldResetModule) {
-        resetPluginModuleCache(id)
-      }
-    }
+    })
 
     if (shouldEnable) {
       upsertPluginCache(newPlugin)
@@ -528,84 +545,111 @@ export const usePluginsStore = defineStore('plugins', () => {
         allowUndefined: true,
       })
     }
-
-    await savePlugins()
   }
 
-  const updatePluginState = async (id: string, newPlugin: App.Plugin) => {
-    const idx = plugins.value.findIndex((v) => v.id === id)
-    if (idx === -1) return
-
-    plugins.value.splice(idx, 1, newPlugin)
-    syncPluginObservers(newPlugin, !newPlugin.disabled)
-    if (PluginsCache[id]) {
-      upsertPluginCache(newPlugin)
-    }
-    await savePlugins()
-  }
+  const updatePluginState = (id: string, newPlugin: App.Plugin) =>
+    withConfigMutation(async () => {
+      const idx = plugins.value.findIndex((v) => v.id === id)
+      if (idx === -1) return
+      const next = plugins.value.map((item, index) => (index === idx ? newPlugin : item))
+      await persistPlugins(next)
+      plugins.value.splice(idx, 1, newPlugin)
+      syncPluginObservers(newPlugin, !newPlugin.disabled)
+      if (PluginsCache[id]) upsertPluginCache(newPlugin)
+    })
 
   const _doUpdatePlugin = async (plugin: App.Plugin) => {
-    let nextPlugin = plugin
-    const isFromPluginHub = plugin.id.startsWith('plugin-')
-    if (isFromPluginHub) {
-      const newPlugin = pluginHub.value.find((v) => v.id === plugin.id)
-      if (!newPlugin) throw 'Plugin not found. Please update the Plugin-Hub.'
-
-      const [major_now, minor_now, patch_now] = (plugin.version || '').substring(1).split('.')
-      const [major_new, minor_new, patch_new] = (newPlugin.version || '').substring(1).split('.')
-
-      if (major_now !== major_new) {
-        newPlugin.updating = plugin.updating
-        newPlugin.loading = plugin.loading
-        newPlugin.running = plugin.running
-        await editPlugin(plugin.id, deepClone(newPlugin))
-        const userSettigns = appSettingsStore.app.pluginSettings[plugin.id]
-        if (userSettigns) {
-          appSettingsStore.app.pluginSettings[plugin.id] = newPlugin.configuration.reduce(
-            (p, c) => {
-              const value_now = userSettigns[c.key]
-              const value_new = c.value
-              const type_now = Array.isArray(value_now) ? 'array' : typeof value_now
-              const type_new = Array.isArray(value_new) ? 'array' : typeof value_new
-              return {
-                ...p,
-                [c.key]: type_now === type_new ? value_now : value_new,
-              }
-            },
-            {},
-          )
+    // Fetch and normalize before publishing either the installed version or its source.
+    const identity = (item: App.Plugin) =>
+      JSON.stringify(omitArray([item], ['disabled', 'status', 'updating', 'loading', 'running']))
+    const installedIdentity = identity(plugin)
+    let nextPlugin = deepClone(plugin)
+    if (plugin.id.startsWith('plugin-')) {
+      const candidate = pluginHub.value.find((item) => item.id === plugin.id)
+      if (!candidate) throw new Error('Plugin not found. Please update the Plugin-Hub.')
+      const major = (version: string) => (version || '').replace(/^v/, '').split('.')[0]
+      if (major(plugin.version) !== major(candidate.version)) {
+        nextPlugin = {
+          ...deepClone(candidate),
+          id: plugin.id,
+          path: plugin.path,
+          disabled: plugin.disabled,
+          status: plugin.status,
         }
-        nextPlugin = newPlugin
-      } else if (minor_now !== minor_new || patch_now !== patch_new) {
-        plugin.version = newPlugin.version
-        await editPlugin(plugin.id, plugin)
+      } else {
+        nextPlugin.version = candidate.version
       }
     }
 
     let code = ''
-
     if (nextPlugin.type === 'File') {
-      code = await ReadFile(nextPlugin.path).catch(() => '')
-    }
-
-    if (nextPlugin.type === 'Http') {
-      const { status, body } = await HttpGet(nextPlugin.url)
-      if (status !== 200) {
+      code = await ReadFile(nextPlugin.path)
+    } else if (nextPlugin.type === 'Http') {
+      const { status, body } = await HttpGet<string>(nextPlugin.url)
+      if (status !== 200)
         throw new Error(`Failed to fetch plugin code from ${nextPlugin.url}. Status: ${status}`)
-      }
       code = body
     }
-
     code = normalizePluginCode(nextPlugin, code)
+    await disposePluginInstance(plugin.id)
 
-    if (nextPlugin.type !== 'File') {
-      await WriteFile(nextPlugin.path, code)
+    await withConfigMutation(async () => {
+      const index = plugins.value.findIndex((item) => item.id === plugin.id)
+      const current = plugins.value[index]
+      if (!current || identity(current) !== installedIdentity)
+        throw new Error('Plugin changed during update; retry the update')
+      // User state may change while downloading. Configuration overrides stay in app settings;
+      // new schema defaults are merged by getPluginMetadata without discarding user values.
+      nextPlugin = {
+        ...nextPlugin,
+        disabled: current.disabled,
+        status: current.status,
+        updating: current.updating,
+        loading: current.loading,
+        running: current.running,
+      }
+      const next = plugins.value.map((item, i) => (i === index ? nextPlugin : item))
+      await persistConfigFiles([
+        ...(nextPlugin.type === 'File' ? [] : [{ path: nextPlugin.path, content: code }]),
+        {
+          path: PluginsFilePath,
+          content: stringifyNoFolding(omitArray(next, ['updating', 'loading', 'running'])),
+        },
+      ])
+      plugins.value.splice(index, 1, nextPlugin)
+      upsertPluginCache(nextPlugin, code)
+      syncPluginObservers(nextPlugin, !nextPlugin.disabled)
+      resetPluginModuleCache(nextPlugin.id)
+    })
+  }
+
+  const reloadFromDisk = async () => {
+    // Lifecycle callbacks may save configuration, so never execute them while holding its lock.
+    for (const plugin of plugins.value) {
+      await disposePluginInstance(plugin.id).catch((error) =>
+        console.warn('Failed to dispose plugin:', error),
+      )
     }
-
-    await disposePluginInstance(nextPlugin.id)
-    upsertPluginCache(nextPlugin, code)
-    syncPluginObservers(nextPlugin, !nextPlugin.disabled)
-    resetPluginModuleCache(nextPlugin.id)
+    return withConfigMutation(async () => {
+      const parsed = parse(await ReadFile(PluginsFilePath)) as App.Plugin[]
+      if (!Array.isArray(parsed)) throw new Error('Plugins file must contain an array')
+      // Read every source before changing live metadata so a failed refresh remains retryable.
+      const sources = await Promise.all(
+        parsed.map(async (plugin) => ({
+          plugin,
+          code: normalizePluginCode(plugin, await ReadFile(plugin.path)),
+        })),
+      )
+      for (const plugin of plugins.value) {
+        syncPluginObservers(plugin, false)
+        releasePluginRuntimeCache(plugin.id)
+      }
+      plugins.value = parsed
+      for (const { plugin, code } of sources) {
+        upsertPluginCache(plugin, code)
+        syncPluginObservers(plugin, !plugin.disabled)
+      }
+    })
   }
 
   const updatePlugin = async (id: string) => {
@@ -617,31 +661,30 @@ export const usePluginsStore = defineStore('plugins', () => {
       return `Plugin [${plugin.name}] updated successfully.`
     } finally {
       plugin.updating = false
+      const current = getPluginById(plugin.id)
+      if (current) current.updating = false
     }
   }
 
   const updatePlugins = async () => {
-    let needSave = false
-
     const update = async (plugin: App.Plugin) => {
       const result = { ok: true, id: plugin.id, name: plugin.name, result: '' }
       try {
         plugin.updating = true
         await _doUpdatePlugin(plugin)
-        needSave = true
         result.result = `Plugin [${plugin.name}] updated successfully.`
       } catch (error: any) {
         result.ok = false
         result.result = `Failed to update plugin [${plugin.name}]. Reason: ${error.message || error}`
       } finally {
         plugin.updating = false
+        const current = getPluginById(plugin.id)
+        if (current) current.updating = false
       }
       return result
     }
 
     const result = await asyncPool(5, plugins.value, update)
-
-    if (needSave) await savePlugins()
 
     return result.flatMap((v) => (v.ok && v.value) || [])
   }
@@ -800,6 +843,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     plugins,
     setupPlugins,
     savePlugins,
+    reloadFromDisk,
     addPlugin,
     editPlugin,
     updatePluginState,

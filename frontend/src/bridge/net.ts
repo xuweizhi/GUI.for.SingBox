@@ -64,7 +64,6 @@ const mergeNetOptions = (options: NetOptions = {}): Required<NetOptions> => ({
 
 const mergeRequestOptions = async (options: Request['options']) => {
   const mergedReqOpts: Required<Request['options']> = {
-    Proxy: options?.Proxy ?? (await GetRequestProxy()),
     Insecure: false,
     Redirect: true,
     Timeout: 15, // 15 seconds
@@ -73,6 +72,7 @@ const mergeRequestOptions = async (options: Request['options']) => {
     Sha256: '',
     Stream: '',
     ...options,
+    Proxy: options?.Proxy ?? (await GetRequestProxy()),
   }
   return mergedReqOpts
 }

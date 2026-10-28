@@ -15,7 +15,7 @@ router.beforeEach(async (to) => {
 
   if (to.meta.public) {
     if (to.path === '/login') {
-      const ok = await authStore.ensureAuthenticated()
+      const ok = await authStore.ensureAuthenticated().catch(() => false)
       if (ok) {
         return resolveRedirectTarget(to.query.redirect as string | undefined)
       }
@@ -24,7 +24,7 @@ router.beforeEach(async (to) => {
     return true
   }
 
-  const ok = await authStore.ensureAuthenticated()
+  const ok = await authStore.ensureAuthenticated().catch(() => false)
   if (ok) return true
 
   return buildLoginRedirect(to.fullPath)

@@ -65,7 +65,7 @@ Object.defineProperty(window, 'matchMedia', {
 })
 
 import { ScheduledTasksType } from '@/enums/app'
-import { useLogsStore, useScheduledTasksStore, useSubscribesStore } from '@/stores'
+import { useLogsStore, useScheduledTasksStore, useSubscribesStore, usePluginsStore } from '@/stores'
 
 describe('scheduledtasks store', () => {
   beforeEach(() => {
@@ -106,6 +106,7 @@ describe('scheduledtasks store', () => {
 
   it('hydrates worker logs and applies log events to task lastTime', async () => {
     setActivePinia(createPinia())
+    vi.spyOn(usePluginsStore(), 'reloadFromDisk').mockResolvedValue(undefined)
     const workerLog = createLog(100)
     const eventLog = createLog(300)
     bridgeMocks.GetScheduledTaskWorkerLogs.mockResolvedValue([workerLog])

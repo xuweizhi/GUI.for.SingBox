@@ -45,3 +45,48 @@ export const replaceFileWithRollback = async (
     throw commitError
   }
 }
+
+export type ConfigFileWrite = { path: string; content: string }
+export type ConfigFileOps = {
+  exists: (path: string) => Promise<boolean>
+  read: (path: string) => Promise<string>
+  write: (path: string, content: string) => Promise<unknown>
+  remove: (path: string) => Promise<unknown>
+}
+
+/** The bridge writes each individual file atomically. Restore original disk contents
+ * if any file in a related update fails; callers serialize the complete read/modify/write. */
+export const writeFilesWithRollback = async (files: ConfigFileWrite[], ops: ConfigFileOps) => {
+  const paths = new Set<string>()
+  const snapshots: Array<{ path: string; content?: string }> = []
+  for (const file of files) {
+    if (paths.has(file.path)) throw new Error(`Duplicate transaction path: ${file.path}`)
+    paths.add(file.path)
+    const exists = await ops.exists(file.path)
+    snapshots.push({ path: file.path, ...(exists ? { content: await ops.read(file.path) } : {}) })
+  }
+  let attempted = 0
+  try {
+    for (const file of files) {
+      attempted++
+      await ops.write(file.path, file.content)
+    }
+  } catch (error) {
+    const rollbackErrors: string[] = []
+    for (const snapshot of snapshots.slice(0, attempted).reverse()) {
+      try {
+        if (snapshot.content === undefined) await ops.remove(snapshot.path)
+        else await ops.write(snapshot.path, snapshot.content)
+      } catch (rollbackError) {
+        rollbackErrors.push(`${snapshot.path}: ${errorMessage(rollbackError)}`)
+      }
+    }
+    if (rollbackErrors.length) {
+      throw new Error(
+        `Failed to save configuration (${errorMessage(error)}). Failed to restore original files: ${rollbackErrors.join('; ')}`,
+        { cause: error },
+      )
+    }
+    throw error
+  }
+}

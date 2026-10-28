@@ -15,6 +15,7 @@ import {
   migrateRulesets,
   omitArray,
 } from '@/utils'
+import { persistConfigFiles, withConfigMutation } from '@/utils/configPersistence'
 
 export const useRulesetsStore = defineStore('rulesets', () => {
   const rulesets = ref<App.RuleSet[]>([])
@@ -30,51 +31,105 @@ export const useRulesetsStore = defineStore('rulesets', () => {
     list && (rulesetHub.value = JSON.parse(list))
   }
 
-  const saveRulesets = () => {
+  const writeRulesets = () => {
     const r = omitArray(rulesets.value, ['updating'])
     return WriteFile(RulesetsFilePath, stringifyNoFolding(r))
   }
 
-  const addRuleset = async (r: App.RuleSet) => {
-    rulesets.value.push(r)
-    try {
-      await saveRulesets()
-    } catch (error) {
-      const idx = rulesets.value.indexOf(r)
-      if (idx !== -1) {
-        rulesets.value.splice(idx, 1)
+  const saveRulesets = () => withConfigMutation(writeRulesets)
+
+  const reloadFromDisk = (options: { emitChanges?: boolean } = {}) =>
+    withConfigMutation(async () => {
+      const parsed = parse(await ReadFile(RulesetsFilePath))
+      if (!Array.isArray(parsed)) throw new Error('Rulesets file must contain an array')
+      rulesets.value = parsed
+      if (options.emitChanges) eventBus.emit('rulesetsChange', undefined)
+    })
+
+  const saveLocalRuleset = (id: string, content: string) =>
+    withConfigMutation(async () => {
+      const index = rulesets.value.findIndex((rule) => rule.id === id)
+      const rule = rulesets.value[index]
+      if (!rule) throw new Error(`${id} Not Found`)
+      if (rule.format !== RulesetFormat.Source)
+        throw new Error('Only source rulesets can be edited')
+      let data: { version: number; rules: Record<string, unknown>[] }
+      try {
+        data = JSON.parse(content)
+      } catch {
+        throw new Error('Not a valid ruleset data')
       }
-      throw error
-    }
-  }
+      if (
+        !data ||
+        !Number.isInteger(data.version) ||
+        data.version < 1 ||
+        !Array.isArray(data.rules) ||
+        data.rules.some((item) => !item || typeof item !== 'object' || Array.isArray(item))
+      ) {
+        throw new Error('Not a valid ruleset data')
+      }
+      const count = data.rules.reduce(
+        (sum, item) =>
+          sum +
+          Object.values(item).reduce<number>(
+            (total, value) => total + (Array.isArray(value) ? value.length : 1),
+            0,
+          ),
+        0,
+      )
+      const nextRule = { ...rule, count, updateTime: Date.now() }
+      const next = rulesets.value.map((item, i) => (i === index ? nextRule : item))
+      await persistConfigFiles([
+        { path: rule.path, content },
+        { path: RulesetsFilePath, content: stringifyNoFolding(omitArray(next, ['updating'])) },
+      ])
+      rulesets.value.splice(index, 1, nextRule)
+      eventBus.emit('rulesetChange', { id })
+    })
 
-  const deleteRuleset = async (id: string) => {
-    const idx = rulesets.value.findIndex((v) => v.id === id)
-    if (idx === -1) return
-    const backup = rulesets.value.splice(idx, 1)[0]!
-    try {
-      await saveRulesets()
-    } catch (error) {
-      rulesets.value.splice(idx, 0, backup)
-      throw error
-    }
+  const addRuleset = (r: App.RuleSet) =>
+    withConfigMutation(async () => {
+      rulesets.value.push(r)
+      try {
+        await writeRulesets()
+      } catch (error) {
+        const idx = rulesets.value.indexOf(r)
+        if (idx !== -1) {
+          rulesets.value.splice(idx, 1)
+        }
+        throw error
+      }
+    })
 
-    eventBus.emit('rulesetChange', { id })
-  }
+  const deleteRuleset = (id: string) =>
+    withConfigMutation(async () => {
+      const idx = rulesets.value.findIndex((v) => v.id === id)
+      if (idx === -1) return
+      const backup = rulesets.value.splice(idx, 1)[0]!
+      try {
+        await writeRulesets()
+      } catch (error) {
+        rulesets.value.splice(idx, 0, backup)
+        throw error
+      }
 
-  const editRuleset = async (id: string, r: App.RuleSet) => {
-    const idx = rulesets.value.findIndex((v) => v.id === id)
-    if (idx === -1) return
-    const backup = rulesets.value.splice(idx, 1, r)[0]!
-    try {
-      await saveRulesets()
-    } catch (error) {
-      rulesets.value.splice(idx, 1, backup)
-      throw error
-    }
+      eventBus.emit('rulesetChange', { id })
+    })
 
-    eventBus.emit('rulesetChange', { id })
-  }
+  const editRuleset = (id: string, r: App.RuleSet) =>
+    withConfigMutation(async () => {
+      const idx = rulesets.value.findIndex((v) => v.id === id)
+      if (idx === -1) return
+      const backup = rulesets.value.splice(idx, 1, r)[0]!
+      try {
+        await writeRulesets()
+      } catch (error) {
+        rulesets.value.splice(idx, 1, backup)
+        throw error
+      }
+
+      eventBus.emit('rulesetChange', { id })
+    })
 
   const _doUpdateRuleset = async (r: App.RuleSet) => {
     if (r.format === RulesetFormat.Source) {
@@ -131,54 +186,56 @@ export const useRulesetsStore = defineStore('rulesets', () => {
     r.updateTime = Date.now()
   }
 
-  const updateRuleset = async (id: string) => {
-    const r = rulesets.value.find((v) => v.id === id)
-    if (!r) throw id + ' Not Found'
-    if (r.disabled) throw r.name + ' Disabled'
-    try {
-      r.updating = true
-      await _doUpdateRuleset(r)
-      await saveRulesets()
-    } finally {
-      r.updating = false
-    }
-
-    eventBus.emit('rulesetChange', { id })
-
-    return `Ruleset [${r.name}] updated successfully.`
-  }
-
-  const updateRulesets = async () => {
-    let needSave = false
-
-    const update = async (r: App.RuleSet) => {
-      const result = { ok: true, id: r.id, name: r.name, result: '' }
+  const updateRuleset = (id: string) =>
+    withConfigMutation(async () => {
+      const r = rulesets.value.find((v) => v.id === id)
+      if (!r) throw id + ' Not Found'
+      if (r.disabled) throw r.name + ' Disabled'
       try {
         r.updating = true
         await _doUpdateRuleset(r)
-        needSave = true
-        result.result = `Rule-Set [${r.name}] updated successfully.`
-      } catch (error: any) {
-        result.ok = false
-        result.result = `Failed to update rule-set [${r.name}]. Reason: ${error.message || error}`
+        await writeRulesets()
       } finally {
         r.updating = false
       }
-      return result
-    }
 
-    const result = await asyncPool(
-      5,
-      rulesets.value.filter((v) => !v.disabled),
-      update,
-    )
+      eventBus.emit('rulesetChange', { id })
 
-    if (needSave) await saveRulesets()
+      return `Ruleset [${r.name}] updated successfully.`
+    })
 
-    eventBus.emit('rulesetsChange', undefined)
+  const updateRulesets = () =>
+    withConfigMutation(async () => {
+      let needSave = false
 
-    return result.flatMap((v) => (v.ok && v.value) || [])
-  }
+      const update = async (r: App.RuleSet) => {
+        const result = { ok: true, id: r.id, name: r.name, result: '' }
+        try {
+          r.updating = true
+          await _doUpdateRuleset(r)
+          needSave = true
+          result.result = `Rule-Set [${r.name}] updated successfully.`
+        } catch (error: any) {
+          result.ok = false
+          result.result = `Failed to update rule-set [${r.name}]. Reason: ${error.message || error}`
+        } finally {
+          r.updating = false
+        }
+        return result
+      }
+
+      const result = await asyncPool(
+        5,
+        rulesets.value.filter((v) => !v.disabled),
+        update,
+      )
+
+      if (needSave) await writeRulesets()
+
+      eventBus.emit('rulesetsChange', undefined)
+
+      return result.flatMap((v) => (v.ok && v.value) || [])
+    })
 
   const rulesetHubLoading = ref(false)
   const updateRulesetHub = async () => {
@@ -200,6 +257,8 @@ export const useRulesetsStore = defineStore('rulesets', () => {
     rulesets,
     setupRulesets,
     saveRulesets,
+    saveLocalRuleset,
+    reloadFromDisk,
     addRuleset,
     editRuleset,
     deleteRuleset,

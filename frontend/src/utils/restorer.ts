@@ -41,6 +41,37 @@ const supportedRuleTypes = [
   RouteRuleType.ClashMode,
 ]
 
+// A simple form rule is safe only when it can represent every native field.
+// Preserve additional match/action fields in the inline payload instead of widening a rule.
+const simpleRuleType = (raw: Recordable, dns: boolean) => {
+  const hits = supportedRuleTypes.filter((key) => key in raw)
+  if (hits.length !== 1) return RouteRuleType.Inline
+  const type = hits[0]!
+  const action = raw.action || RuleAction.Route
+  const fields: Record<string, string[]> = dns
+    ? {
+        route: ['server', 'strategy', 'disable_cache', 'client_subnet'],
+        reject: ['method'],
+        'route-options': ['disable_cache', 'client_subnet'],
+        predefined: [],
+      }
+    : {
+        route: ['outbound'],
+        reject: ['method'],
+        sniff: ['sniffer'],
+        resolve: ['strategy', 'server'],
+        'route-options': [],
+        'hijack-dns': [],
+      }
+  const modeled = new Set(['action', 'invert', type, ...(fields[action] || [])])
+  if (Object.keys(raw).some((key) => !modeled.has(key))) return RouteRuleType.Inline
+  const values = Array.isArray(raw[type]) ? raw[type] : [raw[type]]
+  if (type === RouteRuleType.Inbound && values.length !== 1) return RouteRuleType.Inline
+  if (values.some((value: unknown) => typeof value === 'string' && value.includes(',')))
+    return RouteRuleType.Inline
+  return type
+}
+
 const buildTagIdMapping = (prefix: string, arr?: Recordable[]): Recordable<string> => {
   if (!arr) return {}
   return arr.reduce((p, c, i) => ((p[c.tag] = prefix + i), p), {})
@@ -451,6 +482,7 @@ const restoreRouteRuleset = (
           ruleset.path = r.id
         } else {
           ruleset.path = raw.path
+          ruleset.native_path = raw.path
         }
       }
       if ('format' in raw) {
@@ -487,12 +519,7 @@ const restoreRouteRules = (
     rule.id = 'rule-' + i
     rule.action = raw.action || RuleAction.Route
 
-    const hits = supportedRuleTypes.filter((key) => key in raw)
-    if (hits.length === 1) {
-      rule.type = hits[0] as any
-    } else {
-      rule.type = RouteRuleType.Inline
-    }
+    rule.type = simpleRuleType(raw, false)
 
     if (rule.type === RouteRuleType.Inline) {
       rule.payload = JSON.stringify(
@@ -519,13 +546,13 @@ const restoreRouteRules = (
         : String(raw[rule.type])
     }
 
-    if (RuleAction.Route === raw.action) {
+    if (RuleAction.Route === rule.action) {
       rule.outbound = OutboundsIds[raw.outbound]
-    } else if (RuleAction.Reject === raw.action) {
+    } else if (RuleAction.Reject === rule.action) {
       if ('method' in raw) {
         rule.outbound = raw.method
       }
-    } else if (RuleAction.RouteOptions === raw.action) {
+    } else if (RuleAction.RouteOptions === rule.action) {
       rule.outbound = JSON.stringify(
         {
           ...raw,
@@ -536,11 +563,11 @@ const restoreRouteRules = (
         null,
         2,
       )
-    } else if (RuleAction.Sniff === raw.action) {
+    } else if (RuleAction.Sniff === rule.action) {
       if ('sniffer' in raw) {
         rule.sniffer = Array.isArray(raw.sniffer) ? raw.sniffer : [raw.sniffer]
       }
-    } else if (RuleAction.Resolve === raw.action) {
+    } else if (RuleAction.Resolve === rule.action) {
       if ('strategy' in raw) {
         rule.strategy = raw.strategy
       }
@@ -578,6 +605,7 @@ const restoreDnsServers = (
         DnsServer.Dhcp,
       ].includes(raw.type)
     ) {
+      if (raw.type === DnsServer.Dhcp && 'interface' in raw) server.interface = raw.interface
       if ('detour' in raw) {
         server.detour = OutboundsIds[raw.detour]
       }
@@ -624,10 +652,6 @@ const restoreDnsServers = (
           {} as Recordable,
         )
       }
-    } else if (DnsServer.Dhcp === server.type) {
-      if ('interface' in raw) {
-        server.interface = raw.interface
-      }
     } else if (DnsServer.FakeIP === server.type) {
       if ('inet4_range' in raw) {
         server.inet4_range = raw.inet4_range
@@ -651,12 +675,7 @@ const restoreDnsRules = (
     rule.id = 'rule-' + i
     rule.action = raw.action || RuleAction.Route
 
-    const hits = supportedRuleTypes.filter((key) => key in raw)
-    if (hits.length === 1) {
-      rule.type = hits[0] as any
-    } else {
-      rule.type = RouteRuleType.Inline
-    }
+    rule.type = simpleRuleType(raw, true)
 
     if (rule.type === RouteRuleType.Inline) {
       rule.payload = JSON.stringify(
@@ -683,18 +702,18 @@ const restoreDnsRules = (
         : String(raw[rule.type])
     }
 
-    if (RuleAction.Route === raw.action) {
+    if (RuleAction.Route === rule.action) {
       if ('server' in raw) {
         rule.server = DnsServersIds[raw.server]
       }
       if ('strategy' in raw) {
         rule.strategy = raw.strategy
       }
-    } else if (RuleAction.Reject === raw.action) {
+    } else if (RuleAction.Reject === rule.action) {
       if ('method' in raw) {
         rule.server = raw.method
       }
-    } else if ([RuleAction.RouteOptions, RuleAction.Predefined].includes(raw.action)) {
+    } else if (rule.action === RuleAction.RouteOptions || rule.action === RuleAction.Predefined) {
       rule.server = JSON.stringify(
         {
           ...raw,
@@ -710,7 +729,7 @@ const restoreDnsRules = (
         2,
       )
     }
-    if ([RuleAction.Route, RuleAction.RouteOptions].includes(raw.action)) {
+    if (rule.action === RuleAction.Route || rule.action === RuleAction.RouteOptions) {
       if ('disable_cache' in raw) {
         rule.disable_cache = raw.disable_cache
       }

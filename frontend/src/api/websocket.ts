@@ -18,35 +18,57 @@ export class WebSockets {
   }
 
   public createWS(options: Options) {
-    this.beforeConnect()
-
-    const params = { ...options.params, token: this.bearer }
-    const query = new URLSearchParams(params).toString()
-    const url = query ? `${options.url}?${query}` : options.url
-
-    let isManualClose = false
+    let active = false
+    let generation = 0
     let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 
-    const connect = () => {
-      ws = new WebSocket(this.base + url)
-      ws.onmessage = (e) => options.cb(JSON.parse(e.data))
-      ws.onclose = () => {
-        setTimeout(() => {
-          if (!isManualClose) {
-            setTimeout(connect, 3000)
-          }
-        }, 1000)
+    const clearReconnect = () => {
+      if (reconnectTimer !== undefined) clearTimeout(reconnectTimer)
+      reconnectTimer = undefined
+    }
+    const closeSocket = () => {
+      if (!ws) return
+      ws.onmessage = null
+      ws.onclose = null
+      ws.close()
+      ws = null
+    }
+    const openSocket = (revision: number) => {
+      if (!active || revision !== generation) return
+      this.beforeConnect()
+      const params = { ...options.params, token: this.bearer }
+      const query = new URLSearchParams(params).toString()
+      const url = query ? `${options.url}?${query}` : options.url
+      const socket = new WebSocket(this.base + url)
+      ws = socket
+      socket.onmessage = (event) => {
+        if (active && revision === generation && socket === ws) {
+          options.cb(JSON.parse(event.data))
+        }
+      }
+      socket.onclose = () => {
+        if (!active || revision !== generation || socket !== ws) return
+        ws = null
+        clearReconnect()
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = undefined
+          openSocket(revision)
+        }, 4000)
       }
     }
-
+    const connect = () => {
+      active = true
+      generation += 1
+      clearReconnect()
+      closeSocket()
+      openSocket(generation)
+    }
     const disconnect = () => {
-      isManualClose = true
-      if (ws) {
-        ws.onmessage = null
-        ws.onclose = null
-        ws.close()
-        ws = null
-      }
+      active = false
+      generation += 1
+      clearReconnect()
+      closeSocket()
     }
 
     return { connect, disconnect }

@@ -44,13 +44,13 @@ import {
   usePluginsStore,
   useSubscribesStore,
   useRulesetsStore,
+  useNodeGroupsStore,
 } from '@/stores'
 import {
   getProxyProfileOptionsFromRuntime,
   resolveRuntimeInboundState,
 } from '@/stores/kernelApiRuntime'
 import { resolveCoreStopPid } from '@/stores/kernelProcess'
-import { explainCoreConfigCheckError } from '@/utils/coreConfigValidation'
 import {
   generateConfigFile,
   getKernelFileName,
@@ -62,6 +62,8 @@ import {
   sleep,
   replaceFileWithRollback,
 } from '@/utils'
+import { explainCoreConfigCheckError } from '@/utils/coreConfigValidation'
+import { profileUsesSubscription, getNodeGroupDependencies } from '@/utils/nodeGroup'
 
 import type { CoreApiConfig, CoreApiProxy } from '@/types/kernel'
 
@@ -83,6 +85,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   const profilesStore = useProfilesStore()
   const subscribesStore = useSubscribesStore()
   const rulesetsStore = useRulesetsStore()
+  const nodeGroupsStore = useNodeGroupsStore()
   const appSettingsStore = useAppSettingsStore()
 
   /** RESTful API */
@@ -261,6 +264,9 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   const needRestart = ref(false)
   const coreStateLoading = ref(true)
   let isCoreStartedByThisInstance = false
+  let processGeneration = 0
+  type StartedCore = { pid: number; generation: number; exited: () => boolean }
+  let stopTransition: { generation: number; promise: Promise<void> } | undefined
   let { promise: coreStoppedPromise, resolve: coreStoppedResolver } = Promise.withResolvers()
 
   onLogs((data) => logsStore.recordKernelApiLog(data))
@@ -329,8 +335,9 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     }
   }
 
-  const runCoreProcess = async (isAlpha: boolean) => {
+  const runCoreProcess = async (isAlpha: boolean, onSpawn: (process: StartedCore) => void) => {
     let stopped = false
+    const generation = ++processGeneration
     const pid = await ExecBackground(
       CoreWorkingDirectory + '/' + getKernelFileName(isAlpha),
       getKernelRuntimeArgs(isAlpha),
@@ -340,9 +347,10 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
         const logs = await ReadFile(getCoreLogFilePath(), { Range: '-4096' }).catch((err) =>
           String(err),
         )
+        if (generation !== processGeneration) return
         logsStore.hydrateKernelLogs(logs)
         end && logsStore.recordKernelLog(end)
-        onCoreStopped()
+        await onCoreStopped(generation)
       },
       {
         PidFile: CorePidFilePath,
@@ -350,21 +358,27 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
         Env: getKernelRuntimeEnv(isAlpha),
       },
     )
+    const process = { pid, generation, exited: () => stopped }
+    onSpawn(process)
     const deadline = Date.now() + CORE_START_TIMEOUT
-    while (!stopped) {
-      const ok = await probeApiAvailability().catch(() => false)
-      if (ok) break
+    while (true) {
       if (stopped) throw 'Startup failed. Check logs for details.'
+      const ok = await probeApiAvailability().catch(() => false)
+      if (stopped || generation !== processGeneration)
+        throw 'Startup failed. Check logs for details.'
+      if (ok) break
       if (Date.now() >= deadline) {
-        await KillProcess(pid, 3).catch(() => undefined)
         throw 'Core startup timed out after 30 seconds. Check logs for details.'
       }
       await sleep(500)
     }
-    return pid
+    return process
   }
 
-  const onCoreStarted = async (pid: number) => {
+  const onCoreStarted = async (process: StartedCore) => {
+    const { pid, generation, exited } = process
+    if (exited() || generation !== processGeneration)
+      throw new Error('Core exited before startup completed')
     corePid.value = pid
     running.value = true
     needRestart.value = false
@@ -373,44 +387,58 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
 
     initWebsocket()
     await Promise.all([refreshConfig(), refreshProviderProxies()])
+    if (exited() || generation !== processGeneration)
+      throw new Error('Core exited before startup completed')
 
     await pluginsStore.onCoreStartedTrigger()
+    if (exited() || generation !== processGeneration)
+      throw new Error('Core exited before startup completed')
   }
 
-  const onCoreStopped = async () => {
-    if (!isCoreStartedByThisInstance) {
-      await RemoveFile(CorePidFilePath)
-    }
-
-    corePid.value = -1
-    running.value = false
-    needRestart.value = false
-
-    destroyWebsocket()
-
-    resetConfig()
-
-    await pluginsStore.onCoreStoppedTrigger()
-
-    coreStoppedResolver(null)
+  const onCoreStopped = (generation = processGeneration): Promise<void> => {
+    if (generation !== processGeneration) return Promise.resolve()
+    if (stopTransition?.generation === generation) return stopTransition.promise
+    const resolveStopped = coreStoppedResolver
+    const promise = Promise.resolve().then(async () => {
+      if (generation !== processGeneration) return
+      if (!isCoreStartedByThisInstance) {
+        await RemoveFile(CorePidFilePath).catch((error) => logsStore.recordKernelLog(String(error)))
+      }
+      if (generation !== processGeneration) return
+      corePid.value = -1
+      running.value = false
+      needRestart.value = false
+      destroyWebsocket()
+      resetConfig()
+      try {
+        await pluginsStore.onCoreStoppedTrigger()
+      } finally {
+        resolveStopped(null)
+      }
+    })
+    stopTransition = { generation, promise }
+    return promise
   }
 
   const startCore = async (_profile?: App.Profile) => {
     if (running.value) throw 'The core is already running'
-    if (await syncExistingCoreState()) return
-
-    logsStore.clearKernelLog()
-
-    const { profile: profileID, branch } = appSettingsStore.app.kernel
-    const profile = _profile || profilesStore.getProfileById(profileID)
-    if (!profile) throw 'Choose a profile first'
-
-    if (!_profile) {
-      runtimeProfile = undefined
-    }
-
+    if (starting.value) throw 'The core is already starting'
     starting.value = true
+    ++processGeneration
+    let startedProcess: StartedCore | undefined
     try {
+      if (await syncExistingCoreState()) return
+
+      logsStore.clearKernelLog()
+
+      const { profile: profileID, branch } = appSettingsStore.app.kernel
+      const profile = _profile || profilesStore.getProfileById(profileID)
+      if (!profile) throw 'Choose a profile first'
+
+      if (!_profile) {
+        runtimeProfile = undefined
+      }
+
       const isAlpha = branch === Branch.Alpha
       const coreFilePath = `${CoreWorkingDirectory}/${getKernelFileName(isAlpha)}`
       await RemoveFile(CoreConfigStagedFilePath).catch(() => undefined)
@@ -453,8 +481,26 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
         await RemoveFile(CoreConfigStagedFilePath).catch(() => undefined)
         throw error
       }
-      const pid = await runCoreProcess(isAlpha)
-      pid && (await onCoreStarted(pid))
+      startedProcess = await runCoreProcess(isAlpha, (process) => {
+        startedProcess = process
+      })
+      await onCoreStarted(startedProcess)
+    } catch (error) {
+      if (startedProcess && startedProcess.generation === processGeneration) {
+        let cleanupError: unknown
+        if (!startedProcess.exited()) {
+          await KillProcess(startedProcess.pid, 3).catch((failure) => {
+            cleanupError = failure
+          })
+        }
+        await onCoreStopped(startedProcess.generation)
+        if (cleanupError && !startedProcess.exited())
+          throw new Error(
+            `${String(error)}; failed to stop core after startup failure: ${String(cleanupError)}`,
+            { cause: error },
+          )
+      }
+      throw error
     } finally {
       starting.value = false
     }
@@ -533,29 +579,31 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     }
   })
 
-  eventBus.on('subscriptionChange', ({ id }) => {
-    if (running.value && profilesStore.currentProfile) {
-      const inUse = profilesStore.currentProfile.outbounds.some(({ outbounds }) =>
-        outbounds.some((outbound) => outbound.type === 'Subscription' && outbound.id === id),
-      )
-      if (inUse) {
-        needRestart.value = true
-      }
-    }
+  eventBus.on('nodeGroupChange', ({ id }) => {
+    const profile = profilesStore.currentProfile
+    if (running.value && profile && getNodeGroupDependencies(id, [profile]).length)
+      needRestart.value = true
   })
 
-  eventBus.on('subscriptionsChange', () => {
-    if (running.value && profilesStore.currentProfile) {
-      const enabledSubs = subscribesStore.subscribes.flatMap((v) => (v.disabled ? [] : v.id))
-      const inUse = profilesStore.currentProfile.outbounds.some(({ outbounds }) =>
-        outbounds.some(
-          (outbound) => outbound.type === 'Subscription' && enabledSubs.includes(outbound.id),
-        ),
-      )
-      if (inUse) {
-        needRestart.value = true
-      }
-    }
+  eventBus.on('subscriptionChange', ({ id }) => {
+    const profile = profilesStore.currentProfile
+    if (
+      running.value &&
+      profile &&
+      profileUsesSubscription(profile, id, nodeGroupsStore.nodeGroups)
+    )
+      needRestart.value = true
+  })
+
+  eventBus.on('subscriptionsChange', (change) => {
+    const profile = profilesStore.currentProfile
+    const ids = change?.ids || subscribesStore.subscribes.map((subscription) => subscription.id)
+    if (
+      running.value &&
+      profile &&
+      ids.some((id) => profileUsesSubscription(profile, id, nodeGroupsStore.nodeGroups))
+    )
+      needRestart.value = true
   })
 
   const collectRulesetIDs = () => {

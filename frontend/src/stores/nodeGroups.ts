@@ -3,8 +3,10 @@ import { ref } from 'vue'
 import { parse } from 'yaml'
 
 import { ReadFile, WriteFile } from '@/bridge'
-import { NodeGroupsFilePath } from '@/constant/app'
+import { NodeGroupsFilePath, ProfilesFilePath } from '@/constant/app'
 import { DefaultNodeGroup } from '@/constant/nodeGroup'
+import { persistConfigFiles, withConfigMutation } from '@/utils/configPersistence'
+import { eventBus } from '@/utils/eventBus'
 import {
   getNodeGroupDependencies,
   removeNodeGroupReferences,
@@ -81,12 +83,12 @@ export const useNodeGroupsStore = defineStore('nodeGroups', () => {
     nodeGroups.value = Array.isArray(parsed) ? parsed.map(normalizeNodeGroup) : []
   }
 
-  const saveNodeGroups = () => WriteFile(NodeGroupsFilePath, stringifyNoFolding(nodeGroups.value))
+  const saveNodeGroups = () =>
+    withConfigMutation(() => WriteFile(NodeGroupsFilePath, stringifyNoFolding(nodeGroups.value)))
 
   const getNodeGroupById = (id: string) => nodeGroups.value.find((group) => group.id === id)
 
-  const getDependencies = (id: string) =>
-    getNodeGroupDependencies(id, useProfilesStore().profiles)
+  const getDependencies = (id: string) => getNodeGroupDependencies(id, useProfilesStore().profiles)
 
   const resolveGroup = (group: App.NodeGroup | string) => {
     const value = typeof group === 'string' ? getNodeGroupById(group) : group
@@ -95,86 +97,88 @@ export const useNodeGroupsStore = defineStore('nodeGroups', () => {
       : { nodes: [], issues: [] }
   }
 
-  const addNodeGroup = async (group: App.NodeGroup) => {
-    const next = normalizeNodeGroup(group)
-    validateNodeGroup(next, nodeGroups.value, useSubscribesStore().subscribes)
-    nodeGroups.value.push(next)
-    try {
-      await saveNodeGroups()
-    } catch (error) {
-      nodeGroups.value.pop()
-      throw error
-    }
-  }
-
-  const editNodeGroup = async (id: string, group: App.NodeGroup) => {
-    const index = nodeGroups.value.findIndex((candidate) => candidate.id === id)
-    if (index === -1) throw new Error(`${id} Not Found`)
-    const next = normalizeNodeGroup(group)
-    validateNodeGroup(next, nodeGroups.value, useSubscribesStore().subscribes, id)
-
-    const profilesStore = useProfilesStore()
-    const groupsBackup = deepClone(nodeGroups.value)
-    const profilesBackup = deepClone(profilesStore.profiles)
-    nodeGroups.value.splice(index, 1, next)
-    profilesStore.profiles.forEach((profile) => {
-      profile.outbounds.forEach((outbound) => {
-        outbound.outbounds.forEach((member) => {
-          if (member.type === 'NodeGroup' && member.id === id) member.tag = next.name
-        })
-      })
+  const addNodeGroup = (group: App.NodeGroup) =>
+    withConfigMutation(async () => {
+      const next = normalizeNodeGroup(group)
+      validateNodeGroup(next, nodeGroups.value, useSubscribesStore().subscribes)
+      await WriteFile(NodeGroupsFilePath, stringifyNoFolding([...nodeGroups.value, next]))
+      nodeGroups.value.push(next)
+      eventBus.emit('nodeGroupChange', { id: next.id })
     })
 
-    try {
-      await profilesStore.saveProfiles()
-      await saveNodeGroups()
-    } catch (error) {
-      nodeGroups.value = groupsBackup
-      profilesStore.profiles = profilesBackup
-      throw error
-    }
-  }
+  const editNodeGroup = (id: string, group: App.NodeGroup) =>
+    withConfigMutation(async () => {
+      const index = nodeGroups.value.findIndex((candidate) => candidate.id === id)
+      if (index === -1) throw new Error(`${id} Not Found`)
+      const next = normalizeNodeGroup(group)
+      validateNodeGroup(next, nodeGroups.value, useSubscribesStore().subscribes, id)
+      const profilesStore = useProfilesStore()
+      const profiles = deepClone(profilesStore.profiles)
+      profiles.forEach((profile) =>
+        profile.outbounds.forEach((outbound) => {
+          outbound.outbounds.forEach((member) => {
+            if (member.type === 'NodeGroup' && member.id === id) member.tag = next.name
+          })
+        }),
+      )
+      const groups = nodeGroups.value.map((value, idx) => (idx === index ? next : value))
+      await persistConfigFiles([
+        { path: ProfilesFilePath, content: stringifyNoFolding(profiles) },
+        { path: NodeGroupsFilePath, content: stringifyNoFolding(groups) },
+      ])
+      nodeGroups.value.splice(index, 1, next)
+      profilesStore.profiles = profiles
+      eventBus.emit('nodeGroupChange', { id })
+    })
 
-  const deleteNodeGroup = async (id: string, options: { cascade?: boolean } = {}) => {
-    const index = nodeGroups.value.findIndex((candidate) => candidate.id === id)
-    if (index === -1) return { dependencies: [], removedReferences: 0 }
-    const profilesStore = useProfilesStore()
-    const dependencies = getNodeGroupDependencies(id, profilesStore.profiles)
-    if (dependencies.length > 0 && !options.cascade) throw new NodeGroupInUseError(dependencies)
+  const deleteNodeGroup = (id: string, options: { cascade?: boolean } = {}) =>
+    withConfigMutation(async () => {
+      const index = nodeGroups.value.findIndex((candidate) => candidate.id === id)
+      if (index === -1) return { dependencies: [], removedReferences: 0 }
+      const profilesStore = useProfilesStore()
+      const dependencies = getNodeGroupDependencies(id, profilesStore.profiles)
+      if (dependencies.length > 0 && !options.cascade) throw new NodeGroupInUseError(dependencies)
+      const profiles = deepClone(profilesStore.profiles)
+      const groups = nodeGroups.value.filter((group) => group.id !== id)
+      const removedReferences = removeNodeGroupReferences(id, profiles)
+      await persistConfigFiles([
+        ...(removedReferences
+          ? [{ path: ProfilesFilePath, content: stringifyNoFolding(profiles) }]
+          : []),
+        { path: NodeGroupsFilePath, content: stringifyNoFolding(groups) },
+      ])
+      nodeGroups.value.splice(index, 1)
+      profilesStore.profiles = profiles
+      new Set(dependencies.map((dependency) => dependency.profileId)).forEach((id) =>
+        eventBus.emit('profileChange', { id }),
+      )
+      eventBus.emit('nodeGroupChange', { id })
+      return { dependencies, removedReferences }
+    })
 
-    const groupsBackup = deepClone(nodeGroups.value)
-    const profilesBackup = deepClone(profilesStore.profiles)
-    const removedReferences = removeNodeGroupReferences(id, profilesStore.profiles)
-    nodeGroups.value.splice(index, 1)
-    try {
-      if (removedReferences > 0) await profilesStore.saveProfiles()
-      await saveNodeGroups()
-    } catch (error) {
-      nodeGroups.value = groupsBackup
-      profilesStore.profiles = profilesBackup
-      throw error
-    }
-    return { dependencies, removedReferences }
-  }
-
-  const addMember = async (groupId: string, member: App.NodeGroupMember) => {
-    const group = getNodeGroupById(groupId)
-    if (!group) throw new Error(`${groupId} Not Found`)
-    const exists = group.members.some(
-      (candidate) =>
-        candidate.subscription_id === member.subscription_id && candidate.node_id === member.node_id,
-    )
-    if (exists) return false
-    group.mode = 'manual'
-    group.members.push(member)
-    try {
-      await saveNodeGroups()
-    } catch (error) {
-      group.members.pop()
-      throw error
-    }
-    return true
-  }
+  const addMember = (groupId: string, member: App.NodeGroupMember) =>
+    withConfigMutation(async () => {
+      const group = getNodeGroupById(groupId)
+      if (!group) throw new Error(`${groupId} Not Found`)
+      if (
+        group.members.some(
+          (candidate) =>
+            candidate.subscription_id === member.subscription_id &&
+            candidate.node_id === member.node_id,
+        )
+      )
+        return false
+      const next = deepClone(group)
+      next.mode = 'manual'
+      next.members.push(member)
+      await WriteFile(
+        NodeGroupsFilePath,
+        stringifyNoFolding(nodeGroups.value.map((value) => (value.id === groupId ? next : value))),
+      )
+      Object.assign(group, next)
+      eventBus.emit('nodeGroupChange', { id: groupId })
+      return true
+    })
 
   return {
     nodeGroups,

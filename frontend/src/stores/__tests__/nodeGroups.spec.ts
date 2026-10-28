@@ -7,6 +7,8 @@ const { readFile, writeFile } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/bridge', () => ({
+  FileExists: vi.fn().mockResolvedValue(false),
+  RemoveFile: vi.fn().mockResolvedValue(undefined),
   ReadFile: readFile,
   WriteFile: writeFile,
 }))
@@ -71,18 +73,26 @@ describe('node-groups store', () => {
       store.addNodeGroup(createGroup({ id: 'negative', max_nodes: -1 })),
     ).rejects.toThrow('max_nodes')
     await expect(
-      store.addNodeGroup(createGroup({ id: 'invalid-field', match_field: 'server' as App.NodeGroupMatchField })),
+      store.addNodeGroup(
+        createGroup({ id: 'invalid-field', match_field: 'server' as App.NodeGroupMatchField }),
+      ),
     ).rejects.toThrow('match_field')
     expect(writeFile).not.toHaveBeenCalled()
   })
 
   it('loads existing groups without a match field using the original combined behavior', async () => {
-    readFile.mockResolvedValue(JSON.stringify([{ id: 'legacy', name: 'Legacy', mode: 'filter', include: 'HK' }]))
+    readFile.mockResolvedValue(
+      JSON.stringify([{ id: 'legacy', name: 'Legacy', mode: 'filter', include: 'HK' }]),
+    )
     const store = useNodeGroupsStore()
-    useSubscribesStore().subscribes = [{
-      id: 'provider', name: 'HK Provider', disabled: false,
-      proxies: [{ id: 'jp', tag: 'JP 01', type: 'trojan' }],
-    }] as App.Subscription[]
+    useSubscribesStore().subscribes = [
+      {
+        id: 'provider',
+        name: 'HK Provider',
+        disabled: false,
+        proxies: [{ id: 'jp', tag: 'JP 01', type: 'trojan' }],
+      },
+    ] as App.Subscription[]
 
     await store.setupNodeGroups()
 
@@ -91,19 +101,28 @@ describe('node-groups store', () => {
   })
 
   it('persists the selected field through create, edit and reload without widening the filter', async () => {
-    const subscriptions = [{
-      id: 'provider', name: 'HK Provider', disabled: false,
-      proxies: [
-        { id: 'hk', tag: 'HK 01', type: 'vless' },
-        { id: 'jp', tag: 'JP 01', type: 'trojan' },
-      ],
-    }] as App.Subscription[]
+    const subscriptions = [
+      {
+        id: 'provider',
+        name: 'HK Provider',
+        disabled: false,
+        proxies: [
+          { id: 'hk', tag: 'HK 01', type: 'vless' },
+          { id: 'jp', tag: 'JP 01', type: 'trojan' },
+        ],
+      },
+    ] as App.Subscription[]
     useSubscribesStore().subscribes = subscriptions
     const store = useNodeGroupsStore()
-    await store.addNodeGroup(createGroup({ mode: 'filter', match_field: 'protocol', include: '^trojan$' }))
+    await store.addNodeGroup(
+      createGroup({ mode: 'filter', match_field: 'protocol', include: '^trojan$' }),
+    )
     expect(store.resolveGroup('group-hk').nodes.map((node) => node.proxy.id)).toEqual(['jp'])
 
-    await store.editNodeGroup('group-hk', createGroup({ mode: 'filter', match_field: 'name', include: '^HK' }))
+    await store.editNodeGroup(
+      'group-hk',
+      createGroup({ mode: 'filter', match_field: 'name', include: '^HK' }),
+    )
     const saved = writeFile.mock.calls.findLast(([path]) => path === NodeGroupsFilePath)![1]
     readFile.mockResolvedValue(saved)
     setActivePinia(createPinia())
@@ -123,9 +142,7 @@ describe('node-groups store', () => {
 
     await store.editNodeGroup('group-hk', createGroup({ name: 'Hong Kong Premium' }))
 
-    expect(profilesStore.profiles[0]!.outbounds[0]!.outbounds[0]!.tag).toBe(
-      'Hong Kong Premium',
-    )
+    expect(profilesStore.profiles[0]!.outbounds[0]!.outbounds[0]!.tag).toBe('Hong Kong Premium')
     expect(writeFile).toHaveBeenCalledWith(ProfilesFilePath, expect.any(String))
     expect(writeFile).toHaveBeenCalledWith(NodeGroupsFilePath, expect.any(String))
   })

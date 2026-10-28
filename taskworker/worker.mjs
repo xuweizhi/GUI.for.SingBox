@@ -3,6 +3,7 @@ import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile
 import path from 'node:path'
 import { promisify } from 'node:util'
 import readline from 'node:readline'
+import process from 'node:process'
 
 const execFileAsync = promisify(execFile)
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
@@ -253,25 +254,18 @@ const normalizeSubscriptionProxiesNative = async (payload = {}) => {
   const { parse, produce } = await loadProxyUtilsModule()
 
   proxies = await withMutedConsole(async () => {
-    let converted = proxies
-
-    if (typeof converted[0]?.base64 === 'string') {
-      converted = parse(converted[0].base64)
-    }
-
-    if (converted.some((proxy) => proxy?.name && !proxy?.tag)) {
-      const produced = produce(converted, 'singbox', 'internal')
-      if (!Array.isArray(produced)) {
-        throw new Error('Failed to convert subscription data')
-      }
-      converted = produced
-    }
-
-    return converted
-  })
-
-  proxies.forEach((proxy) => {
-    delete proxy.domain_resolver
+    const parsed = typeof proxies[0]?.base64 === 'string' ? parse(proxies[0].base64) : proxies
+    const native = parsed.filter((proxy) => !proxy.name || proxy.tag || proxy._gui_kind === 'endpoint')
+    const toConvert = parsed.filter((proxy) => proxy.name && !proxy.tag && proxy._gui_kind !== 'endpoint')
+    if (!toConvert.length) return native
+    const converted = produce(toConvert, 'singbox', 'internal')
+    if (!Array.isArray(converted)) throw new Error('Failed to convert subscription data')
+    const resolverTags = new Set(payload.resolverTags || [])
+    converted.forEach((proxy) => {
+      const resolver = typeof proxy.domain_resolver === 'string' ? proxy.domain_resolver : proxy.domain_resolver?.server
+      if (!resolverTags.has(resolver)) delete proxy.domain_resolver
+    })
+    return [...native, ...converted]
   })
 
   return proxies
@@ -463,9 +457,12 @@ const transformPluginSource = (code) =>
 
 const loadPluginModule = async (plugin, pluginSettings = {}) => {
   const code = await readFile(resolvePath(plugin.path), 'utf8').catch(() => '')
-  const pluginContext = buildPluginContext(plugin, pluginSettings)
+  // Cached ESM handlers close over this object. Refresh it in place so settings
+  // changes take effect without allocating a new module URL on every execution.
   globalThis.__GUI_FOR_CORES_PLUGIN_CONTEXT__ ||= {}
-  globalThis.__GUI_FOR_CORES_PLUGIN_CONTEXT__[plugin.id] = pluginContext
+  const pluginContext = globalThis.__GUI_FOR_CORES_PLUGIN_CONTEXT__[plugin.id] ||= {}
+  for (const key of Object.keys(pluginContext)) delete pluginContext[key]
+  Object.assign(pluginContext, buildPluginContext(plugin, pluginSettings))
 
   const source = [
     `const Plugin = globalThis.__GUI_FOR_CORES_PLUGIN_CONTEXT__?.[${JSON.stringify(plugin.id)}]`,
@@ -474,14 +471,8 @@ const loadPluginModule = async (plugin, pluginSettings = {}) => {
   ].join('\n')
   const dataUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
 
-  try {
-    const module = await import(dataUrl)
-    return { module, pluginContext }
-  } finally {
-    if (globalThis.__GUI_FOR_CORES_PLUGIN_CONTEXT__) {
-      delete globalThis.__GUI_FOR_CORES_PLUGIN_CONTEXT__[plugin.id]
-    }
-  }
+  const module = await import(dataUrl)
+  return { module, pluginContext }
 }
 
 const runPluginTask = async (task, pluginList = [], pluginSettings = {}) => {
@@ -613,7 +604,8 @@ const rl = readline.createInterface({
   crlfDelay: Infinity,
 })
 
-rl.on('line', async (line) => {
+let taskQueue = Promise.resolve()
+rl.on('line', (line) => {
   if (!line.trim()) return
   let message
   try {
@@ -625,12 +617,18 @@ rl.on('line', async (line) => {
 
   if (message.type !== 'request') return
 
-  try {
-    const result = await handleRequest(message)
-    reply(message.id, result, '')
-  } catch (error) {
-    reply(message.id, null, failMessage(error))
+  const execute = async () => {
+    try {
+      const result = await handleRequest(message)
+      reply(message.id, result, '')
+    } catch (error) {
+      reply(message.id, null, failMessage(error))
+    }
   }
+  // A plugin may await IO while browser globals/context are active. Serialize
+  // work requests, but keep shutdown/status independent of a stuck async task.
+  if (message.method.startsWith('worker.')) void execute()
+  else taskQueue = taskQueue.then(execute, execute)
 })
 
 process.on('uncaughtException', (error) => {

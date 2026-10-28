@@ -91,8 +91,8 @@ func TestStartHeadlessCoreIfNeededStartsConfiguredCore(t *testing.T) {
 }
 
 func TestExecBackgroundReusesExistingCoreProcess(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-based fake core is only used on non-Windows platforms")
+	if runtime.GOOS != "linux" {
+		t.Skip("native process introspection regression uses Linux /proc")
 	}
 
 	tempDir := t.TempDir()
@@ -109,22 +109,22 @@ func TestExecBackgroundReusesExistingCoreProcess(t *testing.T) {
 	}
 
 	corePath := filepath.Join(coreDir, "sing-box")
-	if err := os.WriteFile(corePath, []byte("#!/bin/sh\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n"), 0o755); err != nil {
-		t.Fatalf("write fake core: %v", err)
-	}
+	writeNativeCoreHelper(t, corePath)
 
 	app := NewApp()
-	first := app.ExecBackground("data/sing-box/sing-box", nil, "", "", ExecOptions{
+	first := app.ExecBackground("data/sing-box/sing-box", nativeCoreHelperArgs(coreDir), "", "", ExecOptions{
 		PidFile: headlessCorePidFilePath,
 		LogFile: headlessCoreLogFilePath,
+		Env:     map[string]string{"GUI_CORE_OWNERSHIP_HELPER": "1"},
 	})
 	if !first.Flag {
 		t.Fatalf("first start failed: %s", first.Data)
 	}
 
-	second := app.ExecBackground("data/sing-box/sing-box", nil, "", "", ExecOptions{
+	second := app.ExecBackground("data/sing-box/sing-box", nativeCoreHelperArgs(coreDir), "", "", ExecOptions{
 		PidFile: headlessCorePidFilePath,
 		LogFile: headlessCoreLogFilePath,
+		Env:     map[string]string{"GUI_CORE_OWNERSHIP_HELPER": "1"},
 	})
 	if !second.Flag {
 		t.Fatalf("second start failed: %s", second.Data)

@@ -69,7 +69,7 @@ WEBUI_TOKEN=replace-with-a-long-random-token \
 
 ## 与其他 sing-box 服务共存
 
-本服务不再修改宿主机系统代理或系统 DNS，也不会创建托盘、窗口或桌面自启动项。HTTP 请求需要上游代理时，只读取进程环境中的 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 和 `NO_PROXY`。
+本服务不再修改宿主机系统代理或系统 DNS，也不会创建托盘、窗口或桌面自启动项。请求代理选择 `None` 时明确直连；选择 `System` 时根据目标地址读取进程环境中的 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 和 `NO_PROXY`，也支持对应的小写变量。协议专用变量优先于 `ALL_PROXY`，命中 `NO_PROXY` 的目标绕过环境代理。
 
 与其他 headless 服务共存时，只需确保以下资源不重复：
 

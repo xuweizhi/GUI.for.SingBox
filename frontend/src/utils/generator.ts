@@ -608,7 +608,12 @@ const generateRoute = (
         extra.rules = JSON.parse(ruleset.rules)
       } else if (ruleset.type === RulesetType.Local) {
         const _ruleset = rulesetsStore.getRulesetById(ruleset.path)
-        extra.path = _ruleset?.path.replace('data/', '../')
+        extra.path = _ruleset
+          ? _ruleset.path.replace('data/', '../')
+          : ruleset.native_path === ruleset.path
+            ? ruleset.native_path
+            : undefined
+        if (!extra.path) throw new Error(`Local rule-set not found: ${ruleset.tag || ruleset.path}`)
         extra.format = ruleset.format
       } else if (ruleset.type === RulesetType.Remote) {
         extra.url = ruleset.url

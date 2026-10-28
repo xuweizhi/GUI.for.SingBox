@@ -73,6 +73,7 @@ describe('webui auth store', () => {
         'Content-Type': 'application/json',
       },
       body: '{"token":"next-token"}',
+      signal: expect.any(AbortSignal),
     })
     expect(passed).toBe(true)
     expect(store.status).toBe('authenticated')
@@ -89,7 +90,10 @@ describe('webui auth store', () => {
     const store = useWebuiAuthStore()
     const passed = await store.ensureAuthenticated()
 
-    expect(fetchMock).toHaveBeenCalledWith('/__webui/api/session', { method: 'GET' })
+    expect(fetchMock).toHaveBeenCalledWith('/__webui/api/session', {
+      method: 'GET',
+      signal: expect.any(AbortSignal),
+    })
     expect(passed).toBe(true)
     expect(store.status).toBe('authenticated')
     expect(store.token).toBe('')
@@ -140,5 +144,65 @@ describe('webui auth store', () => {
     expect(store.lastError).toBe('')
     expect(fetchMock).toHaveBeenCalledWith('/__webui/api/session', { method: 'DELETE' })
     expect(replace).toHaveBeenCalledWith('/login')
+  })
+  it.each(['network', 'server'])(
+    'clears checking after a %s failure and allows retry',
+    async (failure) => {
+      const fetchMock = vi.fn()
+      if (failure === 'network') fetchMock.mockRejectedValueOnce(new Error('offline'))
+      else fetchMock.mockResolvedValueOnce({ ok: false, status: 503 })
+      fetchMock.mockResolvedValueOnce({ ok: true, status: 200 })
+      vi.stubGlobal('fetch', fetchMock)
+      const store = useWebuiAuthStore()
+      await expect(store.verifyToken('token')).rejects.toBeTruthy()
+      expect(store.status).toBe('idle')
+      expect(await store.verifyToken('token')).toBe(true)
+      expect(store.status).toBe('authenticated')
+    },
+  )
+
+  it('ignores a stale failure after a newer successful verification', async () => {
+    let resolveOld!: (value: unknown) => void
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve
+          }),
+      )
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+    vi.stubGlobal('fetch', fetchMock)
+    const store = useWebuiAuthStore()
+    const old = store.verifyToken('old')
+    expect(await store.verifyToken('new')).toBe(true)
+    expect(fetchMock.mock.calls[0]![1].signal.aborted).toBe(true)
+    resolveOld({ ok: false, status: 401 })
+    expect(await old).toBe(false)
+    expect(store.token).toBe('new')
+    expect(store.status).toBe('authenticated')
+  })
+
+  it('does not authenticate a pending verification after logout', async () => {
+    let resolveOld!: (value: unknown) => void
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveOld = resolve
+            }),
+        )
+        .mockResolvedValueOnce({ ok: true, status: 204 }),
+    )
+    const store = useWebuiAuthStore()
+    const old = store.verifyToken('old')
+    await store.logout()
+    resolveOld({ ok: true, status: 200 })
+    expect(await old).toBe(false)
+    expect(store.status).toBe('idle')
+    expect(store.token).toBe('')
   })
 })

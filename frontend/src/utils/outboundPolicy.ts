@@ -2,7 +2,7 @@ import { DefaultOutboundIds, DefaultOutboundRoleById } from '@/constant/outbound
 import { Outbound, RuleAction } from '@/enums/kernel'
 
 export interface OutboundGraphIssue {
-  type: 'missing' | 'missing-node-group' | 'cycle'
+  type: 'missing' | 'missing-node-group' | 'cycle' | 'reserved-tag'
   groupId: string
   targetId?: string
   chain: string[]
@@ -61,6 +61,9 @@ export const findOutboundGraphIssues = (
   const nodeGroupIds = new Set(nodeGroups.map((group) => group.id))
 
   outbounds.forEach((outbound) => {
+    if ([Outbound.Direct, Outbound.Block].includes(outbound.tag as Outbound)) {
+      issues.push({ type: 'reserved-tag', groupId: outbound.id, chain: [outbound.id] })
+    }
     if (outbound.pre_proxy && !byId.has(outbound.pre_proxy)) {
       issues.push({
         type: 'missing',

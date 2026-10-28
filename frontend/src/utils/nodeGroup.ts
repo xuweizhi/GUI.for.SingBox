@@ -57,18 +57,20 @@ export const getNodeGroupRuntimeNames = (
       ...(subscription.proxies || []).map((candidate) => candidate.tag),
     ]),
   ])
-  const literalBases = new Map<string, string | undefined>(runtimeNames.map((name) => {
-    if (knownTags.has(name)) return [name, name]
-    // Search suffix boundaries from right to left so a longer literal tag wins
-    // over a shorter node whose generated name happens to share its prefix.
-    let boundary = name.lastIndexOf(' [via ')
-    while (boundary >= 0) {
-      const base = name.slice(0, boundary)
-      if (knownTags.has(base) && isChainSuffix(name.slice(boundary))) return [name, base]
-      boundary = boundary > 0 ? name.lastIndexOf(' [via ', boundary - 1) : -1
-    }
-    return [name, undefined]
-  }))
+  const literalBases = new Map<string, string | undefined>(
+    runtimeNames.map((name) => {
+      if (knownTags.has(name)) return [name, name]
+      // Search suffix boundaries from right to left so a longer literal tag wins
+      // over a shorter node whose generated name happens to share its prefix.
+      let boundary = name.lastIndexOf(' [via ')
+      while (boundary >= 0) {
+        const base = name.slice(0, boundary)
+        if (knownTags.has(base) && isChainSuffix(name.slice(boundary))) return [name, base]
+        boundary = boundary > 0 ? name.lastIndexOf(' [via ', boundary - 1) : -1
+      }
+      return [name, undefined]
+    }),
+  )
   resolution.nodes.forEach(({ subscription, proxy }) => {
     // Recognize both legacy "[Provider 2]" and "[Provider] 2" aliases, without
     // conflating "Provider" with "Provider Extra". Match literal tags first:
@@ -138,7 +140,9 @@ export const resolveNodeGroup = (
   const issues: NodeGroupIssue[] = []
   const nodes: ResolvedNodeGroupNode[] = []
   const seen = new Set<string>()
-  const subscriptionsById = new Map(subscriptions.map((subscription) => [subscription.id, subscription]))
+  const subscriptionsById = new Map(
+    subscriptions.map((subscription) => [subscription.id, subscription]),
+  )
 
   const addNode = (
     subscription: App.Subscription,
@@ -249,3 +253,23 @@ export const removeNodeGroupReferences = (groupId: string, profiles: App.Profile
   })
   return removed
 }
+
+/** Resolve structural dependencies, not just currently matched nodes: a rename,
+ * enable/disable or a newly added subscription can change a dynamic group's matches. */
+export const profileUsesSubscription = (
+  profile: Pick<App.Profile, 'outbounds'>,
+  subscriptionId: string,
+  nodeGroups: App.NodeGroup[],
+) =>
+  profile.outbounds.some((outbound) =>
+    outbound.outbounds.some((member) => {
+      if (member.type === 'Subscription') return member.id === subscriptionId
+      if (member.type === subscriptionId) return true
+      if (member.type !== 'NodeGroup') return false
+      const group = nodeGroups.find((candidate) => candidate.id === member.id)
+      if (!group) return false
+      if (group.mode === 'manual')
+        return group.members.some((node) => node.subscription_id === subscriptionId)
+      return group.source_scope === 'all' || group.subscription_ids.includes(subscriptionId)
+    }),
+  )

@@ -2,9 +2,9 @@
 import { ref, inject, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ReadFile, WriteFile } from '@/bridge'
+import { ReadFile } from '@/bridge'
 import { useRulesetsStore } from '@/stores'
-import { deepClone, ignoredError, isValidJson, message } from '@/utils'
+import { deepClone, ignoredError, message } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
 
@@ -28,11 +28,7 @@ const handleSave = async () => {
   if (!ruleset.value) return
   loading.value = true
   try {
-    if (!isValidJson(rulesetContent.value)) {
-      throw 'syntax error'
-    }
-    await WriteFile(ruleset.value.path, rulesetContent.value)
-    await rulesetsStore.updateRuleset(ruleset.value.id)
+    await rulesetsStore.saveLocalRuleset(ruleset.value.id, rulesetContent.value)
     await handleSubmit()
   } catch (error: any) {
     message.error(error)

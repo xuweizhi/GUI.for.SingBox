@@ -123,6 +123,10 @@ const handleAddEnd = () => {
   const next = model.value.map((outbound) => (outbound.id === id ? fields.value : outbound))
   if (updateGroupId === -1) next.unshift(fields.value)
   const cycle = findOutboundGraphIssues(next, nodeGroupsStore.nodeGroups)[0]
+  if (cycle?.type === 'reserved-tag') {
+    message.error('Strategy names direct and block are reserved.')
+    return false
+  }
   if (cycle) {
     message.error(
       t(cycle.type === 'cycle' ? 'kernel.outbounds.cycle' : 'kernel.outbounds.missingReference', [

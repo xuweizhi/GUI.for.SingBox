@@ -1,7 +1,8 @@
 type EventMap = {
   profileChange: { id: string }
   subscriptionChange: { id: string }
-  subscriptionsChange: void
+  subscriptionsChange: void | { ids: string[] }
+  nodeGroupChange: { id: string }
   rulesetChange: { id: string }
   rulesetsChange: void
 }

@@ -44,8 +44,9 @@ export const useAppBootstrap = () => {
         rulesetsStore.setupRulesets(),
         nodeGroupsStore.setupNodeGroups(),
         pluginsStore.setupPlugins(),
-        scheduledTasksStore.setupScheduledTasks(),
       ])
+      // Task ownership depends on the loaded proxy settings, subscriptions and plugins.
+      await scheduledTasksStore.setupScheduledTasks()
 
       const startTime = performance.now()
       percent.value = 20

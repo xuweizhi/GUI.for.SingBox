@@ -1,5 +1,5 @@
 import { deleteConnection, getConnections, useProxy } from '@/api/kernel'
-import { GetSystemProxy, ReadFile, RestartApp, WindowReloadApp, WriteFile } from '@/bridge'
+import { ReadFile, RestartApp, WindowReloadApp, WriteFile } from '@/bridge'
 import { CoreWorkingDirectory } from '@/constant/kernel'
 import { RequestProxyMode } from '@/enums/app'
 import { RulesetFormat } from '@/enums/kernel'
@@ -14,17 +14,13 @@ import {
 } from '@/stores'
 import { formatProxyHost, ignoredError, normalizeRequestProxy, message, confirm } from '@/utils'
 
-const requestProxyCache: { proxyPromise: Promise<string> | null; lastAccessTime: number } = {
-  proxyPromise: null,
-  lastAccessTime: 0,
-}
-
 export const GetRequestProxy = async (mode?: App.RequestProxyMode, customProxy?: string) => {
   const appSettings = useAppSettingsStore()
-  const requestProxyMode = mode ?? appSettings.app.requestProxyMode
+  const requestProxyMode =
+    !mode || mode === RequestProxyMode.Global ? appSettings.app.requestProxyMode : mode
 
   if (requestProxyMode === RequestProxyMode.None) {
-    return ''
+    return 'direct'
   }
 
   if (requestProxyMode === RequestProxyMode.Kernel) {
@@ -44,13 +40,9 @@ export const GetRequestProxy = async (mode?: App.RequestProxyMode, customProxy?:
     return normalizeRequestProxy(customProxy ?? appSettings.app.customProxy)
   }
 
-  if (requestProxyCache.proxyPromise && Date.now() - requestProxyCache.lastAccessTime < 1000) {
-    return requestProxyCache.proxyPromise
-  }
-
-  requestProxyCache.lastAccessTime = Date.now()
-  requestProxyCache.proxyPromise = GetSystemProxy().catch(() => '')
-  return requestProxyCache.proxyPromise
+  // Let the backend resolve the environment for each destination, including
+  // HTTP_PROXY/HTTPS_PROXY and NO_PROXY. An explicit URL would bypass NO_PROXY.
+  return ''
 }
 
 export const restartApp = async () => {

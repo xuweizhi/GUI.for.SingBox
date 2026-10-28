@@ -8,6 +8,8 @@ const { writeFile, getSystemProxy, getProxyEndpoint } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/bridge', () => ({
+  FileExists: vi.fn().mockResolvedValue(false),
+  RemoveFile: vi.fn().mockResolvedValue(undefined),
   ReadFile: vi.fn(),
   WriteFile: writeFile,
   Requests: vi.fn(),
@@ -315,7 +317,7 @@ describe('subscribes store', () => {
       proxies: [{ id: 'stable-node-id', tag: 'old-name', type: 'vmess' }],
       script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
     }))
-    vi.mocked(ReadFile).mockResolvedValueOnce(
+    vi.mocked(ReadFile).mockResolvedValue(
       JSON.stringify([
         { tag: 'old-name', type: 'vmess', server: 'node.example', server_port: 443, uuid: 'old' },
       ]),
@@ -490,7 +492,7 @@ describe('subscribes store', () => {
       script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
     }
     store.subscribes = [item]
-    vi.mocked(ReadFile).mockResolvedValueOnce(JSON.stringify([previous]))
+    vi.mocked(ReadFile).mockResolvedValue(JSON.stringify([previous]))
     vi.mocked(Requests).mockResolvedValueOnce({
       status: 200,
       headers: {},
@@ -612,5 +614,23 @@ describe('subscribes store', () => {
       kind: 'endpoint',
     })
     expect(writeFile.mock.calls.some(([path]) => path === item.url)).toBe(false)
+  })
+  it('preserves backend environment proxy handling instead of falling back to kernel when a system proxy exists', async () => {
+    useAppSettingsStore().app.requestProxyMode = RequestProxyMode.Kernel
+    getSystemProxy.mockResolvedValue('http://environment-proxy:8080')
+    const store = useSubscribesStore()
+    const s = store.getSubscribeTemplate('Environment proxy')
+    s.requestProxyMode = RequestProxyMode.System
+    store.subscribes = [s]
+    vi.mocked(Requests).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: '{"outbounds":[{"tag":"node","type":"socks"}]}',
+    } as any)
+    await store.updateSubscribe(s.id)
+    expect(Requests).toHaveBeenLastCalledWith(
+      expect.objectContaining({ options: expect.objectContaining({ Proxy: '' }) }),
+    )
+    expect(getProxyEndpoint).not.toHaveBeenCalled()
   })
 })

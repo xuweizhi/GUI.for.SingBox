@@ -21,12 +21,7 @@ import {
 } from '@/enums/kernel'
 import { useBool } from '@/hooks'
 import { useNodeGroupsStore } from '@/stores'
-import {
-  deepClone,
-  ensureNodeGroupOutlet,
-  message,
-  type NodeGroupOutletBehavior,
-} from '@/utils'
+import { deepClone, ensureNodeGroupOutlet, message, type NodeGroupOutletBehavior } from '@/utils'
 
 interface Props {
   inboundOptions: { label: string; value: string }[]
@@ -125,7 +120,9 @@ const handleUse = (ruleset: any) => {
 }
 
 const handleClearRuleset = (ruleset: any) => {
-  const ids = fields.value.payload.split(',').filter((id) => props.ruleSet.find((v) => v.id === id))
+  const ids = ruleset.payload
+    .split(',')
+    .filter((id: string) => props.ruleSet.some((v) => v.id === id))
   ruleset.payload = ids.join(',')
 }
 
