@@ -58,6 +58,13 @@ export const ReadDir = (arg1: string) => flagResult('ReadDir', [arg1])
 export const ReadFile = (arg1: string, arg2: Record<string, any>) =>
   flagResult('ReadFile', [arg1, arg2])
 export const RecordScheduledTaskLog = (arg1: string) => flagResult('RecordScheduledTaskLog', [arg1])
+type SubscriptionUsageReport = Pick<
+  App.Subscription,
+  'upload' | 'download' | 'total' | 'expire' | 'usageFields' | 'usageUpdatedAt'
+> & { reported: boolean }
+
+export const RefreshSubscriptionUsage = (id: string, proxy: string, userAgent: string) =>
+  invokeBridge<SubscriptionUsageReport>('RefreshSubscriptionUsage', [id, proxy, userAgent])
 export const ReloadScheduledTaskWorker = () => flagResult('ReloadScheduledTaskWorker')
 export const RemoveFile = (arg1: string) => flagResult('RemoveFile', [arg1])
 export const Requests = (

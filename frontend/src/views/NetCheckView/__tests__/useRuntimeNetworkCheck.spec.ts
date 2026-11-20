@@ -6,6 +6,8 @@ import { ref } from 'vue'
 const captured = vi.fn()
 const mockDnsQuery = vi.fn()
 const mockGetConnections = vi.fn()
+const mockConnectionsStream = vi.fn()
+const mockCoreRoute = vi.fn()
 const mockGetProxyDelay = vi.fn()
 const mockRefreshConfig = vi.fn()
 const mockRefreshProviderProxies = vi.fn()
@@ -53,6 +55,8 @@ vi.mock('@/views/NetCheckView/useNetworkCheck', () => ({
 vi.mock('@/api/kernel', () => ({
   dnsQuery: mockDnsQuery,
   getConnections: mockGetConnections,
+  onConnections: mockConnectionsStream,
+  queryCoreRoute: mockCoreRoute,
   getProxyDelay: mockGetProxyDelay,
 }))
 
@@ -118,7 +122,7 @@ describe('useRuntimeNetworkCheck', () => {
     useRuntimeNetworkCheck()
     const deps = captured.mock.calls[0]?.[0]
     expect(typeof deps.dnsQuery).toBe('function')
-    expect(typeof deps.getLatestRuleMatch).toBe('function')
+    expect(typeof deps.observeRuleMatch).toBe('function')
     expect(typeof deps.getRulesetStates).toBe('function')
   })
 
@@ -134,66 +138,52 @@ describe('useRuntimeNetworkCheck', () => {
     expect(mockDnsQuery).toHaveBeenCalledWith('example.com')
   })
 
-  it('derives the latest rule match from connection records', async () => {
-    mockGetConnections.mockResolvedValue({
+  it('retains matching short-lived connections and ignores connections present before this run', async () => {
+    const row = {
+      id: 'old',
+      start: '2026-07-05T10:00:00Z',
+      metadata: { host: 'example.com', destinationPort: '443' },
+      rule: 'MATCH',
+      chains: ['Proxy'],
+    }
+    mockGetConnections
+      .mockResolvedValueOnce({ connections: [row] })
+      .mockResolvedValue({ connections: [] })
+    const unsubscribe = vi.fn()
+    mockConnectionsStream.mockReturnValue(unsubscribe)
+    useRuntimeNetworkCheck()
+    const deps = captured.mock.calls[0]?.[0]
+    const finish = await deps.observeRuleMatch({ requestHost: 'example.com', tcpPort: 443 })
+    mockConnectionsStream.mock.calls[0]![0]({
       connections: [
+        row,
+        { ...row, id: 'new', rule: 'RULE-SET', rulePayload: 'Sites' },
         {
-          id: 'old',
-          chains: ['Proxy', 'US 01'],
-          download: 0,
-          upload: 0,
-          rule: 'MATCH',
-          rulePayload: '',
-          start: '2026-07-05T10:00:00.000Z',
-          metadata: {
-            host: 'example.com',
-            destinationIP: '93.184.216.34',
-            destinationPort: '443',
-            dnsMode: '',
-            network: 'tcp',
-            processPath: '',
-            sourceIP: '',
-            sourcePort: '',
-            type: 'http',
-          },
-        },
-        {
-          id: 'latest',
-          chains: ['Proxy', 'HK 01'],
-          download: 0,
-          upload: 0,
-          rule: 'final => route(Proxy)',
-          rulePayload: '',
-          start: '2026-07-05T10:01:00.000Z',
-          metadata: {
-            host: 'example.com',
-            destinationIP: '93.184.216.34',
-            destinationPort: '443',
-            dnsMode: '',
-            network: 'tcp',
-            processPath: '',
-            sourceIP: '',
-            sourcePort: '',
-            type: 'http',
-          },
+          ...row,
+          id: 'udp',
+          start: '2026-07-05T10:15:00Z',
+          metadata: { ...row.metadata, network: 'udp' },
         },
       ],
     })
-
-    useRuntimeNetworkCheck()
-    const deps = captured.mock.calls[0]?.[0]
-
-    await expect(
-      deps.getLatestRuleMatch({
-        requestHost: 'example.com',
-        tcpPort: 443,
-      }),
-    ).resolves.toEqual({
+    await expect(finish()).resolves.toEqual({
       host: 'example.com',
       port: 443,
-      rule: 'final => route(Proxy)',
-      chains: ['Proxy', 'HK 01'],
+      rule: 'RULE-SET · Sites',
+      chains: ['Proxy'],
     })
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+  it('looks up domain and IP only on cores exposing the extension', async () => {
+    useRuntimeNetworkCheck()
+    const deps = captured.mock.calls[0]?.[0]
+    const target = { requestHost: 'example.com', targetKind: 'domain' }
+    mockCoreRoute
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ rule: 'domain', chain: ['Proxy', 'leaf'] })
+    await expect(deps.queryRoute(target)).resolves.toBeUndefined()
+    await expect(deps.queryRoute(target, '192.0.2.1')).resolves.toBe('domain | Proxy → leaf')
+    expect(mockCoreRoute).toHaveBeenLastCalledWith('example.com', '192.0.2.1')
   })
 
   it('builds ruleset states from profile and rulesets stores', async () => {
@@ -224,9 +214,9 @@ describe('useRuntimeNetworkCheck', () => {
     await expect(deps.getRulesetStates()).resolves.toEqual([
       {
         id: 'ruleset-rs-local',
-        title: 'GeoIP-CN',
-        status: 'success',
-        summary: '123 rules',
+        title: 'Local RS',
+        status: 'skipped',
+        summary: 'diagnostics.registryOnly',
         detail: '/etc/sing-box/rules/local.srs',
       },
     ])

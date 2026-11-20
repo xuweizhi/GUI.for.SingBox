@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n, I18nT } from 'vue-i18n'
 
 import { BrowserOpenURL, ClipboardSetText, RemoveFile } from '@/bridge'
@@ -175,6 +175,20 @@ const handleUpdateSub = async (s: App.Subscription, options?: Partial<App.Subscr
   }
 }
 
+const refreshingUsage = ref(new Set<string>())
+const handleRefreshUsage = async (id: string) => {
+  if (refreshingUsage.value.has(id)) return
+  refreshingUsage.value.add(id)
+  try {
+    if (await subscribeStore.refreshUsage(id)) message.success('subscribes.usageRefreshed')
+    else message.info('subscribes.usageNotReported')
+  } catch (error) {
+    message.error(error)
+  } finally {
+    refreshingUsage.value.delete(id)
+  }
+}
+
 const handleDeleteSub = async (s: App.Subscription) => {
   try {
     await ignoredError(RemoveFile, s.path)
@@ -192,7 +206,11 @@ const handleDisableSub = async (s: App.Subscription) => {
 
 const noUpdateNeeded = computed(() => subscribeStore.subscribes.every((v) => v.disabled))
 
-const clacTrafficPercent = (s: App.Subscription) => ((s.upload + s.download) / s.total) * 100
+const usageKnown = (s: App.Subscription, field: 'upload' | 'download' | 'total') =>
+  s[field] > 0 || !!s.usageFields?.includes(field)
+
+const clacTrafficPercent = (s: App.Subscription) =>
+  s.total > 0 ? ((s.upload + s.download) / s.total) * 100 : 0
 
 const clacTrafficStatus = (s: App.Subscription) => {
   const percent = clacTrafficPercent(s)
@@ -333,15 +351,15 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         <div>
           {{ t('subscribes.upload') }}
           :
-          {{ s.upload ? formatBytes(s.upload, 2) : '--' }}
+          {{ usageKnown(s, 'upload') ? formatBytes(s.upload, 2) : '--' }}
           /
           {{ t('subscribes.download') }}
           :
-          {{ s.download ? formatBytes(s.download, 2) : '--' }}
+          {{ usageKnown(s, 'download') ? formatBytes(s.download, 2) : '--' }}
           /
           {{ t('subscribes.total') }}
           :
-          {{ s.total ? formatBytes(s.total, 2) : '--' }}
+          {{ usageKnown(s, 'total') ? formatBytes(s.total, 2) : '--' }}
         </div>
         <div>
           {{ t('subscribes.expire') }}
@@ -356,9 +374,13 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
       <template v-else>
         <div class="subscription-summary">
           <div class="subscription-traffic">
-            {{ s.upload + s.download ? formatBytes(s.upload + s.download) : '--' }}
+            {{
+              usageKnown(s, 'upload') || usageKnown(s, 'download')
+                ? formatBytes(s.upload + s.download)
+                : '--'
+            }}
             /
-            {{ s.total ? formatBytes(s.total) : '--' }}
+            {{ usageKnown(s, 'total') ? formatBytes(s.total) : '--' }}
           </div>
           <div class="traffic-diagram">
             <Progress
@@ -383,11 +405,38 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
           </div>
         </div>
       </template>
+      <div v-if="s.type === 'Http'" class="subscription-usage">
+        <Button
+          type="link"
+          size="small"
+          :disabled="s.disabled || s.updating"
+          :loading="refreshingUsage.has(s.id)"
+          @click="handleRefreshUsage(s.id)"
+        >
+          {{ t('subscribes.refreshUsage') }}
+        </Button>
+        <span v-if="s.total > 0 && usageKnown(s, 'upload') && usageKnown(s, 'download')">
+          {{
+            t('subscribes.remaining', [formatBytes(Math.max(0, s.total - s.upload - s.download))])
+          }}
+        </span>
+        <span v-if="s.usageUpdatedAt" :title="formatDate(s.usageUpdatedAt, 'YYYY-MM-DD HH:mm:ss')">
+          {{ t('subscribes.usageAsOf', [formatRelativeTime(s.usageUpdatedAt)]) }}
+        </span>
+      </div>
     </Card>
   </div>
 </template>
 
 <style lang="less" scoped>
+.subscription-usage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted-color);
+}
 .traffic-diagram {
   position: absolute;
   top: 4px;

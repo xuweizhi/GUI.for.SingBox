@@ -4,6 +4,7 @@ import { CoreWorkingDirectory } from '@/constant/kernel'
 import { RequestProxyMode } from '@/enums/app'
 import { RulesetFormat } from '@/enums/kernel'
 import i18n from '@/lang'
+import { rememberNode } from '@/utils/nodePreferences'
 import {
   useAppSettingsStore,
   useAppStore,
@@ -69,7 +70,9 @@ export const handleUseProxy = async (
         .map((v) => deleteConnection(v.id)),
     )
   }
+  const key = kernelApiStore.getNodePreferenceKey(proxy.name)
   await useProxy(encodeURIComponent(group.name), proxy.name)
+  appSettings.app.nodePreferences.recent = rememberNode(appSettings.app.nodePreferences.recent, key)
   await Promise.all(promises)
   if (options.refresh !== false) {
     await kernelApiStore.refreshProviderProxies()

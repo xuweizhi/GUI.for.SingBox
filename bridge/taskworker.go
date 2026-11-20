@@ -104,6 +104,8 @@ type subscriptionConfig struct {
 	Download          int64                     `json:"download" yaml:"download"`
 	Total             int64                     `json:"total" yaml:"total"`
 	Expire            int64                     `json:"expire" yaml:"expire"`
+	UsageFields       []string                  `json:"usageFields,omitempty" yaml:"usageFields,omitempty"`
+	UsageUpdatedAt    int64                     `json:"usageUpdatedAt,omitempty" yaml:"usageUpdatedAt,omitempty"`
 	UpdateTime        int64                     `json:"updateTime" yaml:"updateTime"`
 	Type              string                    `json:"type" yaml:"type"`
 	URL               string                    `json:"url" yaml:"url"`
@@ -1938,12 +1940,7 @@ func (w *scheduledTaskWorkerSupervisor) loadSubscriptionBody(
 	subscribe *subscriptionConfig,
 	settings backendNetworkSettings,
 ) (string, map[string]int64, error) {
-	userInfo := map[string]int64{
-		"upload":   0,
-		"download": 0,
-		"total":    0,
-		"expire":   0,
-	}
+	userInfo := map[string]int64{}
 
 	switch subscribe.Type {
 	case "Manual":
@@ -1979,7 +1976,9 @@ func (w *scheduledTaskWorkerSupervisor) loadSubscriptionBody(
 		for key, value := range subscribe.Header.Response {
 			result.Headers.Set(key, value)
 		}
-		parseSubscriptionUserInfo(userInfo, result.Headers.Get("Subscription-Userinfo"))
+		for _, h := range result.Headers.Values("Subscription-Userinfo") {
+			parseSubscriptionUserInfo(userInfo, h)
+		}
 		if isEncryptedSubscription(result.Headers.Values(subscriptionEncryptionHeader)) {
 			decryptPassword := strings.TrimSpace(subscribe.DecryptPassword)
 			if decryptPassword == "" {
@@ -2031,18 +2030,6 @@ func (w *scheduledTaskWorkerSupervisor) resolveGlobalRequestProxy(
 		return "", errors.New("kernel proxy mode is not supported by the backend executor")
 	default:
 		return "", nil
-	}
-}
-
-func parseSubscriptionUserInfo(target map[string]int64, header string) {
-	for _, part := range strings.Split(header, ";") {
-		segments := strings.SplitN(strings.TrimSpace(part), "=", 2)
-		if len(segments) != 2 {
-			continue
-		}
-		if value, err := parseInt64(strings.TrimSpace(segments[1])); err == nil {
-			target[strings.TrimSpace(segments[0])] = value
-		}
 	}
 }
 
@@ -2261,12 +2248,6 @@ func stringValue(value any) string {
 	default:
 		return fmt.Sprint(typed)
 	}
-}
-
-func parseInt64(value string) (int64, error) {
-	var parsed int64
-	_, err := fmt.Sscan(value, &parsed)
-	return parsed, err
 }
 
 func normalizeRequestProxyGo(proxy string) string {

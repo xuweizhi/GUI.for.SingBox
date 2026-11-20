@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CoreApiConnectionRecord } from '@/types/kernel'
 import {
   buildRulesetCheckItems,
   matchLatestConnection,
 } from '@/views/NetCheckView/networkCheckRuntime'
+
+import type { CoreApiConnectionRecord } from '@/types/kernel'
 
 describe('matchLatestConnection', () => {
   it('prefers the latest host and port match', () => {
@@ -81,7 +82,7 @@ describe('matchLatestConnection', () => {
 })
 
 describe('buildRulesetCheckItems', () => {
-  it('marks missing and disabled rulesets as failed', () => {
+  it('distinguishes native remote URLs and disabled GUI registrations from runtime evidence', () => {
     const items = buildRulesetCheckItems(
       [
         {
@@ -126,17 +127,39 @@ describe('buildRulesetCheckItems', () => {
       {
         id: 'ruleset-missing',
         title: 'missing-tag',
-        status: 'failed',
-        summary: 'ruleset missing',
-        detail: 'https://example.com/missing.json',
+        status: 'skipped',
+        summary: 'diagnostics.profileOnly',
+        detail: undefined,
       },
       {
         id: 'ruleset-disabled',
-        title: 'Disabled Ruleset',
-        status: 'failed',
-        summary: 'ruleset disabled',
+        title: 'disabled-tag',
+        status: 'skipped',
+        summary: 'diagnostics.registryDisabled',
         detail: 'data/rulesets/disabled.json',
       },
+    ])
+  })
+  it('matches core counts by URL and download failures by tag', () => {
+    const url = 'https://host/rules.srs'
+    const remote = { id: 'r', tag: 'remote', url, type: 'remote' } as App.ProfileRuleSet
+    const evidence = { counts: { [url]: 3 }, cached: { [url]: '2026-07-01' } }
+    expect(buildRulesetCheckItems([remote], [], evidence)[0]).toMatchObject({
+      status: 'success',
+      detail: '3 · 2026-07-01',
+    })
+    expect(
+      buildRulesetCheckItems([remote], [], { ...evidence, failed: { remote: 'offline' } })[0],
+    ).toMatchObject({ status: 'failed', detail: '3 · 2026-07-01 · offline' })
+    const native = {
+      type: 'local',
+      path: '/rules/local.srs',
+      native_path: '/rules/local.srs',
+    } as App.ProfileRuleSet
+    const broken = { ...native, path: 'missing-id' }
+    expect(buildRulesetCheckItems([native, broken], []).map((row) => row.summary)).toEqual([
+      'diagnostics.profileOnly',
+      'diagnostics.missingReference',
     ])
   })
 })

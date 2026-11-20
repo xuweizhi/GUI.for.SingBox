@@ -124,6 +124,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     autoStartKernel: false,
     autoRestartKernel: false,
     userAgent: '',
+    nodePreferences: { favorites: [], recent: [] },
     connections: DefaultConnections(),
     log: {
       retentionDays: 14,

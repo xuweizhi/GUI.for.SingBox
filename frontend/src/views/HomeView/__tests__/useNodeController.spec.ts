@@ -51,6 +51,7 @@ vi.mock('@/stores', () => {
     config: { mode: 'rule' },
     proxies: {},
     refreshProviderProxies: mocks.refresh,
+    getNodePreferenceKey: (name: string) => name,
   })
   return {
     useKernelApiStore: () => mocks.store,
@@ -66,7 +67,7 @@ vi.mock('@/stores', () => {
     }),
     useSubscribesStore: () => ({ subscribes: mocks.subscriptions }),
     useAppSettingsStore: () => ({
-      app: { kernel: { testUrl: 'test-url', testTimeout: 5000, concurrencyLimit: 7 } },
+      app: { nodePreferences: reactive({ favorites: [] as string[], recent: ['JP 01', 'HK 01'] }), kernel: { testUrl: 'test-url', testTimeout: 5000, concurrencyLimit: 7 } },
     }),
   }
 })
@@ -211,6 +212,20 @@ describe('useNodeController', () => {
     expect(controller.nodes.value.map((node) => node.name)).toEqual(runtimeNames.slice(0, 2))
     controller.nodeGroupFilter.value = '__ungrouped'
     expect(controller.nodes.value.map((node) => node.name)).toEqual([runtimeNames[2]])
+    scope.stop()
+  })
+
+  it('filters favorites and recent choices within the current strategy', () => {
+    const scope = effectScope()
+    const controller = scope.run(useNodeController)!
+    controller.selectGroup('Proxy')
+    controller.nodeGroupFilter.value = '__favorites'
+    expect(controller.nodes.value).toHaveLength(0)
+    controller.toggleFavorite('HK 01')
+    expect(controller.nodes.value.map((node) => node.name)).toEqual(['HK 01'])
+    controller.nodeGroupFilter.value = '__recent'
+    expect(controller.nodes.value.map((node) => node.name)).toEqual(['JP 01', 'HK 01'])
+    expect(mocks.handleUseProxy).not.toHaveBeenCalled()
     scope.stop()
   })
 

@@ -142,6 +142,7 @@ const createController = () => {
       selectedGroupName.value = name
     }),
     switchNode: vi.fn().mockResolvedValue({ ok: true as const }),
+    toggleFavorite: vi.fn(),
     testNode: vi.fn().mockResolvedValue({ ok: true as const }),
     testGroup: vi.fn().mockResolvedValue(undefined),
     cancelGroupTest: vi.fn(),
@@ -205,6 +206,14 @@ describe('NodeSelectorModal', () => {
   beforeEach(() => {
     toast.success.mockReset()
     toast.error.mockReset()
+  })
+
+  it('favorites a node without switching it', async () => {
+    const controller = createController()
+    const wrapper = mountModal(controller)
+    await wrapper.get('[data-favorite="JP 01"]').trigger('click')
+    expect(controller.toggleFavorite).toHaveBeenCalledWith('JP 01')
+    expect(controller.switchNode).not.toHaveBeenCalled()
   })
 
   it('prepares data when opened', async () => {

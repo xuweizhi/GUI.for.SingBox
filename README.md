@@ -67,6 +67,8 @@ WEBUI_TOKEN=replace-with-a-long-random-token \
 
 升级期间旧的 `--headless` 参数会被安全忽略，但它已不再出现在新部署配置中，因为 WebUI 服务是唯一运行模式。
 
+节点收藏、连接筛选、分流和 DNS 诊断、订阅用量刷新，以及 ZIP 和 WebDAV 备份的操作说明见[功能指南](docs/features/karing-adoption.md)。
+
 ## 与其他 sing-box 服务共存
 
 本服务不再修改宿主机系统代理或系统 DNS，也不会创建托盘、窗口或桌面自启动项。请求代理选择 `None` 时明确直连；选择 `System` 时根据目标地址读取进程环境中的 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 和 `NO_PROXY`，也支持对应的小写变量。协议专用变量优先于 `ALL_PROXY`，命中 `NO_PROXY` 的目标绕过环境代理。

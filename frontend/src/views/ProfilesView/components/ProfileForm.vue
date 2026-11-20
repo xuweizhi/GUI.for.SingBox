@@ -300,6 +300,7 @@ defineExpose({ modalSlots })
       <DnsConfig
         ref="dnsRef"
         v-model="profile.dns"
+        :profile="profile"
         :inbound-options="inboundOptions"
         :outbound-options="outboundOptions"
         :rule-set="profile.route.rule_set"

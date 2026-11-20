@@ -31,6 +31,11 @@ const {
   readonlyMode,
 } = props.controller
 
+const filtering = computed(() => !!query.value.trim() || nodeGroupFilter.value !== '__all')
+const emptyMessage = computed(() =>
+  t(filtering.value ? 'home.nodes.noFilterMatches' : 'home.nodes.emptyProxyNodes'),
+)
+
 const batchPercent = computed(() =>
   batch.value.total ? (batch.value.completed / batch.value.total) * 100 : 0,
 )
@@ -116,7 +121,6 @@ const openRoutePolicies = async () => {
         class="node-search flex-1 min-w-128"
       />
       <Select
-        v-if="nodeGroupFilterOptions.length > 2"
         v-model="nodeGroupFilter"
         :options="nodeGroupFilterOptions"
         class="node-group-filter"
@@ -164,10 +168,10 @@ const openRoutePolicies = async () => {
       </div>
     </div>
 
-    <Empty v-if="nodes.length === 0" :description="t('home.nodes.emptyProxyNodes')">
+    <Empty v-if="nodes.length === 0" :description="emptyMessage">
       <template #description>
-        <div class="text-12">{{ t('home.nodes.emptyProxyNodes') }}</div>
-        <Button type="link" size="small" @click="openSubscriptions">
+        <div class="text-12">{{ emptyMessage }}</div>
+        <Button v-if="!filtering" type="link" size="small" @click="openSubscriptions">
           {{ t('home.nodes.addSubscription') }}
         </Button>
       </template>
@@ -190,8 +194,8 @@ const openRoutePolicies = async () => {
         role="button"
         tabindex="0"
         @click="switchNode(node.name)"
-        @keydown.enter.prevent="switchNode(node.name)"
-        @keydown.space.prevent="switchNode(node.name)"
+        @keydown.enter.self.prevent="switchNode(node.name)"
+        @keydown.space.self.prevent="switchNode(node.name)"
       >
         <div v-if="node.displayName" class="text-12 mb-4 line-clamp-1">
           {{ node.name }}
@@ -202,6 +206,21 @@ const openRoutePolicies = async () => {
         <div class="flex items-center text-12">
           <span>{{ node.proxy?.type || t('home.nodes.unknownType') }}</span>
           <span v-if="node.proxy?.udp" class="ml-4">UDP</span>
+          <button
+            type="button"
+            class="favorite-button ml-auto"
+            :data-favorite="node.name"
+            :aria-pressed="node.favorite"
+            :aria-label="
+              t(node.favorite ? 'home.nodes.removeFavorite' : 'home.nodes.addFavorite', [node.name])
+            "
+            :title="
+              t(node.favorite ? 'home.nodes.removeFavorite' : 'home.nodes.addFavorite', [node.name])
+            "
+            @click.stop="controller.toggleFavorite(node.name)"
+          >
+            {{ node.favorite ? '★' : '☆' }}
+          </button>
           <Button
             v-tips.fast="node.error?.message"
             :data-delay="node.name"
@@ -210,7 +229,6 @@ const openRoutePolicies = async () => {
             :title="node.error?.message"
             type="text"
             size="small"
-            class="ml-auto"
             @click.stop="testNode(node.name)"
           >
             <span v-if="nodePhases.get(node.name) === 'queued'">
@@ -244,6 +262,18 @@ const openRoutePolicies = async () => {
 </template>
 
 <style lang="less" scoped>
+.favorite-button {
+  cursor: pointer;
+  background: transparent;
+  color: inherit;
+  font-size: 1.2rem;
+  border: 0;
+  padding: 0 6px;
+}
+.favorite-button[aria-pressed='true'] {
+  color: var(--primary-color);
+}
+
 .node-toolbar {
   background: var(--modal-bg);
 }

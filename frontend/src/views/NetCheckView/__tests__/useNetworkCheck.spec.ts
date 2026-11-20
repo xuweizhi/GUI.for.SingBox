@@ -11,7 +11,7 @@ const mocks = {
   getKernelProxyEndpoint: vi.fn(),
   dnsQuery: vi.fn(),
   getPrimaryOutboundState: vi.fn(),
-  getLatestRuleMatch: vi.fn(),
+  observeRuleMatch: vi.fn(),
   getRulesetStates: vi.fn(),
 }
 
@@ -43,12 +43,12 @@ describe('useNetworkCheck', () => {
       chain: ['Proxy', 'HK 01'],
       delay: 80,
     })
-    mocks.getLatestRuleMatch.mockResolvedValue({
+    mocks.observeRuleMatch.mockResolvedValue(async () => ({
       host: 'example.com',
       port: 443,
       rule: 'final => route(Proxy)',
       chains: ['Proxy', 'HK 01'],
-    })
+    }))
     mocks.getRulesetStates.mockResolvedValue([
       { id: 'rs-1', title: 'GeoIP-CN', status: 'success', summary: '100 rules' },
     ])
@@ -70,7 +70,7 @@ describe('useNetworkCheck', () => {
       { id: 'primary-outbound', status: 'success' },
       { id: 'rule-match', status: 'success' },
     ])
-    expect(mocks.getLatestRuleMatch).toHaveBeenCalledWith(
+    expect(mocks.observeRuleMatch).toHaveBeenCalledWith(
       expect.objectContaining({
         requestHost: 'example.com',
         tcpPort: 443,

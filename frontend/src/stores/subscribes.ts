@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { parse } from 'yaml'
 
 import { ReadFile, WriteFile, Requests, GetSystemProxy } from '@/bridge'
+import { RefreshSubscriptionUsage } from '@/bridge/browser/go/bridge/App'
 import { DefaultSubscribeScript, SubscribesFilePath, ProfilesFilePath } from '@/constant/app'
 import { DefaultExcludeProtocols } from '@/constant/kernel'
 import { PluginTriggerEvent, RequestMethod, RequestProxyMode } from '@/enums/app'
@@ -19,6 +20,7 @@ import {
   eventBus,
   buildSmartRegExp,
   GetRequestProxy,
+  getUserAgent,
   migrateSubscribes,
   decryptEncryptedSubscription,
   getHeaderValue,
@@ -33,6 +35,19 @@ import { persistConfigFiles, withConfigMutation } from '@/utils/configPersistenc
 import { extractSubscriptionConfig, validateSubscriptionEntries } from '@/utils/subscriptionConfig'
 
 import type { ConfigFileWrite } from '@/utils/fileTransaction'
+
+// Some providers report only a subset, or omit the header on node updates.
+const usageFromHeader = (header: unknown) => {
+  const values: Partial<Pick<App.Subscription, 'upload' | 'download' | 'total' | 'expire'>> = {}
+  for (const part of (Array.isArray(header) ? header.join(';') : String(header ?? '')).split(';')) {
+    const match = /^\s*(upload|download|total|expire)\s*=\s*(\d+)\s*$/i.exec(part)
+    if (!match) continue
+    const key = match[1]!.toLowerCase() as keyof typeof values
+    const value = Number(match[2]) * (key === 'expire' ? 1000 : 1)
+    if (Number.isSafeInteger(value)) values[key] = value
+  }
+  return values
+}
 
 export const useSubscribesStore = defineStore('subscribes', () => {
   const subscribes = ref<App.Subscription[]>([])
@@ -211,7 +226,6 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     s = deepClone(s)
     const expected = serialize([s])
     const originalPath = s.path
-    const userInfo: Recordable = {}
     const previousMetadata = deepClone(s.proxies)
     const previousBody = await ignoredError(ReadFile, s.path)
     let previousOutbounds: Recordable[] = []
@@ -254,11 +268,16 @@ export const useSubscribesStore = defineStore('subscribes', () => {
         },
       })
       Object.assign(h, s.header.response, options.header?.response)
-      if (h['Subscription-Userinfo']) {
-        ;(h['Subscription-Userinfo'] as string).split(/\s*;\s*/).forEach((part) => {
-          const [key, value] = part.split('=') as [string, string]
-          userInfo[key] = parseInt(value) || 0
-        })
+      const usage = usageFromHeader(
+        getHeaderValue(options.header?.response ?? {}, 'Subscription-Userinfo') ??
+          getHeaderValue(s.header.response, 'Subscription-Userinfo') ??
+          getHeaderValue(h, 'Subscription-Userinfo'),
+      )
+      const fields = Object.keys(usage)
+      if (fields.length) {
+        Object.assign(s, usage)
+        s.usageFields = [...new Set([...(s.usageFields ?? []), ...fields])]
+        s.usageUpdatedAt = Date.now()
       }
       body = b
       const encryptionHeader = getHeaderValue(h, SubscriptionEncryptionHeader)
@@ -349,10 +368,6 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     }
 
     if (!preserveCachedDns) s.importedDns = importedDns
-    s.upload = userInfo.upload ?? 0
-    s.download = userInfo.download ?? 0
-    s.total = userInfo.total ?? 0
-    s.expire = userInfo.expire * 1000
     s.updateTime = Date.now()
     s.proxies = reconcileSubscriptionProxyIds(
       previousMetadata,
@@ -408,6 +423,21 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       throw new Error('Subscription changed while updating; retry the refresh')
     return current
   }
+
+  const refreshUsage = (id: string) =>
+    withConfigMutation(async () => {
+      const subscription = subscribes.value.find((s) => s.id === id)
+      if (!subscription || subscription.type !== 'Http' || subscription.disabled) {
+        throw new Error('subscribes.usageUnavailable')
+      }
+      const proxy = await resolveSubscribeRequestProxy(
+        subscription.requestProxyMode,
+        subscription.customProxy,
+      )
+      const { reported, ...usage } = await RefreshSubscriptionUsage(id, proxy, getUserAgent())
+      if (reported) Object.assign(subscription, usage)
+      return reported
+    })
 
   const updateSubscribe = async (id: string, options: Partial<App.Subscription> = {}) => {
     const s = subscribes.value.find((v) => v.id === id)
@@ -532,6 +562,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     deleteSubscribe,
     syncSubscribeOutboundRefs,
     updateSubscribe,
+    refreshUsage,
     updateSubscribes,
     getSubscribeById,
     importSubscribe,

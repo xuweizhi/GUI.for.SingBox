@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type subscriptionHeaderConfig struct {
@@ -92,6 +94,24 @@ func (v subscriptionProxyConfig) MarshalJSON() ([]byte, error) {
 func (v *subscriptionProxyConfig) UnmarshalJSON(data []byte) error {
 	type plain subscriptionProxyConfig
 	return unmarshalConfigJSON(data, (*plain)(v), &v.Extra)
+}
+
+// Older WebUI versions saved an absent subscription expiry as YAML .nan.
+// Normalize that single legacy field before decoding the typed worker record.
+func (v *subscriptionConfig) UnmarshalYAML(node *yaml.Node) error {
+	type plain subscriptionConfig
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			value := node.Content[i+1]
+			if node.Content[i].Value == "expire" && value.ShortTag() == "!!float" && strings.EqualFold(value.Value, ".nan") {
+				normalized := *node
+				normalized.Content = append([]*yaml.Node(nil), node.Content...)
+				normalized.Content[i+1] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: "0"}
+				return normalized.Decode((*plain)(v))
+			}
+		}
+	}
+	return node.Decode((*plain)(v))
 }
 
 func (v subscriptionConfig) MarshalJSON() ([]byte, error) {

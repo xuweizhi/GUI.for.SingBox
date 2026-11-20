@@ -2,6 +2,8 @@
 import { onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
+import { onRuntimeEvent } from '@/bridge/browser/shared/webui'
+
 import { useAppBootstrap, useAppLifecycle } from '@/hooks'
 import { useWebuiAuthStore } from '@/stores'
 
@@ -12,6 +14,16 @@ const authStore = useWebuiAuthStore()
 const { loading, percent, hasError, initialized, initialize } = useAppBootstrap()
 
 useAppLifecycle()
+
+watch(
+  () => authStore.status,
+  (status, _, onCleanup) => {
+    if (status === 'authenticated') {
+      onCleanup(onRuntimeEvent('configurationRestored', () => window.location.reload()))
+    }
+  },
+  { immediate: true },
+)
 
 const startBootstrap = async () => {
   if (initialized.value || loading.value) return

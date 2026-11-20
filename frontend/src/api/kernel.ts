@@ -138,6 +138,39 @@ export const getConnections = () => request.get<CoreApiConnections>(Api.Connecti
 export const dnsQuery = (name: string) => {
   return request.get<CoreApiDnsQueryResponse>(Api.DnsQuery, { name })
 }
+// Karing's optional Clash API extension (with_karing). Stock cores return HTTP 404.
+export const queryCoreRoute = (domain: string, ip: string) =>
+  request.getOptional<{ err?: string; rule?: string; chain?: string[]; outbound?: string }>(
+    '/karing/outboundQuery',
+    { domain, ip },
+  )
+export const queryDNSViaNode = (
+  server: Recordable,
+  domain: string,
+  queryType: string,
+  proxy: string,
+) => {
+  // with_karing creates a temporary resolver backed by the active outbound manager,
+  // so it can also probe stateful endpoints that cannot be duplicated in another process.
+  const transport: Recordable = { ...server, detour: proxy }
+  delete transport.domain_resolver
+  return request.postOptional<{ err?: string; latency?: number; addr?: string[] }>(
+    '/karing/dnsQuery',
+    {
+      servers: [transport],
+      tag: server.tag,
+      domain,
+      strategy: queryType === 'AAAA' ? 'ipv6_only' : 'ipv4_only',
+    },
+  )
+}
+export const getRemoteRulesetCounts = () =>
+  request.getOptional<{ result: Record<string, number> | null }>('/karing/remoteRuleSetRulesCount')
+export const getRemoteRulesetStates = () =>
+  request.getOptional<{
+    cached: Record<string, string> | null
+    failed: Record<string, string> | null
+  }>('/karing/remoteRuleSetStates')
 export const deleteConnection = (id: string) => request.delete<null>(Api.Connections + '/' + id)
 export const useProxy = (group: string, proxy: string) => {
   return request.put<null>(Api.Proxies + '/' + group, { name: proxy })

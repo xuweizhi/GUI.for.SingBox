@@ -66,8 +66,9 @@ export interface NetworkCheckDeps {
   tcpPing: (address: string, options?: { Timeout?: number }) => Promise<number>
   dnsQuery?: (host: string) => Promise<DnsQueryResult>
   getPrimaryOutboundState?: () => Promise<PrimaryOutboundState | undefined>
-  getLatestRuleMatch?: (target: ParsedNetworkCheckTarget) => Promise<RuleMatchState | undefined>
-  getRulesetStates?: () => Promise<RulesetState[]>
+  observeRuleMatch?: (target: ParsedNetworkCheckTarget) => Promise<() => Promise<RuleMatchState | undefined>>
+  queryRoute?: (target: ParsedNetworkCheckTarget, resolvedIP?: string) => Promise<string | undefined>
+  getRulesetStates?: (running: boolean) => Promise<RulesetState[]>
 }
 
 export interface NetworkCheckResultItem {
@@ -183,6 +184,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
   }
 
   const run = async (raw = input.value) => {
+    if (running.value) return
     const target = parseNetworkCheckTarget(raw)
     input.value = raw
     clear()
@@ -223,6 +225,9 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     }
     syncGroups()
 
+    let match: RuleMatchState | undefined
+    let observationError: unknown
+    let resolvedIP: string | undefined
     if (!coreAvailable) {
       overviewItems.push({
         id: 'proxy-http',
@@ -231,6 +236,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
         summary: 'netCheck.summary.proxySkipped',
       })
     } else {
+      let finishObservation: (() => Promise<RuleMatchState | undefined>) | undefined
       try {
         const proxy = buildProxyUrl(await deps.getKernelProxyEndpoint())
         if (!proxy) {
@@ -241,6 +247,11 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
             summary: 'netCheck.summary.proxyMissing',
           })
         } else {
+          try {
+            finishObservation = await deps.observeRuleMatch?.(target)
+          } catch (error) {
+            observationError = error
+          }
           let method: 'HEAD' | 'GET' = 'HEAD'
           let request
           try {
@@ -273,13 +284,19 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
           summary: 'netCheck.summary.proxyFailed',
           detail: normalizeErrorMessage(error),
         })
+      } finally {
+        try {
+          match = await finishObservation?.()
+        } catch (error) {
+          observationError = error
+        }
       }
     }
     syncGroups()
 
     try {
       const tcp = await measure(() =>
-        deps.tcpPing(`${target.tcpHost}:${target.tcpPort}`, { Timeout: 15 }),
+        deps.tcpPing(`${formatProxyHost(target.tcpHost)}:${target.tcpPort}`, { Timeout: 15 }),
       )
       overviewItems.push({
         id: 'tcp',
@@ -315,6 +332,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
       try {
         const dns = await deps.dnsQuery(target.dnsLookupHost)
         const answers = normalizeDnsAnswers(dns)
+        resolvedIP = answers.find((answer) => /^(?:\d{1,3}\.){3}\d{1,3}$/.test(answer) || /^[0-9a-f:]*:[0-9a-f:]+$/i.test(answer))
         const status = dns.status ?? dns.Status ?? 0
         dnsItems.push({
           id: 'dns-query',
@@ -379,43 +397,29 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     }
     syncGroups()
 
-    if (!deps.getLatestRuleMatch) {
-      outboundItems.push(
-        createSkippedItem(
-          'rule-match',
-          'netCheck.results.latestRuleMatch',
-          'netCheck.summary.ruleMatchUnavailable',
-        ),
-      )
-    } else {
+    outboundItems.push({
+      id: 'rule-match',
+      title: 'diagnostics.observedConnection',
+      status: observationError ? 'failed' : match ? 'success' : 'skipped',
+      summary: observationError ? 'netCheck.summary.ruleMatchFailed'
+        : match ? `${match.host || target.displayHost}:${match.port ?? target.tcpPort}`
+          : 'diagnostics.noConnection',
+      detail: observationError ? normalizeErrorMessage(observationError)
+        : [match?.rule, match?.chains?.join(' → ')].filter(Boolean).join(' | '),
+    })
+    if (coreAvailable && deps.queryRoute) {
       try {
-        const ruleMatch = await deps.getLatestRuleMatch(target)
-        if (!ruleMatch) {
-          outboundItems.push(
-            createSkippedItem(
-              'rule-match',
-              'netCheck.results.latestRuleMatch',
-              'netCheck.summary.ruleMatchUnavailable',
-            ),
-          )
-        } else {
-          const host = ruleMatch.host || target.displayHost
-          const port = ruleMatch.port ?? target.tcpPort
-          outboundItems.push({
-            id: 'rule-match',
-            title: 'netCheck.results.latestRuleMatch',
-            status: 'success',
-            summary: `${host}:${port}`,
-            detail: [ruleMatch.rule, ruleMatch.chains?.filter(Boolean).join(' -> ')].filter(Boolean).join(' | '),
-          })
-        }
+        const route = await deps.queryRoute(target, resolvedIP)
+        outboundItems.push({
+          id: 'route-query', title: 'diagnostics.routeQuery',
+          status: route ? 'success' : 'skipped',
+          summary: route || 'diagnostics.queryUnsupported',
+          detail: route ? 'diagnostics.routeInputs' : undefined,
+        })
       } catch (error) {
         outboundItems.push({
-          id: 'rule-match',
-          title: 'netCheck.results.latestRuleMatch',
-          status: 'failed',
-          summary: 'netCheck.summary.ruleMatchFailed',
-          detail: normalizeErrorMessage(error),
+          id: 'route-query', title: 'diagnostics.routeQuery', status: 'failed',
+          summary: 'netCheck.summary.ruleMatchFailed', detail: normalizeErrorMessage(error),
         })
       }
     }
@@ -431,7 +435,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
       )
     } else {
       try {
-        const states = await deps.getRulesetStates()
+        const states = await deps.getRulesetStates(coreAvailable)
         if (states.length === 0) {
           rulesetItems.push(
             createSkippedItem('rulesets', 'netCheck.results.rulesetItem', 'netCheck.summary.noRulesets'),

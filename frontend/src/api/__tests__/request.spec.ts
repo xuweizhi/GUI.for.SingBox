@@ -7,6 +7,18 @@ describe('Request', () => {
     vi.unstubAllGlobals()
   })
 
+  it('recognizes missing optional API methods and surfaces genuine lookup errors', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('', {status:404}))
+      .mockResolvedValueOnce(new Response('', {status:405}))
+      .mockResolvedValueOnce(new Response('lookup failed', {status:500}))
+    vi.stubGlobal('fetch', fetch)
+    const request = new Request()
+    await expect(request.getOptional('/karing/outboundQuery')).resolves.toBeUndefined()
+    await expect(request.postOptional('/karing/dnsQuery')).resolves.toBeUndefined()
+    await expect(request.getOptional('/karing/outboundQuery')).rejects.toBe('lookup failed')
+  })
+
   it('throws the API message for a non-success JSON response', async () => {
     const onUnauthorized = vi.fn()
     vi.stubGlobal(

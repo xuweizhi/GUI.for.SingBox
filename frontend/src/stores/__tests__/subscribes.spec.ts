@@ -310,6 +310,39 @@ describe('subscribes store', () => {
     ])
   })
 
+  it('keeps reported usage across partial and missing headers during a node refresh', async () => {
+    const store = useSubscribesStore()
+    const item = {
+      ...subscription('usage'),
+      total: 100,
+      upload: 10,
+      download: 4,
+      expire: 8000,
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }
+    store.subscribes = [item]
+    const response = {
+      status: 200,
+      headers: { 'subscription-userinfo': 'UPLOAD=0; download=8; total=oops; expire=-8' },
+      body: '{"outbounds":[{"tag":"node-a","type":"vmess"}]}',
+    }
+    vi.mocked(Requests).mockResolvedValueOnce(response)
+    await store.updateSubscribe(item.id)
+    const updated = store.subscribes[0]!
+    expect(updated).toMatchObject({ upload: 0, download: 8, total: 100, expire: 8000 })
+    expect(updated.usageUpdatedAt).toBeGreaterThan(0)
+    const timestamp = updated.usageUpdatedAt
+    vi.mocked(Requests).mockResolvedValueOnce({ ...response, headers: {} })
+    await store.updateSubscribe(item.id)
+    expect(updated).toMatchObject({
+      upload: 0,
+      download: 8,
+      total: 100,
+      expire: 8000,
+      usageUpdatedAt: timestamp,
+    })
+  })
+
   it('keeps a proxy id when a subscription renames the same endpoint', async () => {
     const subscribesStore = useSubscribesStore()
     subscribesStore.subscribes = [subscription('sub-stable-id')].map((item) => ({

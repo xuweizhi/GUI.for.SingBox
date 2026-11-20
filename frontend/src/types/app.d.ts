@@ -155,6 +155,7 @@ declare global {
       autoStartKernel: boolean
       autoRestartKernel: boolean
       userAgent: string
+      nodePreferences: { favorites: string[]; recent: string[] }
       connections: {
         visibility: Record<string, boolean>
         order: string[]
@@ -267,6 +268,8 @@ declare global {
       download: number
       total: number
       expire: number
+      usageFields?: string[]
+      usageUpdatedAt?: number
       updateTime: number
       type: 'Http' | 'File' | 'Manual'
       url: string

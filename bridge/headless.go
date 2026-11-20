@@ -76,6 +76,11 @@ func RunHeadless(ctx context.Context, assets embed.FS, app *App, options Headles
 		listen = "127.0.0.1:18080"
 	}
 
+	if err := recoverBackup(resolvePath("data")); err != nil {
+		return fmt.Errorf("recovering interrupted configuration restore: %w", err)
+	}
+	loadConfig()
+	configureAppLogging()
 	token, tokenPath, err := resolveHeadlessToken(options.Token)
 	if err != nil {
 		return err
@@ -89,6 +94,7 @@ func RunHeadless(ctx context.Context, assets embed.FS, app *App, options Headles
 	auth := &headlessAuth{token: token}
 	mux := http.NewServeMux()
 	mux.Handle(webUISessionEndpoint, sameOriginOnly(http.HandlerFunc(auth.handleSession)))
+	mux.Handle(backupEndpoint, sameOriginOnly(auth.wrap(http.HandlerFunc(app.handleBackup))))
 	mux.Handle(webUIRPCEndpoint, sameOriginOnly(auth.wrap(http.HandlerFunc(app.handleRPCCall))))
 	mux.Handle(webUIEmitEndpoint, sameOriginOnly(auth.wrap(http.HandlerFunc(app.handleClientEmit))))
 	mux.Handle(webUISSEEndpoint, auth.wrap(http.HandlerFunc(app.handleEventStream)))
@@ -186,6 +192,8 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	backupRPCMu.RLock()
+	defer backupRPCMu.RUnlock()
 	result, err := a.dispatchRPCCall(req)
 	if err != nil {
 		if errors.Is(err, errUnknownRPCMethod) {
@@ -364,6 +372,12 @@ func (a *App) dispatchRPCCall(req rpcRequest) (any, error) {
 			return nil, err
 		}
 		return a.ReadFile(filePath, options), nil
+	case "RefreshSubscriptionUsage":
+		var id, proxy, userAgent string
+		if err := decodeRPCArgs(req.Args, &id, &proxy, &userAgent); err != nil {
+			return nil, err
+		}
+		return refreshSubscriptionUsage(id, proxy, userAgent)
 	case "ReloadScheduledTaskWorker":
 		if err := decodeRPCArgs(req.Args); err != nil {
 			return nil, err
@@ -407,6 +421,12 @@ func (a *App) dispatchRPCCall(req rpcRequest) (any, error) {
 			return nil, err
 		}
 		return a.RunScheduledTaskWorker(value), nil
+	case "ProbeDNS":
+		var probe dnsProbeRequest
+		if err := decodeRPCArgs(req.Args, &probe); err != nil {
+			return nil, err
+		}
+		return probeDNS(probe), nil
 	case "TcpPing":
 		var address string
 		var options NetOptions

@@ -47,6 +47,11 @@ func (a *App) WriteFile(path string, content string, options IOOptions) FlagResu
 	}
 
 	if options.Range == "" {
+		if fullPath == resolvePath(profilesFilePath) {
+			if err := snapshotBeforeProfileChange(resolvePath("data"), data); err != nil {
+				return FlagResult{false, err.Error()}
+			}
+		}
 		if err := atomicWriteFile(fullPath, data, 0o600); err != nil {
 			return FlagResult{false, err.Error()}
 		}

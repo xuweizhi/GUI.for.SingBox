@@ -1,6 +1,14 @@
 import * as Bridge from '@/bridge/browser/go/bridge/App'
 
-import { getConnections, dnsQuery, getProxyDelay } from '@/api/kernel'
+import {
+  dnsQuery,
+  getConnections,
+  getProxyDelay,
+  getRemoteRulesetCounts,
+  getRemoteRulesetStates,
+  onConnections,
+  queryCoreRoute,
+} from '@/api/kernel'
 import { DefaultTestTimeout, DefaultTestURL } from '@/constant/app'
 import { useAppSettingsStore } from '@/stores/appSettings'
 import { useKernelApiStore } from '@/stores/kernelApi'
@@ -13,6 +21,8 @@ import {
   matchLatestConnection,
 } from '@/views/NetCheckView/networkCheckRuntime'
 import { useNetworkCheck } from '@/views/NetCheckView/useNetworkCheck'
+
+import type { CoreApiConnectionRecord } from '@/types/kernel'
 
 type RequestMethod = 'GET' | 'HEAD'
 type RequestOptions = {
@@ -76,7 +86,10 @@ const requestWithoutBody = async (
   })
 
   if (!result.flag) {
-    throw new RuntimeHttpError(result.body || `HTTP request failed with status ${result.status}`, result.status)
+    throw new RuntimeHttpError(
+      result.body || `HTTP request failed with status ${result.status}`,
+      result.status,
+    )
   }
 
   return {
@@ -161,25 +174,92 @@ export const useRuntimeNetworkCheck = () => {
         delay,
       }
     },
-    getLatestRuleMatch: async (target) => {
-      const { connections } = await getConnections()
-      const match = matchLatestConnection(connections, {
-        targetHost: target.requestHost,
-        targetPort: target.tcpPort,
-      })
-
-      if (!match) return
-
-      return {
-        host: match.metadata.host || match.metadata.destinationIP,
-        port: Number(match.metadata.destinationPort || 0),
-        rule: match.rule,
-        chains: match.chains,
+    observeRuleMatch: async (target) => {
+      const baseline = new Set(((await getConnections()).connections || []).map((item) => item.id))
+      let latest: CoreApiConnectionRecord | undefined
+      const capture = (rows: CoreApiConnectionRecord[]) => {
+        const match = matchLatestConnection(
+          rows.filter(
+            (row) => !baseline.has(row.id) && row.metadata.network?.toLowerCase() !== 'udp',
+          ),
+          {
+            targetHost: target.requestHost,
+            targetPort: target.tcpPort,
+          },
+        )
+        if (match && (!latest || Date.parse(match.start) >= Date.parse(latest.start)))
+          latest = match
+      }
+      const unsubscribe = onConnections((event) => capture(event.connections || []))
+      let pending: Promise<void> | undefined
+      const sample = () => {
+        pending ??= getConnections()
+          .then((data) => capture(data.connections || []))
+          .finally(() => {
+            pending = undefined
+          })
+        return pending
+      }
+      const timer = window.setInterval(() => {
+        void sample().catch(() => undefined)
+      }, 150)
+      return async () => {
+        clearInterval(timer)
+        unsubscribe()
+        try {
+          await sample()
+        } catch (error) {
+          if (!latest) throw error
+        }
+        if (!latest) return
+        return {
+          host: latest.metadata.host || latest.metadata.destinationIP,
+          port: Number(latest.metadata.destinationPort),
+          rule: [latest.rule, latest.rulePayload].filter(Boolean).join(' · '),
+          chains: latest.chains,
+        }
       }
     },
-    getRulesetStates: async () => {
+    queryRoute: async (target, resolvedIP) => {
+      const route = await queryCoreRoute(
+        target.targetKind === 'ip' ? '' : target.requestHost,
+        target.targetKind === 'ip' ? target.requestHost : resolvedIP || '',
+      )
+      if (!route) return
+      if (route.err) throw new Error(route.err)
+      if (typeof route.rule !== 'string') throw new Error('diagnostics.invalidEvidence')
+      return [route.rule, (route.chain || []).join(' → ') || route.outbound]
+        .filter(Boolean)
+        .join(' | ')
+    },
+    getRulesetStates: async (running) => {
       const profileRulesets = profilesStore.currentProfile?.route.rule_set ?? []
-      return buildRulesetCheckItems(profileRulesets, rulesetsStore.rulesets)
+      if (!running || !profileRulesets.some((item) => item.type === 'remote'))
+        return buildRulesetCheckItems(profileRulesets, rulesetsStore.rulesets)
+      const [counts, states] = await Promise.allSettled([
+        getRemoteRulesetCounts(),
+        getRemoteRulesetStates(),
+      ])
+      const items = buildRulesetCheckItems(profileRulesets, rulesetsStore.rulesets, {
+        counts: counts.status === 'fulfilled' ? counts.value?.result : undefined,
+        ...(states.status === 'fulfilled' ? states.value : {}),
+      })
+      return [
+        ...items,
+        ...[counts, states].flatMap((result, index) =>
+          result.status === 'rejected'
+            ? [
+                {
+                  id: `ruleset-api-${index}`,
+                  title: 'diagnostics.coreEvidence',
+                  status: 'failed' as const,
+                  summary: 'netCheck.summary.rulesetsFailed',
+                  detail: String(result.reason),
+                },
+              ]
+            : [],
+        ),
+      ]
     },
   })
 }

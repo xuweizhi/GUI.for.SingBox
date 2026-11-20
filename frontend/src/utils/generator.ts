@@ -34,6 +34,7 @@ import {
   resolveNodeGroup,
 } from '@/utils'
 
+import { makeNodeCatalog, profileNodeKey, subscriptionNodeKey } from './nodePreferences'
 import { findOutboundGraphIssues } from './outboundPolicy'
 import {
   extractSubscriptionConfig,
@@ -136,6 +137,7 @@ const generateOutbounds = async (
   dns: Recordable,
   native: App.Profile['native'] = {},
   nativeRouteRoots: string[] = [],
+  nodeIdentities?: { profileId: string; keys: Map<string, string> },
 ) => {
   const result: Recordable[] = []
   const subscribesStore = useSubscribesStore()
@@ -152,6 +154,7 @@ const generateOutbounds = async (
       name: string
       proxies: Recordable[]
       subscription: App.Subscription
+      nodeIds?: Map<string, string>
       dnsTags: Map<string, string>
       dnsSource: Recordable[]
       resolver?: string
@@ -180,6 +183,9 @@ const generateOutbounds = async (
       throw new Error(`Duplicate outbound tag: ${outbound.tag}`)
     }
     usedRuntimeTags.add(outbound.tag)
+    nodeIdentities?.keys.set(
+      outbound.tag, profileNodeKey(nodeIdentities.profileId, 'outbound', outbound.id),
+    )
   })
   for (const entry of [...(native.outbounds || []), ...(native.endpoints || [])]) {
     if (proxiesByTag.has(entry.tag) || outbounds.some((outbound) => outbound.tag === entry.tag))
@@ -221,6 +227,9 @@ const generateOutbounds = async (
         name: subscription.name || subscriptionId,
         proxies: parsed,
         subscription,
+        nodeIds: nodeIdentities
+          ? new Map((subscription.proxies || []).map((node) => [node.tag, node.id]))
+          : undefined,
         dnsSource: source,
         importedDnsTags: new Set((imported?.servers || []).map((server) => server.tag)),
         dnsTags,
@@ -344,6 +353,8 @@ const generateOutbounds = async (
       runtime.domain_resolver = await registerDns(subscriptionId, subscription.resolver)
     }
     if (isSubscriptionEndpoint(proxy)) endpointTags.add(tag)
+    const nodeId = subscription.nodeIds?.get(proxy.tag)
+    if (nodeId) nodeIdentities?.keys.set(tag, subscriptionNodeKey(subscriptionId, nodeId))
     runtimeTags.set(proxy, tag)
     proxiesByTag.set(tag, runtime)
     activeRegistrations.delete(key)
@@ -466,6 +477,8 @@ const generateOutbounds = async (
       runtime.tag = runtimeTag
       variants.set(key, runtimeTag)
       origins.set(runtimeTag, origins.get(tag) || tag)
+      const identity = nodeIdentities?.keys.get(tag)
+      if (identity) nodeIdentities?.keys.set(runtimeTag, identity)
       if (endpointTags.has(tag)) endpointTags.add(runtimeTag)
       proxiesByTag.set(runtimeTag, runtime)
     }
@@ -642,24 +655,15 @@ const generateRoute = (
   }
 }
 
-const generateDns = (
+export const generateDnsTransports = (
   dns: App.Dns,
-  rule_set: App.ProfileRuleSet[],
-  inbounds: App.Inbound[],
-  outbounds: App.Outbound[],
+  outbounds: Pick<App.Outbound, 'id' | 'tag' | 'type'>[],
   native?: App.Profile['native'],
 ) => {
   const getOutbound = (id: string) =>
     outbounds.find((v) => v.id === id) ||
     [...(native?.outbounds || []), ...(native?.endpoints || [])].find((entry) => entry.tag === id)
   const getDnsServer = (id: string) => dns.servers.find((v) => v.id === id)?.tag
-  const extra: Recordable = {}
-  if (dns.strategy !== Strategy.Default) {
-    extra.strategy = dns.strategy
-  }
-  if (dns.client_subnet) {
-    extra.client_subnet = dns.client_subnet
-  }
   const servers: Recordable[] = dns.servers.flatMap((server) => {
     const extra: Recordable = {}
     if (
@@ -724,6 +728,60 @@ const generateDns = (
   if (!dns.servers.some((server) => server.type === DnsServer.Local)) {
     servers.unshift({ tag: SystemDnsResolverTag, type: DnsServer.Local })
   }
+  // Native DNS definitions preserve protocol-specific fields unavailable in the form.
+  for (const server of native?.dnsServers || []) {
+    const modeled = dns.servers.find((entry) =>
+      server._gui_id ? entry.id === server._gui_id : entry.tag === server.tag,
+    )
+    // A form-backed server was deleted; raw fields must not recreate it.
+    if (server._gui_id && !modeled) continue
+    const index = servers.findIndex((entry) => entry.tag === (modeled?.tag || server.tag))
+    if (index >= 0) {
+      const generated = servers[index]!
+      const retained = deepClone(server)
+      delete retained._gui_id
+      for (const key of [
+        'server',
+        'server_port',
+        'path',
+        'domain_resolver',
+        'detour',
+        'interface',
+        'inet4_range',
+        'inet6_range',
+        'predefined',
+      ])
+        delete retained[key]
+      const merged = { ...retained, ...generated }
+      if (typeof server.domain_resolver === 'object' && generated.domain_resolver) {
+        merged.domain_resolver = { ...server.domain_resolver, server: generated.domain_resolver }
+      }
+      servers[index] = merged
+    } else {
+      const retained = deepClone(server)
+      delete retained._gui_id
+      servers.push(retained)
+    }
+  }
+  return servers
+}
+
+const generateDns = (
+  dns: App.Dns,
+  rule_set: App.ProfileRuleSet[],
+  inbounds: App.Inbound[],
+  outbounds: App.Outbound[],
+  native?: App.Profile['native'],
+) => {
+  const getDnsServer = (id: string) => dns.servers.find((v) => v.id === id)?.tag
+  const extra: Recordable = {}
+  if (dns.strategy !== Strategy.Default) {
+    extra.strategy = dns.strategy
+  }
+  if (dns.client_subnet) {
+    extra.client_subnet = dns.client_subnet
+  }
+  const servers = generateDnsTransports(dns, outbounds, native)
 
   return {
     servers,
@@ -792,6 +850,7 @@ export const generateDnsServerURL = (dnsServer: App.DnsServerConfig) => {
 const _adaptToStableBranch = (_: Recordable) => {}
 
 type GenerateConfigOptions = {
+  nodeKeys?: Map<string, string>
   enableStableConfigCompat?: boolean
   enablePluginProcessing?: boolean
   enableMixinProcessing?: boolean
@@ -823,41 +882,6 @@ export const generateConfig = async (
     profile.outbounds,
     profile.native,
   )
-  // Native DNS definitions preserve protocol-specific fields unavailable in the form.
-  for (const server of profile.native?.dnsServers || []) {
-    const modeled = profile.dns.servers.find((entry) =>
-      server._gui_id ? entry.id === server._gui_id : entry.tag === server.tag,
-    )
-    // A form-backed server was deleted; raw fields must not recreate it.
-    if (server._gui_id && !modeled) continue
-    const index = dns.servers.findIndex((entry) => entry.tag === (modeled?.tag || server.tag))
-    if (index >= 0) {
-      const generated = dns.servers[index]!
-      const retained = deepClone(server)
-      delete retained._gui_id
-      for (const key of [
-        'server',
-        'server_port',
-        'path',
-        'domain_resolver',
-        'detour',
-        'interface',
-        'inet4_range',
-        'inet6_range',
-        'predefined',
-      ])
-        delete retained[key]
-      const merged = { ...retained, ...generated }
-      if (typeof server.domain_resolver === 'object' && generated.domain_resolver) {
-        merged.domain_resolver = { ...server.domain_resolver, server: generated.domain_resolver }
-      }
-      dns.servers[index] = merged
-    } else {
-      const retained = deepClone(server)
-      delete retained._gui_id
-      dns.servers.push(retained)
-    }
-  }
   const nativeRouteRoots = [
     profile.route.final,
     ...profile.route.rules
@@ -884,7 +908,9 @@ export const generateConfig = async (
       else node[field] = typeof reference === 'string' ? renamed : { ...reference, server: renamed }
     }
   }
-  const generated = await generateOutbounds(profile.outbounds, dns, native, nativeRouteRoots)
+  const generated = await generateOutbounds(profile.outbounds, dns, native, nativeRouteRoots,
+    options.nodeKeys ? { profileId: profile.id, keys: options.nodeKeys } : undefined,
+  )
   // step 1
   let config: Recordable = {
     log: profile.log,
@@ -950,10 +976,21 @@ export const generateConfigFile = async (
 ) => {
   const header = `DO NOT EDIT - Generated by ${APP_TITLE}`
 
-  const _config = await generateConfig(profile)
+  const keys = new Map<string, string>()
+  const _config = await generateConfig(profile, { nodeKeys: keys })
   const config = await beforeWrite(_config)
 
   config.experimental.cache_file.path = 'cache.db'
 
-  await WriteFile(outputPath, JSON.stringify({ $schema: header, ...config }, null, 2))
+  const text = JSON.stringify({ $schema: header, ...config }, null, 2)
+  await WriteFile(outputPath, text)
+  const activeKeys = new Map<string, string>()
+  for (const entries of [config.outbounds, config.endpoints]) {
+    if (!Array.isArray(entries)) continue
+    for (const node of entries) {
+      const key = keys.get(node?.tag)
+      if (key) activeKeys.set(node.tag, key)
+    }
+  }
+  return makeNodeCatalog(text, profile.id, activeKeys)
 }

@@ -46,8 +46,6 @@ func CreateApp(fs embed.FS) *App {
 
 	app := NewApp()
 	extractEmbeddedFiles(fs)
-	loadConfig()
-	configureAppLogging()
 	return app
 }
 

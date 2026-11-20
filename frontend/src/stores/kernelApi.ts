@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 
 import {
   getProxies,
@@ -62,6 +62,12 @@ import {
   sleep,
   replaceFileWithRollback,
 } from '@/utils'
+import {
+  legacyNodeKeys,
+  profileNodeKey,
+  readNodeCatalog,
+  type NodeCatalog,
+} from '@/utils/nodePreferences'
 import { explainCoreConfigCheckError } from '@/utils/coreConfigValidation'
 import { profileUsesSubscription, getNodeGroupDependencies } from '@/utils/nodeGroup'
 
@@ -107,6 +113,17 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
 
   const proxies = ref<Record<string, CoreApiProxy>>({})
 
+  const catalogPath = CoreWorkingDirectory + '/node-identities.json'
+  const nodeCatalog = shallowRef<NodeCatalog>()
+  const nodeKeys = computed(() =>
+    nodeCatalog.value
+      ? new Map(nodeCatalog.value.nodes)
+      : legacyNodeKeys(profilesStore.currentProfile, subscribesStore.subscribes),
+  )
+  const getNodePreferenceKey = (tag: string) =>
+    nodeKeys.value.get(tag) ||
+    profileNodeKey(nodeCatalog.value?.profileId ?? profilesStore.currentProfile?.id ?? '', 'tag', tag)
+
   const refreshConfig = async () => {
     const _config = await getConfigs()
 
@@ -117,6 +134,8 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
 
     if (!runtimeProfile) {
       const txt = await ReadFile(CoreConfigFilePath)
+      const catalogText = await ReadFile(catalogPath).catch(() => '')
+      nodeCatalog.value = readNodeCatalog(txt, catalogText)
       runtimeProfile = restoreProfile(JSON.parse(txt))
       const profile = profilesStore.currentProfile
       if (profile) {
@@ -443,7 +462,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       const coreFilePath = `${CoreWorkingDirectory}/${getKernelFileName(isAlpha)}`
       await RemoveFile(CoreConfigStagedFilePath).catch(() => undefined)
       let stagedConfig: unknown
-      await generateConfigFile(
+      const catalog = await generateConfigFile(
         profile,
         async (config) => {
           stagedConfig = await pluginsStore.onBeforeCoreStartTrigger(config, profile)
@@ -480,6 +499,12 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       } catch (error) {
         await RemoveFile(CoreConfigStagedFilePath).catch(() => undefined)
         throw error
+      }
+      nodeCatalog.value = catalog
+      if (catalog) {
+        await WriteFile(catalogPath, JSON.stringify(catalog)).catch((error) =>
+          logsStore.recordKernelLog(String(error)),
+        )
       }
       startedProcess = await runCoreProcess(isAlpha, (process) => {
         startedProcess = process
@@ -655,6 +680,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     coreStateLoading,
     config,
     proxies,
+    getNodePreferenceKey,
     refreshConfig,
     updateConfig,
     refreshProviderProxies,

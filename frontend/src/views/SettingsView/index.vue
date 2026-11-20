@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 
 import { useAppStore } from '@/stores'
 
+import BackupSettings from './components/BackupSettings.vue'
 import CoreSettings from './components/CoreSettings.vue'
 import GeneralSettings from './components/GeneralSettings.vue'
 import PluginSettings from './components/PluginSettings.vue'
@@ -24,6 +25,7 @@ const settings = [
     tab: 'router.plugins',
     component: PluginSettings,
   },
+  { key: 'backup', tab: 'backup.title', component: BackupSettings },
 ] as const
 
 const activeKey = ref(settings[0].key)

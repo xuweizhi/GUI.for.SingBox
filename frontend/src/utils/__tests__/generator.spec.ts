@@ -583,6 +583,30 @@ describe('subscription DNS, endpoints and chained strategies', () => {
     vi.mocked(ReadFile).mockReset()
   })
 
+  it('retains subscription identity through renamed nodes, duplicate tags and pre-proxy variants', async () => {
+    const profile = createProfile()
+    profile.outbounds = [
+      strategy('upstream', [subMember('hop')]),
+      strategy('exit', [subMember('a'), subMember('b')], 'upstream'),
+    ]
+    const generateKeys = async (name: string) => {
+      subscriptions([
+        { id: 'hop', nodes: [socks('hop')] },
+        { id: 'a', nodes: [socks(name)] },
+        { id: 'b', nodes: [socks(name)] },
+      ])
+      const nodeKeys = new Map<string, string>()
+      await generateConfig(profile, { ...configOptions, nodeKeys })
+      return nodeKeys
+    }
+    const first = await generateKeys('node')
+    expect(first.get('node [via upstream]')).toBe(JSON.stringify(['subscription', 'a', 'a-0']))
+    expect(first.get('node [b] [via upstream]')).toBe(JSON.stringify(['subscription', 'b', 'b-0']))
+    mockSubscribes.splice(0)
+    const renamed = await generateKeys('new')
+    expect(renamed.get('new [b] [via upstream]')).toBe(first.get('node [b] [via upstream]'))
+  })
+
   it('isolates same-named subscription resolvers, rewrites bootstrap references and leaves website DNS unchanged', async () => {
     const profile = createProfile()
     profile.outbounds = [strategy('nodes', [subMember('a'), subMember('b')])]

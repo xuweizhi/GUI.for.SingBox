@@ -76,10 +76,11 @@ vi.mock('@/utils', () => ({
 }))
 
 import { getConfigs } from '@/api/kernel'
-import { KillProcess } from '@/bridge'
+import { KillProcess, ReadFile } from '@/bridge'
 import { CoreConfigStagedFilePath } from '@/constant/kernel'
 import { useKernelApiStore } from '@/stores/kernelApi'
 import { sleep } from '@/utils'
+import { makeNodeCatalog, subscriptionNodeKey } from '@/utils/nodePreferences'
 
 describe('kernel staged configuration integration', () => {
   beforeEach(() => {
@@ -129,6 +130,16 @@ describe('kernel staged configuration integration', () => {
     mocks.start.mockResolvedValue(123)
     mocks.replace.mockResolvedValue(undefined)
     mocks.remove.mockResolvedValue(undefined)
+  })
+
+  it('reconnects to an existing core using the generated identity catalog even after subscription changes', async () => {
+    const key = subscriptionNodeKey('provider', 'stable-id')
+    const catalog = makeNodeCatalog('{}', 'installed-profile', new Map([['old-name', key]]))
+    vi.mocked(ReadFile).mockResolvedValueOnce('{}').mockResolvedValueOnce(JSON.stringify(catalog))
+    const store = useKernelApiStore()
+    await store.refreshConfig()
+    expect(store.getNodePreferenceKey('old-name')).toBe(key)
+    expect(store.getNodePreferenceKey('native')).toBe(JSON.stringify(['tag', 'installed-profile', 'native']))
   })
 
   it('annotates the final plugin configuration while keeping the active config untouched on check failure', async () => {

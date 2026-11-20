@@ -110,16 +110,29 @@ export const useNodeController = () => {
   )
   const nodeGroupFilterOptions = computed(() => [
     { label: 'nodeGroups.all', value: '__all' },
+    { label: 'home.nodes.favorites', value: '__favorites' },
+    { label: 'home.nodes.recent', value: '__recent' },
     ...nodeGroupsStore.nodeGroups.flatMap((group) =>
       nodeGroupRuntimeMap.value.has(group.id) ? [{ label: group.name, value: group.id }] : [],
     ),
     { label: 'nodeGroups.ungrouped', value: '__ungrouped' },
   ])
+  const favoriteKeys = computed(() => new Set(appSettingsStore.app.nodePreferences.favorites))
+  const recentOrder = computed(
+    () => new Map(appSettingsStore.app.nodePreferences.recent.map((key, index) => [key, index])),
+  )
+  const toggleFavorite = (name: string) => {
+    const key = kernelApiStore.getNodePreferenceKey(name)
+    const prefs = appSettingsStore.app.nodePreferences
+    prefs.favorites = favoriteKeys.value.has(key)
+      ? prefs.favorites.filter((entry) => entry !== key)
+      : [...prefs.favorites, key]
+  }
   const nodes = computed(() => {
     if (!selectedGroup.value) return []
     const profileOutbounds = profilesStore.currentProfile?.outbounds || []
     const outboundByTag = new Map(profileOutbounds.map((outbound) => [outbound.tag, outbound]))
-    return filterAndSortNodes(
+    const filtered = filterAndSortNodes(
       selectedGroup.value,
       kernelApiStore.proxies,
       query.value,
@@ -129,10 +142,13 @@ export const useNodeController = () => {
       nodeAttempts.value,
     )
       .map((node) => {
+        const key = kernelApiStore.getNodePreferenceKey(node.name)
         const configured = outboundByTag.get(node.name)
         const role = configured ? getOutboundRole(configured) : undefined
         return {
           ...node,
+          favorite: favoriteKeys.value.has(key),
+          recentIndex: recentOrder.value.get(key),
           role,
           displayName:
             role === 'auto'
@@ -148,11 +164,17 @@ export const useNodeController = () => {
       .filter((node) => !['Direct', 'Reject'].includes(node.proxy?.type || ''))
       .filter((node) => {
         if (nodeGroupFilter.value === '__all') return true
+        if (nodeGroupFilter.value === '__favorites') return node.favorite
+        if (nodeGroupFilter.value === '__recent') return node.recentIndex !== undefined
         if (nodeGroupFilter.value === '__ungrouped') {
           return !groupedRuntimeNames.value.has(node.name)
         }
         return nodeGroupRuntimeMap.value.get(nodeGroupFilter.value)?.has(node.name) || false
       })
+    if (nodeGroupFilter.value === '__recent' && !sortByDelay.value) {
+      filtered.sort((a, b) => a.recentIndex! - b.recentIndex!)
+    }
+    return filtered
   })
 
   let disposed = false
@@ -433,6 +455,7 @@ export const useNodeController = () => {
     sortByDelay,
     nodeGroupFilter,
     nodeGroupFilterOptions,
+    toggleFavorite,
     nodeErrors,
     nodeAttempts,
     nodePhases,

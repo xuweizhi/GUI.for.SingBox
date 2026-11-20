@@ -41,6 +41,10 @@ export const migrateSubscribes = async (
   let needSync = false
 
   subscribes.forEach((subscribe) => {
+    if (!Number.isFinite(subscribe.expire)) {
+      subscribe.expire = 0
+      needSync = true
+    }
     if (typeof subscribe.requestProxyMode === 'undefined') {
       subscribe.requestProxyMode = RequestProxyMode.System
       needSync = true

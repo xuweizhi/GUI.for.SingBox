@@ -135,9 +135,13 @@ func getHeadlessKernelRuntimeConfig() KernelRuntimeConfig {
 }
 
 func getHeadlessCoreFileName() string {
+	return headlessCoreFileName(Config.Kernel.Branch)
+}
+
+func headlessCoreFileName(branch string) string {
 	suffix := map[string]string{"windows": ".exe", "linux": "", "darwin": ""}[Env.OS]
 	latest := ""
-	if strings.EqualFold(Config.Kernel.Branch, "alpha") {
+	if strings.EqualFold(branch, "alpha") {
 		latest = "-latest"
 	}
 	return "sing-box" + latest + suffix

@@ -4,10 +4,12 @@ import { useI18n } from 'vue-i18n'
 
 import { DomainStrategyOptions } from '@/constant/kernel'
 
+import DnsComparison from './DnsComparison.vue'
 import DnsRulesConfig from './DnsRulesConfig.vue'
 import DnsServersConfig from './DnsServersConfig.vue'
 
 interface Props {
+  profile: App.Profile
   inboundOptions: { label: string; value: string }[]
   outboundOptions: { label: string; value: string }[]
   ruleSet: App.ProfileRuleSet[]
@@ -73,6 +75,7 @@ defineExpose({ handleAdd })
       </div>
     </template>
     <template #servers>
+      <DnsComparison :profile="profile" @select="(id) => model.final = id" />
       <DnsServersConfig
         ref="serversConfigRef"
         v-model="model.servers"

@@ -21,6 +21,13 @@ import type { PickerItem } from '@/components/Picker/index.vue'
 import type { Column } from '@/components/Table/index.vue'
 import type { CoreApiConnectionsData } from '@/types/kernel'
 
+import {
+  connectionFilterFields,
+  connectionOptions,
+  filterConnections,
+  type ConnectionFilters,
+} from '../connectionFilters'
+
 type TrafficCacheType = { up: number; down: number }
 const TrafficCache: Record<string, TrafficCacheType> = {}
 
@@ -88,7 +95,7 @@ const columns = computed(() =>
         title: 'home.connections.chains',
         key: 'chains',
         hidden: !appSettingsStore.app.connections.visibility['chains'],
-        sort: (a, b) => b.chains[0].localeCompare(a.chains[0]),
+        sort: (a, b) => (b.chains[0] || '').localeCompare(a.chains[0] || ''),
         customRender: ({ value }) => value.slice().reverse().join(' :: '),
       },
       {
@@ -235,31 +242,35 @@ const [isPause, togglePause] = useBool(false)
 const { t } = useI18n()
 const kernelApiStore = useKernelApiStore()
 
-const filteredConnections = computed(() => {
-  if (!keywords.value) return isActive.value ? dataSource.value : disconnectedData.value
-  return (isActive.value ? dataSource.value : disconnectedData.value).filter((connection) =>
-    Object.values(connection.metadata).some((v) =>
-      String(v).toLocaleLowerCase().includes(keywords.value.toLocaleLowerCase()),
-    ),
-  )
-})
+const showFilters = ref(false)
+const filters = ref<ConnectionFilters>({})
+const selectedFilterCount = computed(
+  () => Object.values(filters.value).filter((items) => items.length).length,
+)
+const currentConnections = computed(() =>
+  isActive.value ? dataSource.value : disconnectedData.value,
+)
+const filterOptions = computed(() => connectionOptions(currentConnections.value, filters.value))
+const filteredConnections = computed(() =>
+  filterConnections(currentConnections.value, keywords.value, filters.value),
+)
 
 const handleCloseAll = async () => {
+  const selected = [...filteredConnections.value]
   try {
-    await Promise.all(
-      filteredConnections.value.map((connection) => deleteConnection(connection.id)),
-    )
-    disconnectedData.value.push(...filteredConnections.value)
-    dataSource.value = dataSource.value.filter(
-      (connection) => !filteredConnections.value.find((c) => c.id === connection.id),
-    )
+    await Promise.all(selected.map((connection) => deleteConnection(connection.id)))
+    const ids = new Set(selected.map((connection) => connection.id))
+    const closedIds = new Set(disconnectedData.value.map((connection) => connection.id))
+    disconnectedData.value.push(...selected.filter((connection) => !closedIds.has(connection.id)))
+    dataSource.value = dataSource.value.filter((connection) => !ids.has(connection.id))
   } catch (error: any) {
     message.error(error.message || error)
   }
 }
 
 const handleClearClosedConns = () => {
-  disconnectedData.value.splice(0)
+  const ids = new Set(filteredConnections.value.map((connection) => connection.id))
+  disconnectedData.value = disconnectedData.value.filter((connection) => !ids.has(connection.id))
 }
 
 const handleResetConnections = () => {
@@ -298,7 +309,7 @@ onUnmounted(() => {
 
 <template>
   <div class="flex flex-col h-full">
-    <div class="flex items-center">
+    <div class="flex flex-wrap gap-4 items-center">
       <Radio
         v-model="isActive"
         :options="[
@@ -307,7 +318,23 @@ onUnmounted(() => {
         ]"
         size="small"
       />
-      <Input v-model="keywords" clearable size="small" placeholder="Search" class="ml-8 flex-1" />
+      <Input
+        v-model="keywords"
+        clearable
+        size="small"
+        placeholder="common.keywords"
+        class="flex-1 min-w-128"
+      />
+      <Button
+        icon="filter"
+        size="small"
+        :type="selectedFilterCount ? 'primary' : 'text'"
+        :aria-expanded="showFilters"
+        @click="showFilters = !showFilters"
+      >
+        {{ t('home.connections.filters')
+        }}{{ selectedFilterCount ? ' (' + selectedFilterCount + ')' : '' }}
+      </Button>
       <Button
         :icon="isPause ? 'play' : 'pause'"
         size="small"
@@ -317,7 +344,7 @@ onUnmounted(() => {
       />
       <Button
         v-if="isActive"
-        v-tips="'home.connections.closeAll'"
+        v-tips="'home.connections.closeVisible'"
         icon="close"
         size="small"
         type="text"
@@ -325,13 +352,35 @@ onUnmounted(() => {
       />
       <Button
         v-else
-        v-tips="'common.clear'"
+        v-tips="'home.connections.clearVisible'"
         icon="clear"
         size="small"
         type="text"
         @click="handleClearClosedConns"
       />
       <Button icon="settings" size="small" type="text" @click="toggleSettings" />
+    </div>
+    <div v-if="showFilters" class="connection-filters mt-8">
+      <div
+        v-for="(label, field) in connectionFilterFields"
+        :key="field"
+        role="group"
+        :aria-label="t(label)"
+        class="flex flex-col gap-2"
+      >
+        <span class="text-12">{{ t(label) }}</span>
+        <MultipleSelect
+          :model-value="filters[field] || []"
+          :options="filterOptions[field]"
+          placeholder="home.connections.any"
+          size="small"
+          clearable
+          @update:model-value="filters[field] = $event"
+        />
+      </div>
+      <Button v-if="selectedFilterCount" type="text" size="small" @click="filters = {}">
+        {{ t('common.reset') }}
+      </Button>
     </div>
     <Table
       class="flex-1 mt-8"
@@ -377,3 +426,12 @@ onUnmounted(() => {
     </div>
   </Modal>
 </template>
+
+<style scoped>
+.connection-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  align-items: end;
+  gap: 6px 10px;
+}
+</style>

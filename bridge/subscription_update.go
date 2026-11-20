@@ -67,11 +67,8 @@ func (w *scheduledTaskWorkerSupervisor) prepareSubscriptionUpdate(current subscr
 		}
 		prefixSubscriptionReferences(proxies, subscribe.ImportedDns, subscribe.ProxyPrefix)
 	}
-	subscribe.Upload = userInfo["upload"]
-	subscribe.Download = userInfo["download"]
-	subscribe.Total = userInfo["total"]
-	subscribe.Expire = userInfo["expire"] * 1000
 	subscribe.UpdateTime = time.Now().UnixMilli()
+	subscribe.applyUsage(userInfo, subscribe.UpdateTime)
 	subscribe.Proxies = reconcileSubscriptionIDs(previousMetadata, previousNodes, proxies)
 	if !isDefaultSubscribeScript(subscribe.Script) {
 		// Keep a pre-script identity snapshot: scripts are allowed to rename nodes.

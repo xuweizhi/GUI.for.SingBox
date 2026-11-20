@@ -36,7 +36,7 @@ export class Request {
 
   private request = async <T>(
     url: string,
-    options: { method: Method; body?: Record<string, any> },
+    options: { method: Method; body?: Record<string, any>; optional?: boolean },
   ) => {
     this.beforeRequest()
 
@@ -69,6 +69,8 @@ export class Request {
       await this.onUnauthorized()
       throw 'auth.invalidToken'
     }
+
+    if (options.optional && [404, 405, 501].includes(res.status)) return undefined as T
 
     if (!res.ok) {
       const fallback = `Request failed with status ${res.status}`
@@ -105,6 +107,10 @@ export class Request {
   }
 
   public get = <T>(url: string, body = {}) => this.request<T>(url, { method: 'GET', body })
+  public getOptional = <T>(url: string, body = {}) =>
+    this.request<T | undefined>(url, { method: 'GET', body, optional: true })
+  public postOptional = <T>(url: string, body = {}) =>
+    this.request<T | undefined>(url, { method: 'POST', body, optional: true })
   public post = <T>(url: string, body = {}) => this.request<T>(url, { method: 'POST', body })
   public put = <T>(url: string, body = {}) => this.request<T>(url, { method: 'PUT', body })
   public patch = <T>(url: string, body = {}) => this.request<T>(url, { method: 'PATCH', body })
