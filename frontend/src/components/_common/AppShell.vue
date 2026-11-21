@@ -3,7 +3,9 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
-import { Theme } from '@/enums/app'
+import logo from '@/assets/logo'
+import { NavLayout, Theme } from '@/enums/app'
+import rawRoutes from '@/router/routes'
 import {
   useAppSettingsStore,
   useKernelApiStore,
@@ -12,7 +14,8 @@ import {
 } from '@/stores'
 import { confirm } from '@/utils'
 
-import { NavigationBar } from '@/components'
+import AppearancePopover from './AppearancePopover.vue'
+import NavigationBar from './NavigationBar.vue'
 
 const SIDEBAR_STORAGE_KEY = 'gfs.webui.sidebar.collapsed'
 
@@ -51,12 +54,21 @@ watch(
 )
 
 const isDarkTheme = computed(() => appSettings.themeMode === Theme.Dark)
+const isTopnav = computed(() => appSettings.app.navLayout === NavLayout.Topnav)
 const activeProfileName = computed(() => profilesStore.currentProfile?.name || '')
 const pageTitle = computed(() =>
   route.meta.name ? t(route.meta.name) : String(route.name || ''),
 )
 const isMac = computed(
   () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || ''),
+)
+
+const visibleRoutes = computed(() =>
+  rawRoutes.filter(
+    (r) =>
+      r.meta?.hidden === false ||
+      (!r.meta?.hidden && appSettings.app.pages.includes(r.name! as string)),
+  ),
 )
 
 const toggleTheme = (event: MouseEvent) => {
@@ -99,10 +111,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'is-topnav': isTopnav }">
     <NavigationBar
       v-model:mobile-open="mobileNavOpen"
       v-model:collapsed="sidebarCollapsed"
+      :topnav="isTopnav"
     />
 
     <div class="app-main">
@@ -119,8 +132,37 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             >
               <Icon icon="menu" :size="18" color="currentColor" />
             </button>
-            <h1 class="topbar-title">{{ pageTitle }}</h1>
+
+            <RouterLink v-if="isTopnav" to="/" class="topbar-brand">
+              <img :src="logo" alt="" width="24" height="24" class="shrink-0" />
+              <span class="topbar-brand__name">GUI.for.SingBox</span>
+            </RouterLink>
+
+            <h1 class="topbar-title" :class="{ 'is-mobile-only': isTopnav }">{{ pageTitle }}</h1>
           </div>
+
+          <nav
+            v-if="isTopnav"
+            class="topbar-nav"
+            :aria-label="t('navigation.main')"
+          >
+            <RouterLink
+              v-for="r in visibleRoutes"
+              :key="r.path"
+              :to="r.path"
+              class="topbar-nav__link"
+              active-class="is-active"
+            >
+              <Icon
+                v-if="r.meta?.icon"
+                :icon="r.meta.icon"
+                :size="15"
+                color="currentColor"
+                class="shrink-0"
+              />
+              <span>{{ r.meta?.name ? t(r.meta.name) : r.name }}</span>
+            </RouterLink>
+          </nav>
 
           <div class="app-topbar__right">
             <button
@@ -128,7 +170,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               class="topbar-core-pill"
               :class="[
                 kernelApiStore.running ? 'is-running' : 'is-stopped',
-                { 'is-desktop-visible': sidebarCollapsed },
+                { 'is-desktop-visible': sidebarCollapsed || isTopnav },
               ]"
               :title="
                 (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped')) +
@@ -144,6 +186,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                 }}
               </span>
             </button>
+
+            <AppearancePopover />
 
             <button
               type="button"
@@ -210,9 +254,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 .app-topbar {
   flex-shrink: 0;
-  height: 54px;
-  background: var(--card-bg);
-  border-bottom: 1px solid var(--border-color);
+  height: var(--topbar-height, 54px);
+  background: var(--surface-chrome-bg, var(--card-bg));
+  border-bottom: 1px solid var(--surface-border, var(--border-color));
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  z-index: 30;
 }
 
 .app-topbar__inner {
@@ -220,7 +267,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   width: 100%;
   max-width: 1360px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 var(--page-pad-x, 24px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -232,6 +279,17 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex-shrink: 0;
+}
+
+.topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color);
+  white-space: nowrap;
 }
 
 .topbar-title {
@@ -242,6 +300,55 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+
+  &.is-mobile-only {
+    display: none;
+  }
+}
+
+.topbar-nav {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.topbar-nav__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: var(--control-radius, 8px);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted-color);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease,
+    box-shadow 0.18s ease;
+
+  &:hover {
+    color: var(--color);
+    background: var(--btn-text-hover-bg);
+  }
+
+  &.is-active {
+    color: var(--accent-text);
+    background: var(--accent-soft);
+    box-shadow: var(--active-indicator-shadow);
+    font-weight: 600;
+  }
 }
 
 .app-topbar__right {
@@ -262,7 +369,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   height: 34px;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--control-radius, 8px);
   background: transparent;
   color: var(--muted-color);
   font: inherit;
@@ -293,13 +400,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 }
 
 .topbar-cmd-btn {
-  border-color: var(--border-color);
-  background: var(--bg-color);
+  border-color: var(--surface-border, var(--border-color));
+  background: color-mix(in srgb, var(--bg-color) 75%, var(--surface-bg));
   padding: 0 8px 0 10px;
 
   &:hover {
     border-color: color-mix(in srgb, var(--accent-text) 55%, var(--border-color));
-    background: var(--bg-color);
+    background: color-mix(in srgb, var(--bg-color) 65%, var(--surface-bg));
+  }
+}
+
+.app-shell.is-topnav {
+  .topbar-cmd-btn__label,
+  .topbar-logout-btn__label {
+    display: none;
+  }
+
+  .topbar-logout-btn {
+    width: 34px;
+    padding: 0;
   }
 }
 
@@ -309,7 +428,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   padding: 1px 5px;
   border-radius: 5px;
   border: 1px solid var(--border-color);
-  background: var(--card-bg);
+  background: var(--surface-bg, var(--card-bg));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   line-height: 1.3;
@@ -329,8 +448,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   height: 30px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-color);
+  border: 1px solid var(--surface-border, var(--border-color));
+  background: color-mix(in srgb, var(--bg-color) 75%, var(--surface-bg));
   color: var(--muted-color);
   font: inherit;
   font-size: 12px;
@@ -381,7 +500,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   max-width: 1360px;
   margin: 0 auto;
   overflow-y: auto;
-  padding: 18px 24px 20px;
+  padding: var(--page-pad-y, 18px) var(--page-pad-x, 24px) 20px;
+}
+
+@media (max-width: 1180px) {
+  .topbar-brand__name {
+    display: none;
+  }
 }
 
 @media (max-width: 960px) {
@@ -391,6 +516,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
   .topbar-core-pill {
     display: inline-flex;
+  }
+
+  .topbar-brand,
+  .topbar-nav {
+    display: none;
+  }
+
+  .topbar-title.is-mobile-only {
+    display: block;
   }
 }
 

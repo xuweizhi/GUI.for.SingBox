@@ -131,8 +131,12 @@ const renderCell = (column: Column, record: Recordable) => {
 
 <style lang="less" scoped>
 .gui-table {
-  border: 1px solid var(--border-color);
-  background: var(--card-bg);
+  border: 1px solid var(--surface-border, var(--border-color));
+  border-radius: var(--card-radius, 12px);
+  background: var(--surface-bg, var(--card-bg));
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
 }
 
 .gui-table__head-row {

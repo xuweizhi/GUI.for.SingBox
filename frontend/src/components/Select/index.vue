@@ -215,7 +215,7 @@ const handleTriggerKeydown = (
           'min-h-30': size === 'small',
           'min-h-36': size === 'default',
         }"
-        class="gui-select cursor-pointer inline-flex items-center min-w-128 rounded-6 px-8 gap-4"
+        class="gui-select cursor-pointer inline-flex items-center min-w-128 px-8 gap-4"
         @keydown="handleTriggerKeydown($event, { toggle, close, open, show })"
       >
         <span class="line-clamp-1 break-all flex-1" :class="{ 'text-muted': isPlaceholder }">
@@ -292,6 +292,7 @@ const handleTriggerKeydown = (
 .gui-select {
   background: var(--select-bg);
   color: var(--input-color);
+  border-radius: var(--control-radius, 8px);
   transition:
     border-color 0.16s ease,
     box-shadow 0.16s ease;

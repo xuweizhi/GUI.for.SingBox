@@ -44,7 +44,7 @@ const isInteractive = computed(() => {
       'is-disabled': disabled,
       'is-interactive': isInteractive,
     }"
-    class="gui-card rounded-8 relative flex flex-col"
+    class="gui-card relative flex flex-col"
   >
     <div v-if="hasTitle" class="gui-card__header card-header flex items-center break-all">
       <slot name="title-prefix"></slot>
@@ -61,7 +61,7 @@ const isInteractive = computed(() => {
         <slot name="extra"></slot>
       </div>
     </div>
-    <div v-if="subtitle" class="card-header_subtitle px-16 pb-4 text-12 text-muted">
+    <div v-if="subtitle" class="card-header_subtitle pb-4 text-12 text-muted">
       {{ $t(subtitle) }}
     </div>
     <div class="gui-card__body flex-1" :class="{ 'has-title': hasTitle }">
@@ -80,24 +80,30 @@ const isInteractive = computed(() => {
 <style lang="less" scoped>
 .gui-card {
   min-width: 0;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border: 1px solid var(--surface-border, var(--border-color));
+  border-radius: var(--card-radius, 12px);
   color: var(--card-color);
-  background-color: var(--card-bg);
+  background-color: var(--surface-bg, var(--card-bg));
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   transition:
-    box-shadow 0.18s ease,
-    border-color 0.18s ease,
-    background-color 0.18s ease;
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    transform 0.18s ease;
 
   &.is-interactive {
     cursor: pointer;
     &:hover {
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
-      border-color: color-mix(in srgb, var(--accent-text) 45%, var(--border-color));
-      background-color: var(--card-hover-bg);
+      box-shadow: var(--card-hover-shadow);
+      border-color: color-mix(in srgb, var(--accent-text) 52%, var(--surface-border));
+      background-color: var(--surface-hover-bg, var(--card-hover-bg));
+      transform: translateY(var(--card-hover-lift, 0px));
     }
     &:active {
-      background-color: var(--card-active-bg);
+      background-color: var(--surface-active-bg, var(--card-active-bg));
+      transform: translateY(0);
     }
   }
 
@@ -109,7 +115,7 @@ const isInteractive = computed(() => {
 
   &.is-selected {
     border-color: var(--accent-text);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-text) 28%, transparent);
+    box-shadow: var(--card-selected-shadow);
   }
 
   &.is-disabled {
@@ -117,18 +123,22 @@ const isInteractive = computed(() => {
   }
 }
 .gui-card__header {
-  padding: 14px 16px 10px;
+  padding: var(--card-pad-y, 14px) var(--card-pad-x, 16px) 10px;
   gap: 6px;
+}
+.card-header_subtitle {
+  padding-left: var(--card-pad-x, 16px);
+  padding-right: var(--card-pad-x, 16px);
 }
 .gui-card__title {
   min-width: 0;
 }
 .gui-card__body {
   min-width: 0;
-  padding: 0 16px;
+  padding: 0 var(--card-pad-x, 16px);
 }
 .gui-card__body.has-title {
-  padding-bottom: 16px;
+  padding-bottom: var(--card-pad-x, 16px);
 }
 .gui-card__state--selected {
   position: absolute;
@@ -140,7 +150,9 @@ const isInteractive = computed(() => {
   width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: var(--primary-color);
+  background-color: var(--primary-color);
+  background-image: var(--btn-primary-bg-image);
+  box-shadow: var(--btn-primary-shadow);
   pointer-events: none;
 }
 </style>

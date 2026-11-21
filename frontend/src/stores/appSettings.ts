@@ -21,6 +21,9 @@ import {
   Lang,
   View,
   Color,
+  UiStyle,
+  NavLayout,
+  UiDensity,
   ControllerCloseMode,
   Branch,
   RequestProxyMode,
@@ -28,6 +31,24 @@ import {
 import i18n, { loadLocale } from '@/lang'
 import { useAppStore } from '@/stores'
 import { debounce, ignoredError, deepClone } from '@/utils'
+
+const VALID_UI_STYLES = new Set<string>(Object.values(UiStyle))
+const VALID_NAV_LAYOUTS = new Set<string>(Object.values(NavLayout))
+const VALID_UI_DENSITIES = new Set<string>(Object.values(UiDensity))
+
+export const normalizeAppearanceSettings = (
+  settings: Partial<Pick<App.AppSettings, 'uiStyle' | 'navLayout' | 'uiDensity'>>,
+) => ({
+  uiStyle: VALID_UI_STYLES.has(String(settings.uiStyle))
+    ? (settings.uiStyle as UiStyle)
+    : UiStyle.Modern,
+  navLayout: VALID_NAV_LAYOUTS.has(String(settings.navLayout))
+    ? (settings.navLayout as NavLayout)
+    : NavLayout.Sidebar,
+  uiDensity: VALID_UI_DENSITIES.has(String(settings.uiDensity))
+    ? (settings.uiDensity as UiDensity)
+    : UiDensity.Comfortable,
+})
 
 export const normalizeLogSettings = (settings: App.AppSettings['log'] | undefined) => {
   const retentionDays = Number(settings?.retentionDays)
@@ -110,9 +131,12 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
   const app = ref<App.AppSettings>({
     lang: Lang.EN,
     theme: Theme.Auto,
+    uiStyle: UiStyle.Modern,
+    navLayout: NavLayout.Sidebar,
+    uiDensity: UiDensity.Comfortable,
     color: Color.Default,
-    primaryColor: '#000',
-    secondaryColor: '#545454',
+    primaryColor: '#2563eb',
+    secondaryColor: '#1d4ed8',
     fontFamily: DefaultFontFamily,
     profilesView: View.Grid,
     subscribesView: View.Grid,
@@ -187,6 +211,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
 
     settings.log = normalizeLogSettings(settings.log)
     settings.kernel = normalizeKernelSettings(settings.kernel)
+    Object.assign(settings, normalizeAppearanceSettings(settings))
 
     const legacyDesktopSettings = [
       'windowStartState',
@@ -251,6 +276,15 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     fontFamily(fontFamily: string) {
       document.body.style.fontFamily = fontFamily
     },
+    uiStyle(style: App.UiStyle) {
+      document.body.setAttribute('ui-style', VALID_UI_STYLES.has(style) ? style : UiStyle.Modern)
+    },
+    uiDensity(density: App.UiDensity) {
+      document.body.setAttribute(
+        'ui-density',
+        VALID_UI_DENSITIES.has(density) ? density : UiDensity.Comfortable,
+      )
+    },
   }
 
   /* Apply AppSettings */
@@ -259,6 +293,8 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     applyAppSettings.color(settings.color, settings.primaryColor, settings.secondaryColor)
     applyAppSettings.lang(settings.lang)
     applyAppSettings.fontFamily(settings.fontFamily)
+    applyAppSettings.uiStyle(settings.uiStyle)
+    applyAppSettings.uiDensity(settings.uiDensity)
     const lastModifiedSettings = stringify(settings)
     if (latestUserSettings !== lastModifiedSettings) {
       saveAppSettings(lastModifiedSettings)
@@ -290,6 +326,8 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     }
   }
   watch(themeMode, setAppTheme, { immediate: true })
+  applyAppSettings.uiStyle(app.value.uiStyle)
+  applyAppSettings.uiDensity(app.value.uiDensity)
 
   return { setupAppSettings, app, themeMode }
 })

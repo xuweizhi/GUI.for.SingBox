@@ -44,7 +44,7 @@ const handleKeydown = (event: KeyboardEvent) => {
         'pointer-events-none': disabled || loading,
       },
     ]"
-    class="gui-button inline-flex items-center justify-center text-center align-middle rounded-6 text-14 text-nowrap cursor-pointer px-12 py-6 duration-200"
+    class="gui-button inline-flex items-center justify-center text-center align-middle text-14 text-nowrap cursor-pointer duration-200"
     @keydown="handleKeydown"
   >
     <Icon
@@ -71,10 +71,14 @@ const handleKeydown = (event: KeyboardEvent) => {
 .gui-button {
   line-height: 1.4;
   font-weight: 500;
+  padding: var(--btn-pad-y, 6px) var(--btn-pad-x, 12px);
+  border-radius: var(--control-radius, 8px);
   transition:
     color 0.16s ease,
     background-color 0.16s ease,
     border-color 0.16s ease,
+    box-shadow 0.18s ease,
+    transform 0.14s ease,
     opacity 0.16s ease;
 }
 
@@ -91,38 +95,50 @@ const handleKeydown = (event: KeyboardEvent) => {
   color: var(--btn-normal-color);
   background-color: var(--btn-normal-bg);
   border: 1px solid var(--btn-normal-border-color);
+  box-shadow: var(--btn-normal-shadow);
   &:hover {
     color: var(--btn-normal-hover-color);
     background-color: var(--btn-normal-hover-bg);
     border-color: var(--btn-normal-hover-border-color);
+    transform: translateY(var(--btn-hover-lift, 0px));
   }
   &:active {
     color: var(--btn-normal-active-color);
     border-color: var(--btn-normal-active-border-color);
+    transform: translateY(0) scale(0.98);
   }
 }
 
 .primary {
   color: var(--btn-primary-color);
   background-color: var(--btn-primary-bg);
+  background-image: var(--btn-primary-bg-image);
   border: 1px solid transparent;
+  box-shadow: var(--btn-primary-shadow);
   &:hover {
     background-color: var(--btn-primary-hover-bg);
+    box-shadow: var(--btn-primary-hover-shadow);
+    transform: translateY(var(--btn-hover-lift, 0px));
   }
   &:active {
     background-color: var(--btn-primary-active-bg);
+    transform: translateY(0) scale(0.98);
   }
 }
 
 .danger {
   color: var(--btn-danger-color);
   background-color: var(--btn-danger-bg);
+  background-image: var(--btn-danger-bg-image);
   border: 1px solid transparent;
+  box-shadow: var(--btn-danger-shadow);
   &:hover {
     background-color: var(--btn-danger-hover-bg);
+    transform: translateY(var(--btn-hover-lift, 0px));
   }
   &:active {
     background-color: var(--btn-danger-active-bg);
+    transform: translateY(0) scale(0.98);
   }
 }
 
@@ -149,6 +165,7 @@ const handleKeydown = (event: KeyboardEvent) => {
   &:active {
     color: var(--btn-text-active-color);
     background-color: var(--btn-text-active-bg);
+    transform: scale(0.97);
   }
 }
 
@@ -157,7 +174,8 @@ const handleKeydown = (event: KeyboardEvent) => {
   font-size: 12px;
 }
 .large {
-  padding: 8px 16px;
-  font-size: 16px;
+  padding: 9px 18px;
+  font-size: 15px;
+  font-weight: 600;
 }
 </style>

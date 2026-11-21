@@ -24,6 +24,7 @@ vi.mock('@/stores/app', () => ({
 
 import {
   mergeSettingsDefaults,
+  normalizeAppearanceSettings,
   normalizeKernelSettings,
   normalizeLogSettings,
 } from '@/stores/appSettings'
@@ -78,6 +79,32 @@ describe('app settings store helpers', () => {
     ).toEqual({
       theme: 'auto',
       pluginSettings: { customPlugin: { enabled: true } },
+    })
+  })
+
+  it('normalizes appearance settings with safe defaults and preserves valid presets', () => {
+    expect(
+      normalizeAppearanceSettings({
+        uiStyle: 'invalid' as any,
+        navLayout: 'unknown' as any,
+        uiDensity: '' as any,
+      }),
+    ).toEqual({
+      uiStyle: 'modern',
+      navLayout: 'sidebar',
+      uiDensity: 'comfortable',
+    })
+
+    expect(
+      normalizeAppearanceSettings({
+        uiStyle: 'glass',
+        navLayout: 'topnav',
+        uiDensity: 'compact',
+      }),
+    ).toEqual({
+      uiStyle: 'glass',
+      navLayout: 'topnav',
+      uiDensity: 'compact',
     })
   })
 })

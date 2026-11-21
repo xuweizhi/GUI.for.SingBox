@@ -81,7 +81,7 @@ const appStore = useAppStore()
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 16px 0;
+    padding: var(--row-pad-y, 14px) 0;
     > :first-child {
       min-width: 0;
       font-size: 14px;

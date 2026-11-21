@@ -450,8 +450,12 @@ const tabs = computed(() => [
 }
 
 .console-bar {
-  background-color: var(--card-bg);
-  border: 1px solid var(--border-color);
+  background-color: var(--surface-bg, var(--card-bg));
+  border: 1px solid var(--surface-border, var(--border-color));
+  border-radius: var(--card-radius, 12px);
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
 }
 
 .profile-switcher-btn {
@@ -474,9 +478,12 @@ const tabs = computed(() => [
   flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
-  border-radius: 10px;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
+  border-radius: calc(var(--control-radius, 8px) + 3px);
+  background: var(--surface-bg, var(--card-bg));
+  border: 1px solid var(--surface-border, var(--border-color));
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   align-self: flex-start;
   max-width: 100%;
 }
@@ -488,7 +495,7 @@ const tabs = computed(() => [
   height: 32px;
   padding: 0 12px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--control-radius, 8px);
   background: transparent;
   color: var(--muted-color);
   font: inherit;
@@ -497,8 +504,9 @@ const tabs = computed(() => [
   cursor: pointer;
   white-space: nowrap;
   transition:
-    background-color 0.14s ease,
-    color 0.14s ease;
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.18s ease;
 
   &:hover {
     color: var(--color);
@@ -508,6 +516,7 @@ const tabs = computed(() => [
   &.is-active {
     color: var(--accent-text);
     background: var(--accent-soft);
+    box-shadow: var(--active-indicator-shadow);
     font-weight: 600;
   }
 }

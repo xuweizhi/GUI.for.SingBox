@@ -210,7 +210,11 @@ onUnmounted(() => {
 .gui-dropdown-overlay {
   z-index: 10000;
   background: var(--dropdown-bg);
-  border: 1px solid var(--border-color);
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  border: 1px solid var(--surface-border, var(--border-color));
+  border-radius: calc(var(--control-radius, 8px) + 3px);
+  box-shadow: var(--dropdown-shadow);
+  backdrop-filter: blur(max(var(--surface-blur, 0px), 10px)) saturate(var(--surface-saturate, 130%));
+  -webkit-backdrop-filter: blur(max(var(--surface-blur, 0px), 10px))
+    saturate(var(--surface-saturate, 130%));
 }
 </style>

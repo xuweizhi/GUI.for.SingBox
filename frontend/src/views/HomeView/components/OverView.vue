@@ -188,6 +188,7 @@ onUnmounted(() => {
 <style lang="less" scoped>
 .overview-cards {
   grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--grid-gap, 12px);
 }
 
 .overview-node-slot {
@@ -195,18 +196,49 @@ onUnmounted(() => {
   min-width: 0;
 }
 
+.home-stat-card {
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    opacity: 0.85;
+    pointer-events: none;
+  }
+
+  &--realtime::before {
+    background: linear-gradient(90deg, #8b5cf6, #38bdf8);
+  }
+
+  &--total::before {
+    background: linear-gradient(90deg, var(--primary-color), #06b6d4);
+  }
+
+  &--connections::before {
+    background: linear-gradient(90deg, #10b981, #34d399);
+  }
+
+  &--memory::before {
+    background: linear-gradient(90deg, #f59e0b, #fb7185);
+  }
+}
+
 .home-stat-card__value {
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 650;
   line-height: 1.4;
 }
 
 .metric--upload {
-  color: #8851e3;
+  color: #8b5cf6;
 }
 
 .metric--download {
-  color: #2e9ae5;
+  color: #0ea5e9;
 }
 
 .mode-panel {

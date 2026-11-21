@@ -2,7 +2,7 @@
 import { useI18n } from 'vue-i18n'
 
 interface Props {
-  options?: { label: string; value: string | number | boolean }[]
+  options?: readonly { readonly label: string; readonly value: string | number | boolean }[]
   size?: 'default' | 'small'
 }
 
@@ -28,7 +28,7 @@ const handleSelect = (val: string | number | boolean) => {
 </script>
 
 <template>
-  <div role="radiogroup" :class="[size]" class="gui-radio inline-flex rounded-8 text-12">
+  <div role="radiogroup" :class="[size]" class="gui-radio inline-flex text-12">
     <button
       v-for="o in options"
       :key="o.value.toString()"
@@ -52,16 +52,21 @@ const handleSelect = (val: string | number | boolean) => {
   flex-wrap: wrap;
   gap: 3px;
   padding: 3px;
-  background: var(--bg-color);
-  border: 1px solid var(--border-color);
+  border-radius: var(--control-radius, 8px);
+  background: color-mix(in srgb, var(--bg-color) 76%, var(--surface-bg));
+  border: 1px solid var(--surface-border, var(--border-color));
   &-button {
     color: var(--radio-normal-color);
     background-color: var(--radio-normal-bg);
     flex-shrink: 0;
     border: 0;
-    border-radius: 5px;
+    border-radius: max(3px, calc(var(--control-radius, 8px) - 3px));
     white-space: nowrap;
     font-weight: 500;
+    transition:
+      color 0.16s ease,
+      background-color 0.16s ease,
+      box-shadow 0.18s ease;
     &:hover {
       color: var(--radio-normal-hover-color);
     }
@@ -69,6 +74,8 @@ const handleSelect = (val: string | number | boolean) => {
   .active {
     color: var(--radio-primary-color);
     background-color: var(--radio-primary-bg);
+    background-image: var(--btn-primary-bg-image);
+    box-shadow: var(--active-indicator-shadow);
     &:hover {
       color: var(--radio-primary-color);
       background-color: var(--radio-primary-hover-bg);

@@ -2,11 +2,14 @@ import {
   Color,
   ControllerCloseMode,
   Lang,
+  NavLayout,
   PluginTrigger,
   RequestMethod,
   RequestProxyMode,
   ScheduledTasksType,
   Theme,
+  UiDensity,
+  UiStyle,
   View,
 } from '@/enums/app'
 import { APP_TITLE } from '@/utils'
@@ -36,20 +39,36 @@ export const DefaultFontFamily =
 
 export const Colors = {
   [Color.Default]: {
-    primary: 'rgb(0, 89, 214)',
-    secondary: 'rgb(5, 62, 142)',
+    primary: '#2563eb',
+    secondary: '#1d4ed8',
+  },
+  [Color.Indigo]: {
+    primary: '#6366f1',
+    secondary: '#4f46e5',
+  },
+  [Color.Cyan]: {
+    primary: '#0891b2',
+    secondary: '#0e7490',
   },
   [Color.Green]: {
-    primary: 'green',
-    secondary: '#025f02',
+    primary: '#059669',
+    secondary: '#047857',
   },
   [Color.Purple]: {
-    primary: 'purple',
-    secondary: '#6a0f9c',
+    primary: '#9333ea',
+    secondary: '#7e22ce',
+  },
+  [Color.Rose]: {
+    primary: '#e11d48',
+    secondary: '#be123c',
+  },
+  [Color.Amber]: {
+    primary: '#d97706',
+    secondary: '#b45309',
   },
   [Color.Custom]: {
-    primary: '#000',
-    secondary: '#000',
+    primary: '#2563eb',
+    secondary: '#1d4ed8',
   },
 }
 
@@ -110,6 +129,14 @@ export const ColorOptions = [
     value: Color.Default,
   },
   {
+    label: 'settings.color.indigo',
+    value: Color.Indigo,
+  },
+  {
+    label: 'settings.color.cyan',
+    value: Color.Cyan,
+  },
+  {
     label: 'settings.color.green',
     value: Color.Green,
   },
@@ -118,8 +145,61 @@ export const ColorOptions = [
     value: Color.Purple,
   },
   {
+    label: 'settings.color.rose',
+    value: Color.Rose,
+  },
+  {
+    label: 'settings.color.amber',
+    value: Color.Amber,
+  },
+  {
     label: 'settings.color.custom',
     value: Color.Custom,
+  },
+]
+
+export const UiStyleOptions = [
+  {
+    label: 'settings.appearance.styles.modern.name',
+    desc: 'settings.appearance.styles.modern.desc',
+    value: UiStyle.Modern,
+  },
+  {
+    label: 'settings.appearance.styles.glass.name',
+    desc: 'settings.appearance.styles.glass.desc',
+    value: UiStyle.Glass,
+  },
+  {
+    label: 'settings.appearance.styles.minimal.name',
+    desc: 'settings.appearance.styles.minimal.desc',
+    value: UiStyle.Minimal,
+  },
+  {
+    label: 'settings.appearance.styles.cyber.name',
+    desc: 'settings.appearance.styles.cyber.desc',
+    value: UiStyle.Cyber,
+  },
+]
+
+export const NavLayoutOptions = [
+  {
+    label: 'settings.appearance.layouts.sidebar',
+    value: NavLayout.Sidebar,
+  },
+  {
+    label: 'settings.appearance.layouts.topnav',
+    value: NavLayout.Topnav,
+  },
+]
+
+export const UiDensityOptions = [
+  {
+    label: 'settings.appearance.densities.comfortable',
+    value: UiDensity.Comfortable,
+  },
+  {
+    label: 'settings.appearance.densities.compact',
+    value: UiDensity.Compact,
   },
 ]
 

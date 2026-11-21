@@ -7,6 +7,10 @@ import logo from '@/assets/logo'
 import rawRoutes from '@/router/routes'
 import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
 
+const props = withDefaults(defineProps<{ topnav?: boolean }>(), {
+  topnav: false,
+})
+
 const mobileOpen = defineModel<boolean>('mobileOpen', { default: false })
 const collapsed = defineModel<boolean>('collapsed', { default: false })
 
@@ -68,7 +72,11 @@ const goOverview = () => {
   <aside
     id="main-navigation"
     class="app-sidebar"
-    :class="{ 'is-collapsed': collapsed, 'is-mobile-open': mobileOpen }"
+    :class="{
+      'is-collapsed': collapsed,
+      'is-mobile-open': mobileOpen,
+      'is-topnav-mode': props.topnav,
+    }"
     :aria-label="t('navigation.main')"
   >
     <div class="sidebar-header">
@@ -168,11 +176,17 @@ const goOverview = () => {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--card-bg);
-  border-right: 1px solid var(--border-color);
+  background: var(--surface-chrome-bg, var(--card-bg));
+  border-right: 1px solid var(--surface-border, var(--border-color));
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 40;
   overflow: hidden;
+
+  &.is-topnav-mode {
+    display: none;
+  }
 
   &.is-collapsed {
     width: 64px;
@@ -226,14 +240,14 @@ const goOverview = () => {
 }
 
 .sidebar-header {
-  height: 54px;
+  height: var(--topbar-height, 54px);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 0 12px 0 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--surface-border, var(--border-color));
 }
 
 .sidebar-brand {
@@ -318,14 +332,15 @@ const goOverview = () => {
   gap: 10px;
   height: 38px;
   padding: 0 10px;
-  border-radius: 9px;
+  border-radius: var(--control-radius, 8px);
   font-size: 13.5px;
   font-weight: 500;
   color: var(--color);
   white-space: nowrap;
   transition:
     background-color 0.14s ease,
-    color 0.14s ease;
+    color 0.14s ease,
+    box-shadow 0.18s ease;
 
   &:hover {
     background: var(--btn-text-hover-bg);
@@ -334,6 +349,7 @@ const goOverview = () => {
   &.is-active {
     background: var(--accent-soft);
     color: var(--accent-text);
+    box-shadow: var(--active-indicator-shadow);
     font-weight: 600;
 
     &::before {
@@ -431,7 +447,9 @@ const goOverview = () => {
   }
 
   .app-sidebar,
-  .app-sidebar.is-collapsed {
+  .app-sidebar.is-collapsed,
+  .app-sidebar.is-topnav-mode {
+    display: flex;
     position: fixed;
     top: 0;
     bottom: 0;

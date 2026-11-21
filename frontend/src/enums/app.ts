@@ -27,9 +27,30 @@ export enum ControllerCloseMode {
 
 export enum Color {
   Default = 'default',
+  Indigo = 'indigo',
+  Cyan = 'cyan',
   Green = 'green',
   Purple = 'purple',
+  Rose = 'rose',
+  Amber = 'amber',
   Custom = 'custom',
+}
+
+export enum UiStyle {
+  Modern = 'modern',
+  Glass = 'glass',
+  Minimal = 'minimal',
+  Cyber = 'cyber',
+}
+
+export enum NavLayout {
+  Sidebar = 'sidebar',
+  Topnav = 'topnav',
+}
+
+export enum UiDensity {
+  Comfortable = 'comfortable',
+  Compact = 'compact',
 }
 
 export enum Branch {

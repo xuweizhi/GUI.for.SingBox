@@ -82,7 +82,15 @@ vi.mock('@/stores', () => {
     currentProfile: { id: 'p1', name: 'Default Profile' },
   })
   mocks.appSettingsStore ||= reactive({
+    themeMode: 'light',
     app: {
+      theme: 'light',
+      uiStyle: 'modern',
+      navLayout: 'sidebar',
+      uiDensity: 'comfortable',
+      color: 'default',
+      primaryColor: '#2563eb',
+      secondaryColor: '#1d4ed8',
       pages: [
         'Overview',
         'NetCheck',
@@ -109,6 +117,7 @@ vi.mock('@/stores', () => {
     useAppSettingsStore: () => mocks.appSettingsStore,
     useAppStore: () => mocks.appStore,
     useRulesetsStore: () => mocks.rulesetsStore,
+    useWebuiAuthStore: () => ({ logout: vi.fn() }),
   }
 })
 
@@ -140,6 +149,8 @@ vi.mock('@/views/HomeView/components/QuickStart.vue', () => ({
   default: { template: '<div class="quickstart-stub" />' },
 }))
 
+import AppearancePopover from '@/components/_common/AppearancePopover.vue'
+import AppShell from '@/components/_common/AppShell.vue'
 import NavigationBar from '@/components/_common/NavigationBar.vue'
 import CommonController from '@/views/HomeView/components/CommonController.vue'
 import HomeView from '@/views/HomeView/index.vue'
@@ -151,6 +162,10 @@ describe('layout and workspace interactions', () => {
     routerReplace.mockClear()
     routerPush.mockClear()
     mocks.kernelStore.running = true
+    mocks.appSettingsStore.app.uiStyle = 'modern'
+    mocks.appSettingsStore.app.navLayout = 'sidebar'
+    mocks.appSettingsStore.app.uiDensity = 'comfortable'
+    mocks.appSettingsStore.app.color = 'default'
     mocks.rulesetsStore.addRuleset.mockReset()
     mocks.messageError.mockReset()
   })
@@ -258,5 +273,56 @@ describe('layout and workspace interactions', () => {
     expect((wrapper.vm as any).modalSlots.submit().props.loading).toBe(false)
     expect((wrapper.vm as any).modalSlots.cancel().props.disabled).toBe(false)
     expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it('switches visual style, accent color, and navigation layout via AppearancePopover', async () => {
+    const wrapper = mount(AppearancePopover, {
+      global: {
+        stubs: {
+          Icon: true,
+          Radio: true,
+          ColorPicker: true,
+          Dropdown: {
+            template: '<div><slot :show="true" /><slot name="overlay" /></div>',
+          },
+        },
+      },
+    })
+
+    const styleButtons = wrapper.findAll('.style-option')
+    expect(styleButtons).toHaveLength(4)
+    await styleButtons[1]!.trigger('click')
+    expect(mocks.appSettingsStore.app.uiStyle).toBe('glass')
+
+    const swatchButtons = wrapper.findAll('.swatch-btn')
+    expect(swatchButtons).toHaveLength(8)
+    await swatchButtons[4]!.trigger('click')
+    expect(mocks.appSettingsStore.app.color).toBe('purple')
+
+    const layoutButtons = wrapper.findAll('.layout-option')
+    expect(layoutButtons).toHaveLength(2)
+    await layoutButtons[1]!.trigger('click')
+    expect(mocks.appSettingsStore.app.navLayout).toBe('topnav')
+  })
+
+  it('renders horizontal topnav links in AppShell when navLayout is topnav', async () => {
+    mocks.appSettingsStore.app.navLayout = 'topnav'
+    const wrapper = mount(AppShell, {
+      global: {
+        stubs: {
+          Icon: true,
+          AppearancePopover: true,
+          RouterView: true,
+          RouterLink: {
+            props: ['to'],
+            template: '<a :href="to" v-bind="$attrs"><slot /></a>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.find('.app-shell.is-topnav').exists()).toBe(true)
+    expect(wrapper.find('.app-sidebar.is-topnav-mode').exists()).toBe(true)
+    expect(wrapper.findAll('.topbar-nav__link')).toHaveLength(4)
   })
 })

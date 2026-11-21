@@ -518,10 +518,12 @@ defineExpose({ handleCancel, handleDestroy })
   background-color: var(--modal-mask-bg);
 
   .gui-modal-modal {
-    background-color: var(--modal-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 14px;
-    box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+    background-color: var(--surface-elevated-bg, var(--modal-bg));
+    border: 1px solid var(--surface-border, var(--border-color));
+    border-radius: var(--modal-radius, 14px);
+    box-shadow: var(--modal-shadow);
+    backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+    -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
     overflow: hidden;
 
     &.is-maximized {

@@ -1,4 +1,10 @@
-import { ColorOptions, ThemeOptions } from '@/constant/app'
+import {
+  ColorOptions,
+  NavLayoutOptions,
+  ThemeOptions,
+  UiDensityOptions,
+  UiStyleOptions,
+} from '@/constant/app'
 import { ModeOptions } from '@/constant/kernel'
 import { PluginTrigger, PluginTriggerEvent } from '@/enums/app'
 import useI18n from '@/lang'
@@ -150,6 +156,33 @@ export const getCommands = () => {
             label: color.label,
             cmd: color.value,
             handler: () => (appSettings.app.color = color.value),
+          })),
+        },
+        {
+          label: 'settings.appearance.style',
+          cmd: 'Visual Style',
+          children: UiStyleOptions.map((style) => ({
+            label: style.label,
+            cmd: style.value,
+            handler: () => (appSettings.app.uiStyle = style.value),
+          })),
+        },
+        {
+          label: 'settings.appearance.layout',
+          cmd: 'Navigation Layout',
+          children: NavLayoutOptions.map((layout) => ({
+            label: layout.label,
+            cmd: layout.value,
+            handler: () => (appSettings.app.navLayout = layout.value),
+          })),
+        },
+        {
+          label: 'settings.appearance.density',
+          cmd: 'Interface Density',
+          children: UiDensityOptions.map((density) => ({
+            label: density.label,
+            cmd: density.value,
+            handler: () => (appSettings.app.uiDensity = density.value),
           })),
         },
         {

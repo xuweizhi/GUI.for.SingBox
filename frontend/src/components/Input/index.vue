@@ -197,7 +197,7 @@ defineExpose({
     :style="{
       height: type === 'code' ? '' : size === 'small' ? '30px' : '36px',
     }"
-    class="gui-input inline-flex items-center rounded-6 px-8"
+    class="gui-input inline-flex items-center px-8"
   >
     <div v-if="$slots.prefix" class="flex items-center shrink-0 mr-4">
       <slot name="prefix" v-bind="{ showInput }"></slot>
@@ -292,6 +292,7 @@ defineExpose({
   min-width: min(220px, 100%);
   max-width: 100%;
   border: 1px solid transparent;
+  border-radius: var(--control-radius, 8px);
   cursor: text;
   transition:
     border-color 0.16s ease,

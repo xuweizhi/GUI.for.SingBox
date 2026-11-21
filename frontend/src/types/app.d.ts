@@ -3,7 +3,10 @@ declare global {
     type OS = 'windows' | 'linux' | 'darwin'
     type Lang = 'en' | 'zh'
     type Theme = 'auto' | 'light' | 'dark'
-    type Color = 'default' | 'green' | 'purple' | 'custom'
+    type Color = 'default' | 'indigo' | 'cyan' | 'green' | 'purple' | 'rose' | 'amber' | 'custom'
+    type UiStyle = 'modern' | 'glass' | 'minimal' | 'cyber'
+    type NavLayout = 'sidebar' | 'topnav'
+    type UiDensity = 'comfortable' | 'compact'
     type View = 'grid' | 'list'
     type RequestProxyMode = 'global' | 'none' | 'system' | 'kernel' | 'custom'
     type Branch = 'main' | 'alpha'
@@ -141,6 +144,9 @@ declare global {
     type AppSettings = {
       lang: Lang | string
       theme: Theme
+      uiStyle: UiStyle
+      navLayout: NavLayout
+      uiDensity: UiDensity
       color: Color
       primaryColor: string
       secondaryColor: string
