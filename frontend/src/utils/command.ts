@@ -2,6 +2,8 @@ import { ColorOptions, ThemeOptions } from '@/constant/app'
 import { ModeOptions } from '@/constant/kernel'
 import { PluginTrigger, PluginTriggerEvent } from '@/enums/app'
 import useI18n from '@/lang'
+import router from '@/router'
+import rawRoutes from '@/router/routes'
 import {
   useAppSettingsStore,
   useAppStore,
@@ -48,6 +50,17 @@ export const getCommands = () => {
   const pluginsStore = usePluginsStore()
 
   const rawCommands: Command[] = [
+    {
+      label: 'common.navigate',
+      cmd: 'Go to',
+      children: rawRoutes
+        .filter((r) => !r.meta?.public && r.meta?.name)
+        .map((r) => ({
+          label: r.meta!.name!,
+          cmd: String(r.name || r.path),
+          handler: () => router.push(r.path),
+        })),
+    },
     {
       label: 'commands.kernel',
       cmd: 'Core',

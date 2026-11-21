@@ -217,6 +217,7 @@ export const useAppStore = defineStore('app', () => {
   watch(showAbout, (v) => {
     if (v) {
       const m = modal({
+        title: 'router.about',
         cancel: false,
         submit: false,
         maskClosable: true,

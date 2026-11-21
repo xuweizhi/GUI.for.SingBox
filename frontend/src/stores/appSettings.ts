@@ -153,7 +153,15 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     githubApiToken: '',
     githubDownloadAcceleration: false,
     githubDownloadMirror: '',
-    pages: ['Overview', 'Profiles', 'Subscriptions', 'Plugins'],
+    pages: [
+      'Overview',
+      'NetCheck',
+      'Profiles',
+      'Subscriptions',
+      'Rulesets',
+      'Plugins',
+      'ScheduledTasks',
+    ],
   })
 
   const saveAppSettings = debounce(async (config: string) => WriteFile(UserFilePath, config), 500)

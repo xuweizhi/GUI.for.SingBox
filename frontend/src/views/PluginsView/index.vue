@@ -226,7 +226,13 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
 
   <div v-else class="grid-list-header">
     <Radio v-model="appSettingsStore.app.pluginsView" :options="ViewOptions" />
-    <span class="resource-count-badge">{{ pluginsStore.plugins.length }}</span>
+    <span class="resource-count-badge">
+      {{
+        keywords.trim()
+          ? `${filteredPlugins.length} / ${pluginsStore.plugins.length}`
+          : pluginsStore.plugins.length
+      }}
+    </span>
     <Input
       v-model="keywords"
       size="small"

@@ -1,30 +1,23 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import logo from '@/assets/logo'
-import { Theme } from '@/enums/app'
 import rawRoutes from '@/router/routes'
-import {
-  useAppSettingsStore,
-  useKernelApiStore,
-  useProfilesStore,
-  useWebuiAuthStore,
-} from '@/stores'
-import { confirm } from '@/utils'
+import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
+
+const mobileOpen = defineModel<boolean>('mobileOpen', { default: false })
+const collapsed = defineModel<boolean>('collapsed', { default: false })
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const appSettings = useAppSettingsStore()
-const authStore = useWebuiAuthStore()
 const kernelApiStore = useKernelApiStore()
 const profilesStore = useProfilesStore()
-const expanded = ref(false)
-const toggle = ref<HTMLButtonElement>()
 
-const routes = computed(() =>
+const visibleRoutes = computed(() =>
   rawRoutes.filter(
     (r) =>
       r.meta?.hidden === false ||
@@ -32,48 +25,30 @@ const routes = computed(() =>
   ),
 )
 
-const isDarkTheme = computed(() => appSettings.themeMode === Theme.Dark)
+const groupOrder = ['control', 'config', 'system'] as const
+
+const groupedRoutes = computed(() =>
+  groupOrder
+    .map((group) => ({
+      key: group,
+      label: `navigation.groups.${group}`,
+      items: visibleRoutes.value.filter((r) => (r.meta?.group || 'system') === group),
+    }))
+    .filter((section) => section.items.length > 0),
+)
 
 const activeProfileName = computed(() => profilesStore.currentProfile?.name || '')
 
-watch(
-  () => route.fullPath,
-  () => {
-    expanded.value = false
-  },
-)
-
-const closeMenu = () => {
-  if (!expanded.value) return
-  expanded.value = false
-  toggle.value?.focus()
+const closeMobile = () => {
+  mobileOpen.value = false
 }
 
-const toggleTheme = (event: MouseEvent) => {
-  document.documentElement.style.setProperty('--x', event.clientX + 'px')
-  document.documentElement.style.setProperty('--y', event.clientY + 'px')
-  appSettings.app.theme = isDarkTheme.value ? Theme.Light : Theme.Dark
-}
-
-const openCommandPalette = () => {
-  window.dispatchEvent(new CustomEvent('open-command-palette'))
-}
-
-const handleLogout = async () => {
-  try {
-    await confirm(t('auth.signOut'), t('common.confirmSignOut'), {
-      type: 'text',
-      okText: 'auth.signOut',
-      danger: true,
-    })
-    await authStore.logout()
-  } catch {
-    // user canceled
-  }
+const toggleCollapsed = () => {
+  collapsed.value = !collapsed.value
 }
 
 const goOverview = () => {
-  closeMenu()
+  closeMobile()
   if (route.path !== '/') {
     void router.push('/')
   }
@@ -81,257 +56,455 @@ const goOverview = () => {
 </script>
 
 <template>
-  <header class="app-header" @keydown.esc="closeMenu">
-    <div class="app-header__inner">
-      <div class="app-brand">
-        <RouterLink to="/" class="app-brand__link" @click="closeMenu">
-          <img :src="logo" alt="" width="26" height="26" />
-          <span>GUI.for.SingBox</span>
-        </RouterLink>
-        <button
-          type="button"
-          class="core-pill"
-          :class="kernelApiStore.running ? 'is-running' : 'is-stopped'"
-          :title="
-            (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped')) +
-            (activeProfileName ? ' · ' + activeProfileName : '')
-          "
-          @click="goOverview"
-        >
-          <span class="core-pill__dot" aria-hidden="true"></span>
-          <span class="core-pill__text">
-            {{
-              activeProfileName ||
-              (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped'))
-            }}
-          </span>
-        </button>
-      </div>
+  <Transition name="drawer-backdrop">
+    <div
+      v-if="mobileOpen"
+      class="sidebar-backdrop"
+      aria-hidden="true"
+      @click="closeMobile"
+    />
+  </Transition>
+
+  <aside
+    id="main-navigation"
+    class="app-sidebar"
+    :class="{ 'is-collapsed': collapsed, 'is-mobile-open': mobileOpen }"
+    :aria-label="t('navigation.main')"
+  >
+    <div class="sidebar-header">
+      <RouterLink
+        to="/"
+        class="sidebar-brand"
+        :title="collapsed ? 'GUI.for.SingBox' : undefined"
+        @click="closeMobile"
+      >
+        <img :src="logo" alt="" width="26" height="26" class="shrink-0" />
+        <span class="sidebar-brand__name">GUI.for.SingBox</span>
+      </RouterLink>
 
       <button
-        ref="toggle"
         type="button"
-        class="nav-toggle"
-        :aria-label="t('navigation.toggle')"
-        :aria-expanded="expanded"
-        aria-controls="main-navigation"
-        @click="expanded = !expanded"
+        class="sidebar-collapse-btn"
+        :aria-label="collapsed ? t('navigation.expand') : t('navigation.collapse')"
+        :title="collapsed ? t('navigation.expand') : t('navigation.collapse')"
+        @click="toggleCollapsed"
       >
-        <span>{{ t('navigation.menu') }}</span>
-        <Icon :icon="expanded ? 'close' : 'arrowDown'" />
+        <Icon icon="sidebar" :size="16" color="currentColor" />
       </button>
 
-      <nav
-        id="main-navigation"
-        :class="{ 'is-expanded': expanded }"
-        class="main-nav"
-        :aria-label="t('navigation.main')"
+      <button
+        type="button"
+        class="sidebar-close-btn"
+        :aria-label="t('common.close')"
+        @click="closeMobile"
       >
+        <Icon icon="close" :size="16" color="currentColor" />
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div
+        v-for="(section, sIdx) in groupedRoutes"
+        :key="section.key"
+        class="sidebar-group"
+        :class="{ 'has-divider': sIdx > 0 }"
+      >
+        <div class="sidebar-group__label">{{ t(section.label) }}</div>
         <RouterLink
-          v-for="r in routes"
+          v-for="r in section.items"
           :key="r.path"
           :to="r.path"
-          class="main-nav__button"
+          class="sidebar-link"
           active-class="is-active"
-          @click="closeMenu"
+          :title="collapsed ? (r.meta?.name ? t(r.meta.name) : String(r.name)) : undefined"
+          @click="closeMobile"
         >
-          <Icon v-if="r.meta?.icon" :icon="r.meta.icon" :size="15" color="currentColor" />
-          <span>{{ r.meta?.name ? t(r.meta.name) : r.name }}</span>
+          <Icon
+            v-if="r.meta?.icon"
+            :icon="r.meta.icon"
+            :size="17"
+            color="currentColor"
+            class="sidebar-link__icon shrink-0"
+          />
+          <span class="sidebar-link__text">
+            {{ r.meta?.name ? t(r.meta.name) : r.name }}
+          </span>
         </RouterLink>
+      </div>
+    </nav>
 
-        <div class="main-nav__utilities">
-          <button
-            type="button"
-            class="main-nav__icon-btn"
-            :aria-label="t('common.commandPalette')"
-            :title="`${t('common.commandPalette')} (Ctrl/⌘ + K)`"
-            @click="openCommandPalette"
-          >
-            <Icon icon="command" :size="15" color="currentColor" />
-          </button>
-          <button
-            type="button"
-            class="main-nav__icon-btn"
-            :aria-label="t('common.switchTheme')"
-            :title="t('common.switchTheme')"
-            @click="toggleTheme"
-          >
-            <Icon :icon="isDarkTheme ? 'sun' : 'moon'" :size="15" color="currentColor" />
-          </button>
-          <button
-            type="button"
-            class="main-nav__logout"
-            :title="t('auth.logout')"
-            @click="handleLogout"
-          >
-            <Icon icon="logout" :size="15" color="currentColor" />
-            <span>{{ t('auth.signOut') }}</span>
-          </button>
-        </div>
-      </nav>
+    <div class="sidebar-footer">
+      <button
+        type="button"
+        class="sidebar-core-card"
+        :class="kernelApiStore.running ? 'is-running' : 'is-stopped'"
+        :title="
+          (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped')) +
+          (activeProfileName ? ' · ' + activeProfileName : '')
+        "
+        @click="goOverview"
+      >
+        <span class="sidebar-core-card__dot" aria-hidden="true"></span>
+        <span class="sidebar-core-card__info">
+          <span class="sidebar-core-card__state">
+            {{ kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped') }}
+          </span>
+          <span v-if="activeProfileName" class="sidebar-core-card__profile">
+            {{ activeProfileName }}
+          </span>
+        </span>
+      </button>
     </div>
-  </header>
+  </aside>
 </template>
 
 <style lang="less" scoped>
-.app-header {
+.sidebar-backdrop {
+  display: none;
+}
+
+.app-sidebar {
+  width: 224px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--card-bg);
+  border-right: 1px solid var(--border-color);
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 40;
+  overflow: hidden;
+
+  &.is-collapsed {
+    width: 64px;
+
+    .sidebar-header {
+      justify-content: center;
+      padding: 0 8px;
+      gap: 0;
+    }
+
+    .sidebar-brand {
+      justify-content: center;
+    }
+
+    .sidebar-brand__name,
+    .sidebar-group__label,
+    .sidebar-link__text,
+    .sidebar-core-card__info {
+      display: none;
+    }
+
+    .sidebar-collapse-btn {
+      position: static;
+    }
+
+    .sidebar-group.has-divider::before {
+      content: '';
+      display: block;
+      height: 1px;
+      margin: 6px 10px 8px;
+      background: var(--border-color);
+    }
+
+    .sidebar-link {
+      justify-content: center;
+      padding: 0;
+      width: 40px;
+      height: 40px;
+      margin: 0 auto;
+
+      &.is-active::before {
+        display: none;
+      }
+    }
+
+    .sidebar-core-card {
+      justify-content: center;
+      padding: 10px 0;
+    }
+  }
+}
+
+.sidebar-header {
+  height: 54px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--border-color);
 }
-.app-header__inner {
-  max-width: 1360px;
-  margin: 0 auto;
-  padding: 10px 20px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-}
-.app-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  white-space: nowrap;
-}
-.app-brand__link {
+
+.sidebar-brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 15px;
+  gap: 9px;
+  min-width: 0;
+  font-size: 14px;
   font-weight: 700;
   color: var(--color);
-}
-.core-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 150px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-color);
-  color: var(--muted-color);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color 0.16s ease;
-  &:hover {
-    border-color: var(--accent-text);
-    color: var(--color);
-  }
-  &.is-running .core-pill__dot {
-    background: var(--success-color);
-    box-shadow: 0 0 0 3px var(--success-soft);
-  }
-  &.is-stopped .core-pill__dot {
-    background: var(--muted-color);
-  }
-}
-.core-pill__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-.core-pill__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.main-nav {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
+
+.sidebar-brand__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.main-nav__utilities {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-}
-.main-nav__button,
-.main-nav__logout,
-.main-nav__icon-btn,
-.nav-toggle {
+
+.sidebar-collapse-btn,
+.sidebar-close-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  min-height: 34px;
-  padding: 6px 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border: 0;
-  border-radius: 8px;
-  font: inherit;
-  font-size: 13px;
-  color: var(--color);
+  border-radius: 7px;
   background: transparent;
+  color: var(--muted-color);
   cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+
+  &:hover {
+    background: var(--btn-text-hover-bg);
+    color: var(--color);
+  }
+}
+
+.app-sidebar.is-collapsed .sidebar-brand {
+  display: none;
+}
+
+.sidebar-close-btn {
+  display: none;
+}
+
+.sidebar-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-group__label {
+  padding: 0 10px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-color);
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.sidebar-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color);
   white-space: nowrap;
   transition:
     background-color 0.14s ease,
     color 0.14s ease;
+
   &:hover {
     background: var(--btn-text-hover-bg);
   }
+
   &.is-active {
-    color: var(--accent-text);
     background: var(--accent-soft);
+    color: var(--accent-text);
     font-weight: 600;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 3px;
+      border-radius: 999px;
+      background: var(--accent-text);
+    }
   }
 }
-.main-nav__icon-btn,
-.main-nav__logout {
-  color: var(--muted-color);
+
+.sidebar-link__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.sidebar-core-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  color: var(--color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease;
+
   &:hover {
-    color: var(--color);
+    border-color: color-mix(in srgb, var(--accent-text) 50%, var(--border-color));
+  }
+
+  &.is-running .sidebar-core-card__dot {
+    background: var(--success-color);
+    box-shadow: 0 0 0 3px var(--success-soft);
+  }
+
+  &.is-stopped .sidebar-core-card__dot {
+    background: var(--muted-color);
   }
 }
-.main-nav__logout:hover {
-  color: var(--danger-color);
-  background: var(--danger-soft);
+
+.sidebar-core-card__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
 }
-.nav-toggle {
-  display: none;
+
+.sidebar-core-card__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
 }
-@media (max-width: 760px) {
-  .app-header__inner {
-    padding: 10px 16px;
-    gap: 10px;
+
+.sidebar-core-card__state {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color);
+}
+
+.sidebar-core-card__profile {
+  font-size: 11.5px;
+  color: var(--muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+@media (max-width: 960px) {
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    background: var(--modal-mask-bg);
+    backdrop-filter: blur(2px);
   }
-  .app-brand {
-    flex: 1;
-    min-width: 0;
+
+  .app-sidebar,
+  .app-sidebar.is-collapsed {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(272px, 82vw);
+    z-index: 910;
+    transform: translateX(-100%);
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 16px 48px rgba(15, 23, 42, 0.24);
+
+    &.is-mobile-open {
+      transform: translateX(0);
+    }
+
+    .sidebar-header {
+      justify-content: space-between;
+      padding: 0 12px 0 16px;
+    }
+
+    .sidebar-brand {
+      display: inline-flex;
+      justify-content: flex-start;
+    }
+
+    .sidebar-brand__name,
+    .sidebar-group__label,
+    .sidebar-link__text,
+    .sidebar-core-card__info {
+      display: initial;
+    }
+
+    .sidebar-core-card__info {
+      display: flex;
+    }
+
+    .sidebar-collapse-btn {
+      display: none;
+    }
+
+    .sidebar-close-btn {
+      display: inline-flex;
+    }
+
+    .sidebar-group.has-divider::before {
+      display: none;
+    }
+
+    .sidebar-link {
+      justify-content: flex-start;
+      width: auto;
+      height: 42px;
+      padding: 0 12px;
+      margin: 0;
+
+      &.is-active::before {
+        display: block;
+      }
+    }
+
+    .sidebar-core-card {
+      justify-content: flex-start;
+      padding: 10px 12px;
+    }
   }
-  .core-pill {
-    max-width: 110px;
-  }
-  .nav-toggle {
-    display: inline-flex;
-    min-height: 40px;
-  }
-  .main-nav {
-    display: none;
-    flex-basis: 100%;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4px;
-  }
-  .main-nav.is-expanded {
-    display: grid;
-  }
-  .main-nav__button {
-    justify-content: flex-start;
-    min-height: 42px;
-    white-space: normal;
-  }
-  .main-nav__utilities {
-    grid-column: 1 / -1;
-    margin-left: 0;
-    padding-top: 6px;
-    border-top: 1px solid var(--border-color);
-    justify-content: flex-end;
-  }
+}
+
+.drawer-backdrop-enter-active,
+.drawer-backdrop-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.drawer-backdrop-enter-from,
+.drawer-backdrop-leave-to {
+  opacity: 0;
 }
 </style>

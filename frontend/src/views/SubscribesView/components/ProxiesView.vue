@@ -54,54 +54,67 @@ const filteredProxies = computed(() => {
   })
 })
 
+const handleInspectProxy = async (record: App.Subscription['proxies'][0], edit = false) => {
+  try {
+    const proxy = await getProxyByTag(record.tag)
+    details.value = JSON.stringify(proxy, null, 2)
+    isEdit.value = edit
+    if (edit) editId = record.tag
+    toggleDetails()
+  } catch (error: any) {
+    message.error(error)
+  }
+}
+
+const handleCopyProxy = async (record: App.Subscription['proxies'][0]) => {
+  try {
+    const proxy = await getProxyByTag(record.tag)
+    await ClipboardSetText(JSON.stringify(proxy, null, 2))
+    message.success('common.copied')
+  } catch (error: any) {
+    message.error(error)
+  }
+}
+
+const handleDeleteProxy = (record: Pick<App.Subscription['proxies'][0], 'tag'>) => {
+  const idx = sub.value.proxies.findIndex((v) => v.tag === record.tag)
+  if (idx !== -1) {
+    sub.value.proxies.splice(idx, 1)
+  }
+}
+
+const handleAddToManualGroup = async (
+  groupId: string,
+  record: App.Subscription['proxies'][0],
+) => {
+  try {
+    const added = await nodeGroupsStore.addMember(groupId, {
+      subscription_id: sub.value.id,
+      node_id: record.id,
+      last_known_tag: record.tag,
+    })
+    added && message.success('common.success')
+  } catch (error: any) {
+    message.error(error.message || error)
+  }
+}
+
 const menus: App.Menu[] = [
   {
     label: 'common.details',
-    handler: async (record: App.Subscription['proxies'][0]) => {
-      try {
-        const proxy = await getProxyByTag(record.tag)
-        details.value = JSON.stringify(proxy, null, 2)
-        isEdit.value = false
-        toggleDetails()
-      } catch (error: any) {
-        message.error(error)
-      }
-    },
+    handler: (record: App.Subscription['proxies'][0]) => handleInspectProxy(record, false),
   },
   {
     label: 'common.copy',
-    handler: async (record: App.Subscription['proxies'][0]) => {
-      try {
-        const proxy = await getProxyByTag(record.tag)
-        await ClipboardSetText(JSON.stringify(proxy, null, 2))
-        message.success('common.copied')
-      } catch (error: any) {
-        message.error(error)
-      }
-    },
+    handler: handleCopyProxy,
   },
   {
     label: 'common.edit',
-    handler: async (record: App.Subscription['proxies'][0]) => {
-      try {
-        const proxy = await getProxyByTag(record.tag)
-        details.value = JSON.stringify(proxy, null, 2)
-        isEdit.value = true
-        editId = record.tag
-        toggleDetails()
-      } catch (error: any) {
-        message.error(error)
-      }
-    },
+    handler: (record: App.Subscription['proxies'][0]) => handleInspectProxy(record, true),
   },
   {
     label: 'common.delete',
-    handler: (record: Record<string, any>) => {
-      const idx = sub.value.proxies.findIndex((v) => v.tag === record.tag)
-      if (idx !== -1) {
-        sub.value.proxies.splice(idx, 1)
-      }
-    },
+    handler: handleDeleteProxy,
   },
 ]
 
@@ -175,9 +188,7 @@ const onEditEnd = async () => {
   } catch (error: any) {
     console.log(error)
     message.error(error.message || error)
-    // reopen
-    toggleDetails()
-    return
+    return false
   }
 
   await initAllFieldsProxies()
@@ -248,10 +259,9 @@ defineExpose({ modalSlots })
 
 <template>
   <div class="h-full flex flex-col">
-    <div class="flex items-center">
-      <span class="mr-8">
-        {{ t('subscribes.proxies.type') }}
-        :
+    <div class="flex flex-wrap items-center gap-8">
+      <span class="text-12 text-muted">
+        {{ t('subscribes.proxies.type') }}:
       </span>
       <Select v-model="proxyType" :options="filteredProxyTypeOptions" size="small" />
       <Input
@@ -259,9 +269,16 @@ defineExpose({ modalSlots })
         :placeholder="t('subscribes.proxies.name')"
         clearable
         size="small"
-        class="mx-8 flex-1"
+        class="flex-1 min-w-160"
       />
-      <Button type="primary" size="small" @click="handleAdd">
+      <span class="resource-count-badge">
+        {{
+          keywords.trim() || proxyType
+            ? `${filteredProxies.length} / ${sub.proxies.length}`
+            : sub.proxies.length
+        }}
+      </span>
+      <Button type="primary" size="small" icon="add" @click="handleAdd">
         {{ t('subscribes.proxies.add') }}
       </Button>
     </div>
@@ -270,8 +287,11 @@ defineExpose({ modalSlots })
 
     <div
       v-else
-      v-draggable="[sub.proxies, DraggableOptions]"
-      class="grid grid-cols-4 gap-8 mt-8 overflow-y-auto"
+      v-draggable="[
+        sub.proxies,
+        { ...DraggableOptions, disabled: Boolean(keywords.trim() || proxyType) },
+      ]"
+      class="proxies-grid gap-8 mt-10 overflow-y-auto pb-8"
     >
       <Card
         v-for="proxy in filteredProxies"
@@ -279,11 +299,96 @@ defineExpose({ modalSlots })
         v-menu="generateMenus(proxy)"
         :title="proxy.tag"
       >
-        <div class="text-12">
-          {{ proxy.type }}
-          <span v-if="proxy.kind === 'endpoint'" class="text-primary ml-4">{{
-            t('subscribe.endpoint')
-          }}</span>
+        <template #extra>
+          <Dropdown>
+            <Button
+              type="text"
+              size="small"
+              icon="more"
+              :aria-label="t('common.more') + ' · ' + proxy.tag"
+            />
+            <template #overlay="{ close }">
+              <div class="flex flex-col gap-2 min-w-128 p-6">
+                <Button
+                  type="text"
+                  size="small"
+                  class="justify-start"
+                  @click="
+                    () => {
+                      close()
+                      handleInspectProxy(proxy, false)
+                    }
+                  "
+                >
+                  {{ t('common.details') }}
+                </Button>
+                <Button
+                  type="text"
+                  size="small"
+                  class="justify-start"
+                  @click="
+                    () => {
+                      close()
+                      handleInspectProxy(proxy, true)
+                    }
+                  "
+                >
+                  {{ t('common.edit') }}
+                </Button>
+                <Button
+                  type="text"
+                  size="small"
+                  class="justify-start"
+                  @click="
+                    () => {
+                      close()
+                      handleCopyProxy(proxy)
+                    }
+                  "
+                >
+                  {{ t('common.copy') }}
+                </Button>
+                <template v-if="manualNodeGroups.length">
+                  <Divider size="small">{{ t('nodeGroups.addNode') }}</Divider>
+                  <Button
+                    v-for="group in manualNodeGroups"
+                    :key="group.id"
+                    type="text"
+                    size="small"
+                    class="justify-start"
+                    @click="
+                      () => {
+                        close()
+                        handleAddToManualGroup(group.id, proxy)
+                      }
+                    "
+                  >
+                    {{ group.name }}
+                  </Button>
+                </template>
+                <Divider size="small" />
+                <Button
+                  type="text"
+                  size="small"
+                  class="justify-start text-danger"
+                  @click="
+                    () => {
+                      close()
+                      handleDeleteProxy(proxy)
+                    }
+                  "
+                >
+                  {{ t('common.delete') }}
+                </Button>
+              </div>
+            </template>
+          </Dropdown>
+        </template>
+        <div class="text-12 text-muted flex items-center gap-6">
+          <span>{{ proxy.type }}</span>
+          <Tag v-if="proxy.kind === 'endpoint'" size="small" color="blue">
+            {{ t('subscribe.endpoint') }}
+          </Tag>
         </div>
       </Card>
     </div>
@@ -302,3 +407,29 @@ defineExpose({ modalSlots })
     <CodeEditor v-model="details" lang="json" :editable="isEdit" />
   </Modal>
 </template>
+
+<style scoped>
+.proxies-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-content: start;
+}
+
+@media (max-width: 1080px) {
+  .proxies-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 780px) {
+  .proxies-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .proxies-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>

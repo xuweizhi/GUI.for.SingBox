@@ -271,7 +271,13 @@ const onSortUpdate = debounce(profilesStore.saveProfiles, 1000)
 
   <div v-else class="grid-list-header">
     <Radio v-model="appSettingsStore.app.profilesView" :options="ViewOptions" />
-    <span class="resource-count-badge">{{ profilesStore.profiles.length }}</span>
+    <span class="resource-count-badge">
+      {{
+        keywords.trim()
+          ? `${filteredProfiles.length} / ${profilesStore.profiles.length}`
+          : profilesStore.profiles.length
+      }}
+    </span>
     <Input
       v-model="keywords"
       size="small"
@@ -476,6 +482,29 @@ const onSortUpdate = debounce(profilesStore.saveProfiles, 1000)
             {{ p.dns.servers.length }} / {{ p.dns.rules.length }}
           </span>
         </div>
+      </div>
+
+      <div
+        v-if="appSettingsStore.app.profilesView === View.Grid"
+        class="resource-card-footer"
+        @dblclick.stop
+      >
+        <Button
+          :type="appSettingsStore.app.kernel.profile === p.id ? 'text' : 'normal'"
+          size="small"
+          :disabled="appSettingsStore.app.kernel.profile === p.id"
+          :loading="switchingProfileId === p.id"
+          @click="handleUseProfile(p)"
+        >
+          {{
+            appSettingsStore.app.kernel.profile === p.id
+              ? t('home.overview.currentProfile')
+              : t('common.use')
+          }}
+        </Button>
+        <Button type="text" size="small" icon="edit" @click="handleShowProfileForm(p.id)">
+          {{ t('common.edit') }}
+        </Button>
       </div>
     </Card>
   </div>

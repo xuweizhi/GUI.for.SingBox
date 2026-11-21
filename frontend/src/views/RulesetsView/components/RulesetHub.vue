@@ -26,8 +26,11 @@ const handleCancel = inject('cancel') as any
 watch(keywords, () => (currentPage.value = 1))
 
 const filteredList = computed(() => {
-  if (!keywords.value) return rulesetsStore.rulesetHub.list
-  return rulesetsStore.rulesetHub.list.filter((ruleset) => ruleset.name.includes(keywords.value))
+  const q = keywords.value.trim().toLowerCase()
+  if (!q) return rulesetsStore.rulesetHub.list
+  return rulesetsStore.rulesetHub.list.filter(
+    (ruleset) => ruleset.name.toLowerCase().includes(q) || ruleset.type.toLowerCase().includes(q),
+  )
 })
 
 const currentList = computed(() => {
@@ -188,11 +191,11 @@ const modalSlots = {
           class: 'mr-auto',
         })
       : null,
-  close: () =>
+  cancel: () =>
     h(
       Button,
       {
-        type: 'text',
+        type: 'normal',
         onClick: handleCancel,
       },
       () => t('common.close'),
@@ -224,7 +227,7 @@ defineExpose({ modalSlots })
 
       <Empty v-if="filteredList.length === 0" />
 
-      <div class="overflow-y-auto grid grid-cols-3 text-12 gap-8 mt-8 pb-16 pr-8">
+      <div class="responsive-card-grid overflow-y-auto text-12 mt-8 pb-16 pr-4">
         <Card
           v-for="ruleset in currentList"
           :key="ruleset.name + ruleset.type"

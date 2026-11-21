@@ -59,11 +59,11 @@ const handleClearGithubMirror = () => {
 </script>
 
 <template>
-  <div class="px-8 py-12 text-18 font-bold">{{ $t('settings.network') }}</div>
+  <div class="px-8 py-12 text-16 font-bold">{{ $t('settings.network') }}</div>
 
   <Card>
     <div class="settings-row">
-      <div class="text-16 font-bold">{{ $t('settings.requestProxy.name') }}</div>
+      <div>{{ $t('settings.requestProxy.name') }}</div>
       <div class="flex items-center gap-6">
         <Button
           v-if="showProxyTest"
@@ -78,7 +78,7 @@ const handleClearGithubMirror = () => {
       </div>
     </div>
     <div v-if="isCustomProxy" class="settings-row">
-      <div class="text-16 font-bold">{{ $t('settings.requestProxy.custom') }}</div>
+      <div>{{ $t('settings.requestProxy.custom') }}</div>
       <Input
         v-model.lazy="appSettings.app.customProxy"
         placeholder="scheme://username:password@host:port"
@@ -100,9 +100,9 @@ const handleClearGithubMirror = () => {
       </Input>
     </div>
     <div class="settings-row">
-      <div class="text-16 font-bold">
+      <div>
         {{ $t('settings.userAgent.name') }}
-        <span class="font-normal text-12">({{ $t('settings.userAgent.tips') }})</span>
+        <span class="font-normal text-12">{{ $t('settings.userAgent.tips') }}</span>
       </div>
       <Input
         v-model.lazy="appSettings.app.userAgent"
@@ -124,9 +124,9 @@ const handleClearGithubMirror = () => {
       </Input>
     </div>
     <div class="settings-row">
-      <div class="text-16 font-bold">
+      <div>
         {{ $t('settings.githubapi.name') }}
-        <span class="font-normal text-12">({{ $t('settings.githubapi.tips') }})</span>
+        <span class="font-normal text-12">{{ $t('settings.githubapi.tips') }}</span>
       </div>
       <Input
         v-model.lazy="appSettings.app.githubApiToken"
@@ -148,16 +148,16 @@ const handleClearGithubMirror = () => {
       </Input>
     </div>
     <div class="settings-row">
-      <div class="text-16 font-bold">
+      <div>
         {{ $t('settings.githubDownloadAcceleration.name') }}
         <span class="font-normal text-12">
-          ({{ $t('settings.githubDownloadAcceleration.tips') }})
+          {{ $t('settings.githubDownloadAcceleration.tips') }}
         </span>
       </div>
       <Switch v-model="appSettings.app.githubDownloadAcceleration" />
     </div>
     <div v-if="appSettings.app.githubDownloadAcceleration" class="settings-row">
-      <div class="text-16 font-bold">{{ $t('settings.githubDownloadAcceleration.mirror') }}</div>
+      <div>{{ $t('settings.githubDownloadAcceleration.mirror') }}</div>
       <Input
         v-model.lazy="appSettings.app.githubDownloadMirror"
         placeholder="https://example.com/{url}"

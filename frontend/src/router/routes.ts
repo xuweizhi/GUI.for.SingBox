@@ -29,6 +29,17 @@ const routes: RouteRecordRaw[] = [
     meta: {
       name: 'router.overview',
       icon: 'overview',
+      group: 'control',
+    },
+  },
+  {
+    path: '/netcheck',
+    name: 'NetCheck',
+    component: NetCheckView,
+    meta: {
+      name: 'router.netcheck',
+      icon: 'speedTest',
+      group: 'control',
     },
   },
   {
@@ -38,6 +49,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       name: 'router.profiles',
       icon: 'profiles',
+      group: 'config',
     },
   },
   {
@@ -47,6 +59,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       name: 'router.subscriptions',
       icon: 'subscriptions',
+      group: 'config',
     },
   },
   {
@@ -56,6 +69,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       name: 'router.nodeGroups',
       icon: 'folder',
+      group: 'config',
       hidden: false,
     },
   },
@@ -66,6 +80,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       name: 'router.rulesets',
       icon: 'rulesets',
+      group: 'config',
     },
   },
   {
@@ -75,15 +90,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       name: 'router.plugins',
       icon: 'plugins',
-    },
-  },
-  {
-    path: '/netcheck',
-    name: 'NetCheck',
-    component: NetCheckView,
-    meta: {
-      name: 'router.netcheck',
-      icon: 'speedTest',
+      group: 'system',
     },
   },
   {
@@ -93,6 +100,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       name: 'router.scheduledtasks',
       icon: 'scheduledTasks',
+      group: 'system',
     },
   },
   {
@@ -102,6 +110,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       name: 'router.settings',
       icon: 'settings2',
+      group: 'system',
       hidden: false,
     },
   },

@@ -165,10 +165,10 @@ onUnmounted(() => {
             </template>
           </Input>
         </div>
-        <div class="overflow-y-auto p-8 flex flex-col gap-6" style="max-height: calc(100dvh - 180px)">
+        <div class="overflow-y-auto p-8 flex flex-col gap-6" style="max-height: calc(100dvh - 216px)">
           <div
             v-for="(c, index) in hitCommand"
-            :key="c.label"
+            :key="`${c.cmd}-${index}`"
             :ref="(el: any) => (commandsRefMap[c.label] = el)"
             :class="{ 'is-selected': index === selected }"
             class="command-item rounded-8 px-12 py-8 cursor-pointer"
@@ -184,6 +184,10 @@ onUnmounted(() => {
           <div v-show="hitCommand.length === 0" class="p-16 text-center text-13 text-muted">
             {{ t('commands.noMatching') }}
           </div>
+        </div>
+        <div class="command-panel__footer px-12 py-8 text-12 text-muted flex items-center justify-between">
+          <span>{{ t('common.commandHints') }}</span>
+          <span class="font-mono">{{ hitCommand.length }}</span>
         </div>
       </div>
     </div>
@@ -205,6 +209,11 @@ onUnmounted(() => {
 
 .command-panel__header {
   border-bottom: 1px solid var(--border-color);
+}
+
+.command-panel__footer {
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-color);
 }
 
 .command-item {

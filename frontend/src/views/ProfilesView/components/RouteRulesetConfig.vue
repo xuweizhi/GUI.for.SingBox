@@ -148,25 +148,24 @@ const handleUse = (ruleset: any) => {
     </div>
     <template v-if="fields.type === RulesetType.Local">
       <Divider>{{ t('kernel.route.tab.rule_set') }}</Divider>
-      <div class="grid grid-cols-3 gap-8">
-        <Empty
-          v-if="rulesetsStore.rulesets.length === 0"
-          :description="t('kernel.route.rule_set.empty')"
-        />
-        <template v-else>
-          <Card
-            v-for="ruleset in rulesetsStore.rulesets"
-            :key="ruleset.id"
-            v-tips="ruleset.path"
-            :title="ruleset.name"
-            :selected="fields.path === ruleset.id"
-            @click="handleUse(ruleset)"
-          >
-            <div class="text-12">
-              {{ ruleset.path }}
-            </div>
-          </Card>
-        </template>
+      <Empty
+        v-if="rulesetsStore.rulesets.length === 0"
+        :description="t('kernel.route.rule_set.empty')"
+      />
+      <div v-else class="responsive-card-grid">
+        <Card
+          v-for="ruleset in rulesetsStore.rulesets"
+          :key="ruleset.id"
+          v-tips="ruleset.path"
+          :title="ruleset.name"
+          :selected="fields.path === ruleset.id"
+          interactive
+          @click="handleUse(ruleset)"
+        >
+          <div class="text-12 text-muted break-all">
+            {{ ruleset.path }}
+          </div>
+        </Card>
       </div>
     </template>
     <template v-else-if="fields.type === RulesetType.Remote">

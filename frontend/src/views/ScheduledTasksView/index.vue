@@ -132,7 +132,13 @@ const onSortUpdate = debounce(scheduledTasksStore.saveScheduledTasks, 1000)
       v-model="appSettingsStore.app.scheduledtasksView"
       :options="ViewOptions"
     />
-    <span class="resource-count-badge">{{ scheduledTasksStore.scheduledtasks.length }}</span>
+    <span class="resource-count-badge">
+      {{
+        keywords.trim()
+          ? `${filteredTasks.length} / ${scheduledTasksStore.scheduledtasks.length}`
+          : scheduledTasksStore.scheduledtasks.length
+      }}
+    </span>
     <Input
       v-model="keywords"
       size="small"
@@ -299,6 +305,18 @@ const onSortUpdate = debounce(scheduledTasksStore.saveScheduledTasks, 1000)
             }}
           </span>
         </div>
+      </div>
+
+      <div v-if="appSettingsStore.app.scheduledtasksView === View.Grid" class="resource-card-footer">
+        <Button type="normal" size="small" icon="play" @click="handleRunTaskNow(s.id)">
+          {{ t('scheduledtasks.run') }}
+        </Button>
+        <Button type="text" size="small" @click="handleShowTaskLogs(s.id)">
+          {{ t('scheduledtasks.log') }}
+        </Button>
+        <Button type="text" size="small" class="ml-auto" @click="handleShowTaskForm(s.id)">
+          {{ t('common.edit') }}
+        </Button>
       </div>
     </Card>
   </div>

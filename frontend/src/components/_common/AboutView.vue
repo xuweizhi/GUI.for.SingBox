@@ -32,10 +32,10 @@ if (Date.now() - appStore.lastCheckTime > 60_000) {
 </script>
 
 <template>
-  <div class="flex flex-col items-center pt-36">
-    <img :src="logo" class="w-128" draggable="false" />
-    <div class="py-8 font-bold">{{ APP_TITLE }}</div>
-    <div class="flex items-center pb-8 my-4">
+  <div class="flex flex-col items-center py-20 gap-10">
+    <img :src="logo" class="w-96" draggable="false" />
+    <div class="text-18 font-bold">{{ APP_TITLE }}</div>
+    <div class="flex flex-wrap items-center justify-center gap-8">
       <Button
         v-if="appStore.restartable"
         icon="restartApp"
@@ -48,15 +48,16 @@ if (Date.now() - appStore.lastCheckTime > 60_000) {
       <template v-else>
         <Button
           :loading="appStore.checkForUpdatesLoading"
-          type="link"
+          type="normal"
           size="small"
           @click="appStore.checkForUpdates(true)"
         >
-          Bridge: {{ envStore.env.appVersion }} - UI: {{ APP_VERSION }}
+          Bridge: {{ envStore.env.appVersion }} · UI: {{ APP_VERSION }}
         </Button>
         <Button
           v-if="appStore.updatable"
           :loading="appStore.downloading"
+          type="primary"
           size="small"
           @click="appStore.downloadApp"
         >
@@ -64,23 +65,16 @@ if (Date.now() - appStore.lastCheckTime > 60_000) {
         </Button>
       </template>
     </div>
-    <div
-      class="text-12 underline flex items-center cursor-pointer"
-      @click="BrowserOpenURL(PROJECT_URL)"
-    >
-      <Icon icon="github" />GitHub
-    </div>
-    <div
-      class="text-12 underline flex items-center cursor-pointer"
-      @click="BrowserOpenURL(TG_GROUP)"
-    >
-      <Icon icon="telegram" />Telegram Group
-    </div>
-    <div
-      class="text-12 underline flex items-center cursor-pointer"
-      @click="BrowserOpenURL(TG_CHANNEL)"
-    >
-      <Icon icon="telegram" />Telegram Channel
+    <div class="flex flex-wrap items-center justify-center gap-8 mt-6">
+      <Button type="text" size="small" icon="github" @click="BrowserOpenURL(PROJECT_URL)">
+        GitHub
+      </Button>
+      <Button type="text" size="small" icon="telegram" @click="BrowserOpenURL(TG_GROUP)">
+        Telegram Group
+      </Button>
+      <Button type="text" size="small" icon="telegram" @click="BrowserOpenURL(TG_CHANNEL)">
+        Telegram Channel
+      </Button>
     </div>
   </div>
 </template>

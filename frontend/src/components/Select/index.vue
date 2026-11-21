@@ -140,6 +140,17 @@ const handleClear = () => {
   internalUpdate = true
 }
 
+watch(filteredOptions, () => {
+  highlightedIndex.value = -1
+})
+
+const onDropdownVisibilityChange = (visible: boolean) => {
+  if (!visible) {
+    searchQuery.value = ''
+    highlightedIndex.value = -1
+  }
+}
+
 const handleTriggerKeydown = (
   event: KeyboardEvent,
   controls: { toggle: () => void; close: () => void; open: () => void; show: boolean },
@@ -186,7 +197,7 @@ const handleTriggerKeydown = (
 </script>
 
 <template>
-  <Dropdown :trigger="disabled ? [] : ['click']">
+  <Dropdown :trigger="disabled ? [] : ['click']" @update:show="onDropdownVisibilityChange">
     <template #default="{ toggle, close, open, show }">
       <div
         role="combobox"

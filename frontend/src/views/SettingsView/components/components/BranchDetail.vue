@@ -5,7 +5,7 @@ import { RemoveFile } from '@/bridge'
 import { CoreCacheFilePath } from '@/constant/kernel'
 import { useCoreBranch } from '@/hooks/useCoreBranch'
 import { useKernelApiStore } from '@/stores'
-import { message } from '@/utils'
+import { confirm, message } from '@/utils'
 
 interface Props {
   isAlpha: boolean
@@ -40,6 +40,16 @@ const {
 
 const handleClearCoreCache = async () => {
   try {
+    await confirm(t('settings.kernel.clearCache'), t('settings.kernel.confirmClearCache'), {
+      type: 'text',
+      okText: 'settings.kernel.clearCache',
+      danger: true,
+    })
+  } catch {
+    return
+  }
+
+  try {
     if (kernelApiStore.running) {
       await kernelApiStore.restartCore(() => RemoveFile(CoreCacheFilePath))
     } else {
@@ -54,13 +64,14 @@ const handleClearCoreCache = async () => {
 </script>
 
 <template>
-  <div class="flex items-center">
-    <div class="px-8 py-12 text-18 font-bold">
+  <div class="flex flex-wrap items-center gap-4">
+    <div class="px-8 py-12 text-16 font-bold">
       {{ isAlpha ? 'Alpha' : t('settings.kernel.name') }}
     </div>
     <Button
       v-if="rollbackable"
       v-tips="'settings.kernel.rollbackTip'"
+      :aria-label="t('settings.kernel.rollbackTip')"
       icon="rollback"
       type="text"
       size="small"
@@ -68,6 +79,7 @@ const handleClearCoreCache = async () => {
     />
     <Button
       v-tips="'settings.kernel.clearCache'"
+      :aria-label="t('settings.kernel.clearCache')"
       type="text"
       size="small"
       icon="clear3"
@@ -75,6 +87,7 @@ const handleClearCoreCache = async () => {
     />
     <Button
       v-tips="'settings.kernel.linkTip'"
+      :aria-label="t('settings.kernel.linkTip')"
       icon="link"
       type="text"
       size="small"
@@ -82,6 +95,7 @@ const handleClearCoreCache = async () => {
     />
     <Button
       v-tips="'settings.kernel.config.name'"
+      :aria-label="t('settings.kernel.config.name')"
       type="text"
       size="small"
       icon="settings3"
@@ -89,10 +103,10 @@ const handleClearCoreCache = async () => {
     />
   </div>
   <Card>
-    <div v-if="versionDetail" class="text-12 pt-8 break-all line-clamp-2">
+    <div v-if="versionDetail" class="text-12 text-muted pt-8 break-all line-clamp-2 font-mono">
       {{ versionDetail }}
     </div>
-    <div class="flex items-center min-h-38">
+    <div class="flex flex-wrap items-center gap-8 min-h-38 py-6">
       <Tag
         :color="updatable ? 'orange' : 'default'"
         class="cursor-pointer"

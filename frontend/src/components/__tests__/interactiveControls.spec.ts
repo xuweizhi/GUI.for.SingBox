@@ -6,6 +6,7 @@ import Button from '@/components/Button/index.vue'
 import Card from '@/components/Card/index.vue'
 import CheckBox from '@/components/CheckBox/index.vue'
 import Dropdown from '@/components/Dropdown/index.vue'
+import { icons } from '@/components/Icon/icons'
 import Input from '@/components/Input/index.vue'
 import KeyValueEditor from '@/components/KeyValueEditor/index.vue'
 import Pagination from '@/components/Pagination/index.vue'
@@ -223,5 +224,34 @@ describe('interactive controls', () => {
     await inputs[1]!.setValue('3')
     const emitted = wrapper.emitted('update:modelValue')
     expect(emitted?.at(-1)).toEqual([{ A: '3' }])
+  })
+
+  it('clears Select search filter when its dropdown closes', async () => {
+    const options = Array.from({ length: 15 }, (_, idx) => ({
+      label: `Option ${idx + 1}`,
+      value: `opt-${idx + 1}`,
+    }))
+    const wrapper = mount(Select, {
+      props: { modelValue: 'opt-1', options },
+      global: {
+        components: { Button, Dropdown, Input },
+        stubs: { Empty: true, Icon: true, Teleport: true, CodeEditor: true },
+      },
+    })
+
+    await wrapper.get('.gui-select').trigger('click')
+    const searchInput = wrapper.get('input')
+    await searchInput.setValue('Option 15')
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(1)
+
+    await wrapper.get('[role="option"]').trigger('click')
+    await wrapper.get('.gui-select').trigger('click')
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(15)
+  })
+
+  it('keeps restart, stop, log, and settings icons tintable without hardcoded primary fills', () => {
+    for (const name of ['restart', 'stop', 'log', 'settings'] as const) {
+      expect(icons[name]).not.toContain('var(--primary-color)')
+    }
   })
 })

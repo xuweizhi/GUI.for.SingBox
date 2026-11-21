@@ -41,29 +41,19 @@ const handleCancel = inject('cancel') as any
 const handleSubmit = async () => {
   loading.value = true
 
-  if (props.isUpdate) {
-    try {
-      await rulesetsStore.editRuleset(props.id, ruleset.value)
-      handleCancel()
-    } catch (error: any) {
-      console.error('editRuleset: ', error)
-      message.error(error)
-    }
-
-    loading.value = true
-
-    return
-  }
-
   try {
-    await rulesetsStore.addRuleset(ruleset.value)
+    if (props.isUpdate) {
+      await rulesetsStore.editRuleset(props.id, ruleset.value)
+    } else {
+      await rulesetsStore.addRuleset(ruleset.value)
+    }
     handleCancel()
   } catch (error: any) {
-    console.error('addRuleset: ', error)
+    console.error(props.isUpdate ? 'editRuleset: ' : 'addRuleset: ', error)
     message.error(error)
+  } finally {
+    loading.value = false
   }
-
-  loading.value = true
 }
 
 const disabled = computed(

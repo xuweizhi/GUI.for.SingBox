@@ -272,7 +272,13 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
 
   <div v-else class="grid-list-header subscriptions-toolbar">
     <Radio v-model="appSettingsStore.app.subscribesView" :options="ViewOptions" />
-    <span class="resource-count-badge">{{ subscribeStore.subscribes.length }}</span>
+    <span class="resource-count-badge">
+      {{
+        keywords.trim()
+          ? `${filteredSubscribes.length} / ${subscribeStore.subscribes.length}`
+          : subscribeStore.subscribes.length
+      }}
+    </span>
     <Input
       v-model="keywords"
       size="small"
@@ -564,6 +570,25 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         <span v-if="s.usageUpdatedAt" :title="formatDate(s.usageUpdatedAt, 'YYYY-MM-DD HH:mm:ss')">
           {{ t('subscribes.usageAsOf', [formatRelativeTime(s.usageUpdatedAt)]) }}
         </span>
+      </div>
+
+      <div v-if="appSettingsStore.app.subscribesView === View.Grid" class="resource-card-footer">
+        <Button
+          :disabled="s.disabled"
+          :loading="s.updating"
+          type="normal"
+          size="small"
+          icon="refresh"
+          @click="handleUpdateSub(s)"
+        >
+          {{ t('common.update') }}
+        </Button>
+        <Button type="text" size="small" @click="handleEditProxies(s.id)">
+          {{ t('subscribes.editProxies') }}
+        </Button>
+        <Button type="text" size="small" class="ml-auto" @click="handleShowSubForm(s.id)">
+          {{ t('common.edit') }}
+        </Button>
       </div>
     </Card>
   </div>

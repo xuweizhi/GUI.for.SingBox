@@ -104,11 +104,11 @@ const handleViewNextRuns = () => {
     message.error(reason)
     return
   }
-  const list = instance!.nextRuns(99).map((v, i) => {
+  const list = instance!.nextRuns(20).map((v, i) => {
     const index = (i + 1).toString().padStart(2, '0')
-    return index + ' - '.repeat(14) + formatDate(v.getTime(), 'YYYY/MM/DD HH:mm:ss')
+    return `${index}.  ${formatDate(v.getTime(), 'YYYY-MM-DD HH:mm:ss')}`
   })
-  alert('Next Run Time', list.join('\n'))
+  alert(t('scheduledtasks.next'), list.join('\n'))
 }
 
 const onNotificationChange = async (v: boolean) => {
@@ -166,26 +166,25 @@ defineExpose({ modalSlots })
         <Input v-model="task.name" autofocus class="w-full" />
       </div>
     </div>
-    <div class="form-item">
-      {{ t('scheduledtask.cron') }} *
-      <div class="min-w-[75%]">
-        <Input v-model="task.cron" :placeholder="t('scheduledtask.cronTips')" class="w-full">
-          <template #suffix>
-            <Button type="primary" size="small" @click="handleValidate">Validate</Button>
-            <Button type="primary" size="small" class="ml-4" @click="handleViewNextRuns">
-              Next Run Time
-            </Button>
-          </template>
-        </Input>
+    <div class="form-item items-start">
+      <div class="pt-6">{{ t('scheduledtask.cron') }} *</div>
+      <div class="min-w-[75%] flex flex-col gap-6">
+        <Input v-model="task.cron" :placeholder="t('scheduledtask.cronTips')" clearable class="w-full" />
+        <div class="flex flex-wrap items-center gap-6">
+          <Button type="normal" size="small" :disabled="!task.cron" @click="handleValidate">
+            {{ t('scheduledtask.validate') }}
+          </Button>
+          <Button type="text" size="small" :disabled="!task.cron" @click="handleViewNextRuns">
+            {{ t('scheduledtasks.next') }}
+          </Button>
+        </div>
       </div>
     </div>
     <div class="form-item">
       <div>{{ t('scheduledtask.type') }}</div>
-      <Radio v-model="task.type" :options="ScheduledTaskOptions.slice(5)" />
-    </div>
-    <div class="form-item">
-      <div></div>
-      <Radio v-model="task.type" :options="ScheduledTaskOptions.slice(0, 5)" />
+      <div class="min-w-[75%]">
+        <Select v-model="task.type" :options="ScheduledTaskOptions" auto-size />
+      </div>
     </div>
     <div class="form-item">
       {{ t('scheduledtask.notification') }}
@@ -195,15 +194,16 @@ defineExpose({ modalSlots })
     <div v-if="task.type === ScheduledTasksType.UpdateSubscription">
       <Divider>{{ t('scheduledtask.subscriptions') }}</Divider>
       <Empty v-if="subscribesStore.subscribes.length === 0" />
-      <div class="grid grid-cols-3 gap-8">
+      <div class="responsive-card-grid">
         <Card
           v-for="s in subscribesStore.subscribes"
           :key="s.id"
           :title="s.name"
           :selected="task.subscriptions.includes(s.id)"
+          interactive
           @click="handleUse(task.subscriptions, s.id)"
         >
-          <div class="text-12 line-clamp-2">{{ s.type }}</div>
+          <div class="text-12 text-muted line-clamp-2">{{ s.type }}</div>
         </Card>
       </div>
     </div>
@@ -211,15 +211,16 @@ defineExpose({ modalSlots })
     <div v-else-if="task.type === ScheduledTasksType.UpdateRuleset">
       <Divider>{{ t('scheduledtask.rulesets') }}</Divider>
       <Empty v-if="rulesetsStore.rulesets.length === 0" />
-      <div class="grid grid-cols-3 gap-8">
+      <div class="responsive-card-grid">
         <Card
           v-for="r in rulesetsStore.rulesets"
           :key="r.id"
           :title="r.name"
           :selected="task.rulesets.includes(r.id)"
+          interactive
           @click="handleUse(task.rulesets, r.id)"
         >
-          <div class="text-12 line-clamp-2">{{ r.type }}</div>
+          <div class="text-12 text-muted line-clamp-2">{{ r.type }}</div>
         </Card>
       </div>
     </div>
@@ -227,15 +228,16 @@ defineExpose({ modalSlots })
     <div v-else-if="task.type === ScheduledTasksType.UpdatePlugin">
       <Divider>{{ t('scheduledtask.plugins') }}</Divider>
       <Empty v-if="pluginsStore.plugins.length === 0" />
-      <div class="grid grid-cols-3 gap-8">
+      <div class="responsive-card-grid">
         <Card
           v-for="p in pluginsStore.plugins"
           :key="p.id"
           :title="p.name"
           :selected="task.plugins.includes(p.id)"
+          interactive
           @click="handleUse(task.plugins, p.id)"
         >
-          <div class="text-12 line-clamp-2">{{ p.type }}</div>
+          <div class="text-12 text-muted line-clamp-2">{{ p.type }}</div>
         </Card>
       </div>
     </div>
@@ -243,16 +245,17 @@ defineExpose({ modalSlots })
     <div v-else-if="task.type === ScheduledTasksType.RunPlugin">
       <Divider>{{ t('scheduledtask.plugins') }}</Divider>
       <Empty v-if="pluginsStore.plugins.length === 0" />
-      <div class="grid grid-cols-3 gap-8">
+      <div class="responsive-card-grid">
         <Card
           v-for="p in pluginsStore.plugins"
           :key="p.id"
           v-tips="p.description"
           :title="p.name"
           :selected="task.plugins.includes(p.id)"
+          interactive
           @click="handleUse(task.plugins, p.id)"
         >
-          <div class="text-12 line-clamp-2">{{ p.description }}</div>
+          <div class="text-12 text-muted line-clamp-2">{{ p.description }}</div>
         </Card>
       </div>
     </div>

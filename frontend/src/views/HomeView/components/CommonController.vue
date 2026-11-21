@@ -47,8 +47,10 @@ const onInterfaceChange = createValueWatcher(
 
 <template>
   <div>
-    <Divider class="w-full mb-8"> {{ t('home.overview.settingsTips') }} </Divider>
-    <div class="grid grid-cols-4 gap-8 pb-16">
+    <div class="runtime-tip rounded-8 px-12 py-8 mb-12 text-12 text-muted">
+      {{ t('home.overview.settingsTips') }}
+    </div>
+    <div class="common-settings-grid pb-16">
       <Card :title="t('kernel.inbounds.mixedPort')">
         <Input
           v-model="kernelApiStore.config['mixed-port']"
@@ -118,7 +120,19 @@ const onInterfaceChange = createValueWatcher(
           @change="onInterfaceChange"
         />
       </Card>
-      <Card :title="t('common.none')"> </Card>
     </div>
   </div>
 </template>
+
+<style scoped>
+.runtime-tip {
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
+}
+
+.common-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+</style>

@@ -60,7 +60,13 @@ const removeGroup = async (group: App.NodeGroup) => {
 
 <template>
   <div class="grid-list-header">
-    <span class="resource-count-badge">{{ nodeGroupsStore.nodeGroups.length }}</span>
+    <span class="resource-count-badge">
+      {{
+        keywords.trim()
+          ? `${groupCards.length} / ${nodeGroupsStore.nodeGroups.length}`
+          : nodeGroupsStore.nodeGroups.length
+      }}
+    </span>
     <Input
       v-if="nodeGroupsStore.nodeGroups.length > 0"
       v-model="keywords"

@@ -119,6 +119,8 @@ body {
   font-size: 13px;
   color: var(--muted-color);
   line-height: 1.6;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .resource-meta-row {
@@ -131,6 +133,29 @@ body {
 .resource-meta-value {
   color: var(--card-color);
   font-weight: 500;
+}
+
+.resource-card-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.responsive-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.font-mono,
+code,
+pre {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .resource-count-badge {

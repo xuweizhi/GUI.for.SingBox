@@ -168,28 +168,25 @@ const hasLost = (rule: App.Rule) => {
   return rulesValidationFlags.some((v) => v) || !rule.payload
 }
 
-const renderRule = (rule: App.Rule) => {
+const formatRuleParts = (rule: App.Rule) => {
   const { type, payload, outbound, action, invert } = rule
-  const children: string[] = [type]
-  let _payload = payload
+  let displayPayload = payload
   if (type === RuleType.RuleSet) {
-    _payload = rule.payload
+    displayPayload = rule.payload
       .split(',')
       .map((id) => props.ruleSet.find((v) => v.id === id)?.tag || id)
-      .join(',')
+      .join(', ')
   } else if (type === RuleType.Inbound) {
-    _payload = props.inboundOptions.find((v) => v.value === rule.payload)?.label || rule.payload
+    displayPayload =
+      props.inboundOptions.find((v) => v.value === rule.payload)?.label || rule.payload
   }
-  if (invert) {
-    _payload += ` (invert) `
-  }
-  children.push(_payload, action)
-  if (outbound) {
-    const proxy = props.outboundOptions.find((v) => v.value === outbound)?.label || outbound
-    children.push(proxy)
-  }
-  return children.join(',')
+  const target = outbound
+    ? props.outboundOptions.find((v) => v.value === outbound)?.label || outbound
+    : ''
+  return { type, payload: displayPayload, action, target, invert }
 }
+
+const isRulesetSelected = (id: string) => fields.value.payload.split(',').includes(id)
 </script>
 
 <template>
@@ -227,7 +224,7 @@ const renderRule = (rule: App.Rule) => {
         <div class="shrink-0">
           <Switch v-model="rule.enable" border="square" size="small" />
         </div>
-        <div class="font-bold flex-1 rule-content flex items-center gap-4 flex-wrap">
+        <div class="flex-1 rule-content flex items-center gap-6 flex-wrap text-13">
           <Button
             v-if="hasLost(rule)"
             v-tips="'kernel.route.rules.invalid'"
@@ -237,7 +234,21 @@ const renderRule = (rule: App.Rule) => {
             size="small"
             @click="showLost"
           />
-          <span>{{ renderRule(rule) }}</span>
+          <Tag size="small" color="cyan">{{ formatRuleParts(rule).type }}</Tag>
+          <span v-if="formatRuleParts(rule).payload" class="font-mono text-12 break-all">
+            {{ formatRuleParts(rule).payload }}
+          </span>
+          <Tag v-if="formatRuleParts(rule).invert" size="small" color="orange">invert</Tag>
+          <span class="text-muted" aria-hidden="true">→</span>
+          <Tag
+            size="small"
+            :color="formatRuleParts(rule).action === RuleAction.Reject ? 'red' : 'blue'"
+          >
+            {{ formatRuleParts(rule).action }}
+          </Tag>
+          <Tag v-if="formatRuleParts(rule).target" size="small" color="default">
+            {{ formatRuleParts(rule).target }}
+          </Tag>
         </div>
         <div class="ml-auto shrink-0 flex items-center gap-2">
           <Button
@@ -309,7 +320,7 @@ const renderRule = (rule: App.Rule) => {
         v-model="fields.payload"
         editable
         lang="json"
-        style="min-width: 320px"
+        class="w-full"
       />
       <Switch
         v-else-if="fields.type === RuleType.IpIsPrivate"
@@ -351,7 +362,7 @@ const renderRule = (rule: App.Rule) => {
       <template v-else-if="fields.action === RuleAction.RouteOptions">
         <div class="form-item">
           {{ t('kernel.route.rules.routeOptions') }}
-          <CodeEditor v-model="fields.outbound" editable lang="json" style="min-width: 320px" />
+          <CodeEditor v-model="fields.outbound" editable lang="json" class="w-full" />
         </div>
       </template>
       <template v-else-if="fields.action === RuleAction.Reject">
@@ -391,24 +402,23 @@ const renderRule = (rule: App.Rule) => {
     </Card>
     <template v-if="fields.type === RuleType.RuleSet">
       <Divider>{{ t('kernel.route.tab.rule_set') }}</Divider>
-      <div class="grid grid-cols-3 gap-8">
-        <Empty v-if="ruleSet.length === 0" :description="t('kernel.route.rule_set.empty')" />
-        <template v-else>
-          <Card
-            v-for="ruleset in ruleSet"
-            :key="ruleset.tag"
-            v-tips="ruleset.type"
-            :title="ruleset.tag"
-            :selected="fields.payload.includes(ruleset.id)"
-            class="ruleset"
-            @click="handleUse(ruleset)"
-          >
-            <div class="text-12">
-              {{ ruleset.type }}
-              {{ ruleset.type === RulesetType.Inline ? RulesetFormat.Source : ruleset.format }}
-            </div>
-          </Card>
-        </template>
+      <Empty v-if="ruleSet.length === 0" :description="t('kernel.route.rule_set.empty')" />
+      <div v-else class="responsive-card-grid">
+        <Card
+          v-for="ruleset in ruleSet"
+          :key="ruleset.tag"
+          v-tips="ruleset.type"
+          :title="ruleset.tag"
+          :selected="isRulesetSelected(ruleset.id)"
+          interactive
+          class="ruleset"
+          @click="handleUse(ruleset)"
+        >
+          <div class="text-12 text-muted">
+            {{ ruleset.type }}
+            {{ ruleset.type === RulesetType.Inline ? RulesetFormat.Source : ruleset.format }}
+          </div>
+        </Card>
       </div>
     </template>
   </Modal>

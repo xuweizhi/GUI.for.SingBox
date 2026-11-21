@@ -17,6 +17,10 @@ const props = withDefaults(defineProps<Props>(), {
   delay: 0,
 })
 
+const emit = defineEmits<{
+  'update:show': [value: boolean]
+}>()
+
 const domRef = useTemplateRef('domRef')
 const overlayRef = useTemplateRef('overlayRef')
 const overlayStyle = ref({ top: 'auto', left: '0px', bottom: 'auto', maxHeight: 'none' })
@@ -97,6 +101,7 @@ const onKeydown = (e: KeyboardEvent) => {
 }
 
 watch(show, async (isVisible) => {
+  emit('update:show', isVisible)
   if (isVisible) {
     await nextTick()
     updatePosition()

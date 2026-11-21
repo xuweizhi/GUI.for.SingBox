@@ -15,6 +15,12 @@ const nodeController = useNodeController()
 const networkCheck = useRuntimeNetworkCheck()
 const runError = ref('')
 
+const presetTargets = [
+  { label: 'gstatic 204', value: 'https://www.gstatic.com/generate_204' },
+  { label: 'Cloudflare', value: 'https://cp.cloudflare.com' },
+  { label: 'GitHub', value: 'https://github.com' },
+] as const
+
 const coreReady = computed(() => kernelApiStore.running)
 const runtimeNode = useRuntimeNodeDetails(
   coreReady,
@@ -50,6 +56,11 @@ const handleRun = async () => {
   } catch (error) {
     runError.value = error instanceof Error ? error.message : String(error)
   }
+}
+
+const applyPreset = (target: string) => {
+  networkCheck.input.value = target
+  void handleRun()
 }
 
 const clearResults = () => {
@@ -104,39 +115,78 @@ onUnmounted(() => {
             {{ t('netCheck.actions.clear') }}
           </Button>
         </div>
+        <div class="flex flex-wrap items-center gap-6">
+          <Button
+            v-for="preset in presetTargets"
+            :key="preset.value"
+            type="text"
+            size="small"
+            class="preset-chip"
+            :disabled="networkCheck.running.value"
+            @click="applyPreset(preset.value)"
+          >
+            {{ preset.label }}
+          </Button>
+        </div>
         <div v-if="runError" role="alert" class="net-check__error rounded-8 px-12 py-8 text-12">
           {{ renderText(runError) }}
         </div>
       </div>
     </Card>
 
-    <Card :title="t('netCheck.results.title')">
-      <div v-if="networkCheck.groups.value.length === 0" class="py-16 text-center text-13 text-muted">
-        {{ t('netCheck.results.empty') }}
-      </div>
-      <div v-else class="flex flex-col gap-12">
-        <NetCheckGroupCard
-          v-for="group in networkCheck.groups.value"
-          :key="group.id"
-          :group="group"
-          :running="networkCheck.running.value"
-        />
-      </div>
-    </Card>
+    <div class="net-check__grid">
+      <Card :title="t('netCheck.results.title')">
+        <div
+          v-if="networkCheck.groups.value.length === 0"
+          class="py-24 text-center text-13 text-muted"
+        >
+          {{ t('netCheck.results.empty') }}
+        </div>
+        <div v-else class="flex flex-col gap-12">
+          <NetCheckGroupCard
+            v-for="group in networkCheck.groups.value"
+            :key="group.id"
+            :group="group"
+            :running="networkCheck.running.value"
+          />
+        </div>
+      </Card>
 
-    <NodeDiagnosticsPanel
-      :controller="nodeController"
-      :core-ready="coreReady"
-      :runtime-details="runtimeNode.details.value"
-      :runtime-unavailable="runtimeNode.unavailable.value"
-    />
+      <NodeDiagnosticsPanel
+        :controller="nodeController"
+        :core-ready="coreReady"
+        :runtime-details="runtimeNode.details.value"
+        :runtime-unavailable="runtimeNode.unavailable.value"
+      />
+    </div>
   </div>
 </template>
 
 <style lang="less" scoped>
+.net-check__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.preset-chip {
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  color: var(--muted-color);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
 .net-check__error {
   color: var(--danger-color);
   background: var(--danger-soft);
   border: 1px solid color-mix(in srgb, var(--danger-color) 35%, transparent);
+}
+
+@media (max-width: 1040px) {
+  .net-check__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

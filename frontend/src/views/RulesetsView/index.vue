@@ -247,7 +247,13 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
 
   <div v-else class="grid-list-header">
     <Radio v-model="appSettingsStore.app.rulesetsView" :options="ViewOptions" />
-    <span class="resource-count-badge">{{ rulesetsStore.rulesets.length }}</span>
+    <span class="resource-count-badge">
+      {{
+        keywords.trim()
+          ? `${filteredRulesets.length} / ${rulesetsStore.rulesets.length}`
+          : rulesetsStore.rulesets.length
+      }}
+    </span>
     <Input
       v-model="keywords"
       size="small"
@@ -459,6 +465,35 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
             }}
           </span>
         </div>
+      </div>
+
+      <div v-if="appSettingsStore.app.rulesetsView === View.Grid" class="resource-card-footer">
+        <Button
+          :disabled="r.disabled"
+          :loading="r.updating"
+          type="normal"
+          size="small"
+          icon="refresh"
+          @click="handleUpdateRuleset(r)"
+        >
+          {{ t('common.update') }}
+        </Button>
+        <Button
+          v-if="r.format === RulesetFormat.Source"
+          type="text"
+          size="small"
+          @click="handleEditRulesetList(r.id)"
+        >
+          {{ t('rulesets.editRuleset') }}
+        </Button>
+        <Button
+          v-else
+          type="text"
+          size="small"
+          @click="handleAddRulesetToProfile(r.id)"
+        >
+          {{ t('rulesets.addToProfile') }}
+        </Button>
       </div>
     </Card>
   </div>

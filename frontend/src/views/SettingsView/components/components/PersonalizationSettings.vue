@@ -27,15 +27,15 @@ const onThemeClick = (e: MouseEvent) => {
 }
 </script>
 <template>
-  <div class="px-8 py-12 text-18 font-bold">{{ $t('settings.personalization') }}</div>
+  <div class="px-8 py-12 text-16 font-bold">{{ $t('settings.personalization') }}</div>
 
   <Card>
     <div class="settings-row">
-      <div class="text-16 font-bold">{{ $t('settings.theme.name') }}</div>
+      <div>{{ $t('settings.theme.name') }}</div>
       <Radio v-model="appSettings.app.theme" :options="ThemeOptions" @click="onThemeClick" />
     </div>
     <div class="settings-row">
-      <div class="text-16 font-bold">{{ $t('settings.color.name') }}</div>
+      <div>{{ $t('settings.color.name') }}</div>
       <div class="flex items-center">
         <div v-if="appSettings.app.color === Color.Custom" class="flex items-center mr-4">
           <ColorPicker v-model="appSettings.app.primaryColor">
@@ -53,13 +53,14 @@ const onThemeClick = (e: MouseEvent) => {
       </div>
     </div>
     <div class="settings-row">
-      <div class="flex items-center text-16 font-bold">
+      <div class="flex items-center">
         <div class="mr-4">{{ $t('settings.lang.name') }}</div>
-        <Button type="text" icon="link" @click="BrowserOpenURL(APP_LOCALES_URL)" />
+        <Button type="text" size="small" icon="link" @click="BrowserOpenURL(APP_LOCALES_URL)" />
         <Button
           v-tips="'settings.lang.load'"
           :loading="appStore.localesLoading"
           type="text"
+          size="small"
           icon="refresh"
           @click="appStore.loadLocales()"
         />
@@ -67,7 +68,7 @@ const onThemeClick = (e: MouseEvent) => {
       <Radio v-model="appSettings.app.lang" :options="appStore.locales" />
     </div>
     <div class="settings-row">
-      <div class="text-16 font-bold">{{ $t('settings.fontFamily') }}</div>
+      <div>{{ $t('settings.fontFamily') }}</div>
       <Input v-model="appSettings.app.fontFamily" editable class="text-14">
         <template #suffix>
           <Button
@@ -81,7 +82,7 @@ const onThemeClick = (e: MouseEvent) => {
       </Input>
     </div>
     <div class="settings-row">
-      <div class="text-16 font-bold">{{ $t('settings.pages.name') }}</div>
+      <div>{{ $t('settings.pages.name') }}</div>
       <CheckBox v-model="appSettings.app.pages" :options="pages" />
     </div>
   </Card>

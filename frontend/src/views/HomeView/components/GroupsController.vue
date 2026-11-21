@@ -3,15 +3,12 @@ import { ref, computed, onActivated, onScopeDispose } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
-  ControllerCloseModeOptions,
   DefaultCardColumns,
   DefaultConcurrencyLimit,
-  DefaultControllerSensitivity,
   DefaultTestTimeout,
   DefaultTestURL,
   MaxConcurrencyLimit,
 } from '@/constant/app'
-import { ControllerCloseMode } from '@/enums/app'
 import { useBool } from '@/hooks'
 import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
 import { ignoredError, sleep, handleUseProxy, message, buildSmartRegExp } from '@/utils'
@@ -301,8 +298,6 @@ const handleResetMoreSettings = () => {
   appSettings.app.kernel.testUrl = DefaultTestURL
   appSettings.app.kernel.testTimeout = DefaultTestTimeout
   appSettings.app.kernel.concurrencyLimit = DefaultConcurrencyLimit
-  appSettings.app.kernel.controllerCloseMode = ControllerCloseMode.All
-  appSettings.app.kernel.controllerSensitivity = DefaultControllerSensitivity
   appSettings.app.kernel.cardColumns = DefaultCardColumns
   message.success('common.success')
 }
@@ -321,8 +316,8 @@ onScopeDispose(() => {
 </script>
 
 <template>
-  <div class="m-8 mt-0 sticky top-0 z-3">
-    <div class="groups-toolbar flex flex-wrap gap-8 items-center p-10 rounded-12 backdrop-blur-sm">
+  <div class="mb-10">
+    <div class="groups-toolbar flex flex-wrap gap-8 items-center p-10 rounded-12">
       <Switch v-model="appSettings.app.kernel.autoClose" label="home.controller.autoClose" />
       <Switch v-model="appSettings.app.kernel.unAvailable" label="home.controller.unAvailable" />
       <Switch v-model="appSettings.app.kernel.cardMode" label="home.controller.cardMode" />
@@ -365,9 +360,9 @@ onScopeDispose(() => {
     </div>
   </div>
 
-  <div v-for="group in groups" :key="group.name" class="m-8">
+  <div v-for="group in groups" :key="group.name" class="mb-10">
     <div
-      class="group-header sticky z-2 flex flex-wrap gap-8 items-center p-10 rounded-12 cursor-pointer backdrop-blur-sm"
+      class="group-header sticky top-0 z-2 flex flex-wrap gap-8 items-center p-10 rounded-12 cursor-pointer backdrop-blur-sm"
       @click="toggleExpanded(group.name)"
     >
       <div class="text-14 flex items-center gap-6 flex-wrap min-w-0">
@@ -526,29 +521,6 @@ onScopeDispose(() => {
     </div>
 
     <div class="form-item">
-      {{ t('home.controller.closeMode.name') }}
-      <Radio
-        v-model="appSettings.app.kernel.controllerCloseMode"
-        :options="ControllerCloseModeOptions"
-      />
-    </div>
-
-    <div
-      v-if="appSettings.app.kernel.controllerCloseMode === ControllerCloseMode.All"
-      class="form-item"
-    >
-      {{ t('home.controller.sensitivity') }}
-      <Input
-        v-model="appSettings.app.kernel.controllerSensitivity"
-        type="number"
-        :min="1"
-        :max="6"
-        placeholder="1-6"
-        editable
-      />
-    </div>
-
-    <div class="form-item">
       {{ t('home.controller.cardColumns') }}
       <Radio
         v-model="appSettings.app.kernel.cardColumns"
@@ -566,7 +538,6 @@ onScopeDispose(() => {
 }
 
 .group-header {
-  top: 56px;
   transition: border-color 0.16s ease;
   &:hover {
     border-color: color-mix(in srgb, var(--accent-text) 45%, var(--border-color));

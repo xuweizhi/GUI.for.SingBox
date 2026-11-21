@@ -99,16 +99,15 @@ if (pluginsStore.pluginHub.length === 0) {
 <template>
   <div class="pr-8">
     <div class="text-22 text-center pb-12">{{ t('plugins.slogan', [APP_TITLE]) }}</div>
-    <div class="flex items-center gap-8 sticky top-0 z-2 mb-12">
+    <div class="plugin-hub__search flex items-center gap-8 sticky top-0 z-2 py-8 mb-8">
       <Input
         v-model="keywords"
-        :border="false"
         :placeholder="t('plugins.total') + ': ' + pluginsStore.pluginHub.length"
         clearable
         class="flex-1"
       >
         <template #prefix>
-          <Icon icon="search" :size="22" />
+          <Icon icon="search" :size="16" color="var(--muted-color)" />
         </template>
         <template #suffix>
           <Button
@@ -116,12 +115,14 @@ if (pluginsStore.pluginHub.length === 0) {
             icon="refresh"
             :loading="pluginsStore.pluginHubLoading"
             type="text"
+            size="small"
             @click="handleUpdatePluginHub"
           />
           <Button
             v-tips="'plugins.sourceConfig.name'"
             icon="settings3"
             type="text"
+            size="small"
             @click="toggleSettingsModal"
           />
         </template>
@@ -147,19 +148,19 @@ if (pluginsStore.pluginHub.length === 0) {
     <div v-for="group in filteredPlugins" :key="group.name">
       <div class="text-16 font-bold mt-20 px-4">{{ group.name }}</div>
 
-      <div class="grid grid-cols-2 gap-8 py-8">
+      <div class="plugin-hub__grid py-8">
         <Card v-for="plugin in group.plugins" :key="plugin.id">
           <template #title-prefix>
             <div class="text-14 font-bold">{{ plugin.name }}</div>
           </template>
-          <div class="flex items-center">
-            <div v-tips="plugin.description" class="flex-1 line-clamp-1 h-full text-10">
-              {{ plugin.description }}
+          <div class="flex items-center gap-8">
+            <div v-tips="plugin.description" class="flex-1 line-clamp-2 text-12 text-muted">
+              {{ plugin.description || '--' }}
             </div>
             <Button v-if="loadingSet.has(plugin.id)" loading type="text" size="small" />
-            <div v-else class="flex items-center">
+            <div v-else class="flex items-center shrink-0">
               <Button v-if="isAlreadyAdded(plugin.id)" icon="selected" type="text" size="small" />
-              <Button v-else type="text" icon="add" size="small" @click="handleAddPlugin(plugin)" />
+              <Button v-else type="normal" icon="add" size="small" @click="handleAddPlugin(plugin)" />
             </div>
           </div>
         </Card>
@@ -197,3 +198,15 @@ if (pluginsStore.pluginHub.length === 0) {
     <Button icon="add" class="w-full" type="primary" @click="handleAddSource" />
   </Modal>
 </template>
+
+<style scoped>
+.plugin-hub__search {
+  background: var(--modal-bg);
+}
+
+.plugin-hub__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+</style>

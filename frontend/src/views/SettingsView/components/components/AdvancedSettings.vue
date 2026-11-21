@@ -5,24 +5,24 @@ const appSettings = useAppSettingsStore()
 </script>
 
 <template>
-  <div class="px-8 py-12 text-18 font-bold">{{ $t('settings.advanced') }}</div>
+  <div class="px-8 py-12 text-16 font-bold">{{ $t('settings.advanced') }}</div>
 
   <Card>
     <div class="settings-row">
-      <div class="text-16 font-bold">{{ $t('settings.realMemoryUsage') }}</div>
+      <div>{{ $t('settings.realMemoryUsage') }}</div>
       <Switch v-model="appSettings.app.kernel.realMemoryUsage" />
     </div>
     <div class="settings-row">
-      <div class="text-16 font-bold">
+      <div>
         {{ $t('settings.logRetentionDays.name') }}
-        <span class="font-normal text-12">({{ $t('settings.logRetentionDays.tips') }})</span>
+        <span class="font-normal text-12">{{ $t('settings.logRetentionDays.tips') }}</span>
       </div>
       <Input v-model="appSettings.app.log.retentionDays" :min="1" type="number" />
     </div>
     <div class="settings-row">
-      <div class="text-16 font-bold">
+      <div>
         {{ $t('settings.autoRestartKernel.name') }}
-        <span class="font-normal text-12">({{ $t('settings.autoRestartKernel.tips') }})</span>
+        <span class="font-normal text-12">{{ $t('settings.autoRestartKernel.tips') }}</span>
       </div>
       <Switch v-model="appSettings.app.autoRestartKernel" />
     </div>

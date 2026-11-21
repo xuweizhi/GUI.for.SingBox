@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watchEffect } from 'vue'
+import { computed, ref, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { NodeController } from '@/views/HomeView/useNodeController'
@@ -14,6 +14,17 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const nodeFilter = ref('')
+
+const filteredNodes = computed(() => {
+  const q = nodeFilter.value.trim().toLowerCase()
+  if (!q) return props.controller.nodes.value
+  return props.controller.nodes.value.filter(
+    (node) =>
+      node.name.toLowerCase().includes(q) ||
+      (node.proxy?.type || '').toLowerCase().includes(q),
+  )
+})
 
 const groupOptions = computed(() =>
   props.controller.groups.value.map((group) => ({ label: group.name, value: group.name })),
@@ -119,7 +130,7 @@ watchEffect(() => {
         {{ controller.refreshError.value }}
       </div>
 
-      <div class="mb-12">
+      <div class="flex flex-wrap items-center gap-8 mb-12">
         <Select
           v-if="groupOptions.length"
           :model-value="controller.selectedGroupName.value"
@@ -127,12 +138,21 @@ watchEffect(() => {
           size="small"
           @change="controller.selectGroup"
         />
+        <Input
+          v-if="controller.nodes.value.length > 6"
+          v-model="nodeFilter"
+          size="small"
+          clearable
+          auto-size
+          :placeholder="t('netCheck.node.searchPlaceholder')"
+          class="flex-1 min-w-128"
+        />
       </div>
 
-      <Empty v-if="controller.nodes.value.length === 0" />
-      <div v-else class="flex flex-col gap-8">
+      <Empty v-if="filteredNodes.length === 0" />
+      <div v-else class="node-list flex flex-col gap-8">
         <div
-          v-for="node in controller.nodes.value"
+          v-for="node in filteredNodes"
           :key="node.name"
           :data-node="node.name"
           :class="{ 'is-selected': node.name === controller.selectedGroup.value?.now }"
@@ -186,6 +206,14 @@ watchEffect(() => {
 .node-diag-summary {
   background: var(--bg-color);
   border: 1px solid var(--border-color);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.node-list {
+  max-height: 460px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .node-row {

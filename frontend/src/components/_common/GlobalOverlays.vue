@@ -111,8 +111,17 @@ const minimizeAll = () => {
       :loading="kernelApiStore.restarting"
       icon="restart"
       type="primary"
-      class="rounded-full w-42 h-42 shadow"
+      class="restart-pill shadow"
       @click="handleRestartCore"
-    />
+    >
+      {{ $t('common.restartNeeded') }}
+    </Button>
   </div>
 </template>
+
+<style scoped>
+.restart-pill {
+  border-radius: 999px;
+  padding: 8px 16px;
+}
+</style>
