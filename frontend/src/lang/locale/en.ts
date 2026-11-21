@@ -1056,6 +1056,15 @@ export default {
     },
     fontFamily: 'Font-Family',
     resetFont: 'Reset Font-Family',
+    font: {
+      system: 'System Default',
+      modern: 'Modern Sans',
+      rounded: 'Rounded',
+      serif: 'Editorial Serif',
+      mono: 'Geek Mono',
+      custom: 'Custom',
+      customPlaceholder: 'Enter CSS font-family, e.g. "Inter", sans-serif',
+    },
     lang: {
       name: 'Language',
       load: 'Load language files',

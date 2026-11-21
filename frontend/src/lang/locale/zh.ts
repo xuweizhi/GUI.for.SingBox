@@ -1043,6 +1043,15 @@ export default {
     },
     fontFamily: '字体',
     resetFont: '重置字体',
+    font: {
+      system: '系统默认',
+      modern: '现代无衬线',
+      rounded: '圆润柔和',
+      serif: '书卷衬线',
+      mono: '极客等宽',
+      custom: '自定义',
+      customPlaceholder: '输入 CSS font-family，如 "PingFang SC", sans-serif',
+    },
     lang: {
       name: '语言',
       load: '加载语言文件',

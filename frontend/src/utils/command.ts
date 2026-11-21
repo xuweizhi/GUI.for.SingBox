@@ -1,5 +1,6 @@
 import {
   ColorOptions,
+  FontPresetOptions,
   NavLayoutOptions,
   ThemeOptions,
   UiDensityOptions,
@@ -183,6 +184,15 @@ export const getCommands = () => {
             label: density.label,
             cmd: density.value,
             handler: () => (appSettings.app.uiDensity = density.value),
+          })),
+        },
+        {
+          label: 'settings.fontFamily',
+          cmd: 'Font',
+          children: FontPresetOptions.map((font) => ({
+            label: font.label,
+            cmd: font.key,
+            handler: () => (appSettings.app.fontFamily = font.value),
           })),
         },
         {

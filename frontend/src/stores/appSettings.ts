@@ -274,7 +274,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
       document.documentElement.style.setProperty('--secondary-color', secondary)
     },
     fontFamily(fontFamily: string) {
-      document.body.style.fontFamily = fontFamily
+      document.body.style.fontFamily = fontFamily.trim() || DefaultFontFamily
     },
     uiStyle(style: App.UiStyle) {
       document.body.setAttribute('ui-style', VALID_UI_STYLES.has(style) ? style : UiStyle.Modern)

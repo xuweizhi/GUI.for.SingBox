@@ -37,6 +37,38 @@ export const RulesetHubFilePath = 'data/.cache/ruleset-list.json'
 export const DefaultFontFamily =
   'system-ui, "Microsoft YaHei UI", "Source Han Sans CN", "Twemoji Mozilla", sans-serif'
 
+export const FontPresetOptions = [
+  {
+    key: 'system',
+    label: 'settings.font.system',
+    value: DefaultFontFamily,
+  },
+  {
+    key: 'modern',
+    label: 'settings.font.modern',
+    value:
+      '"Inter", "SF Pro Text", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans SC", "Segoe UI", sans-serif',
+  },
+  {
+    key: 'rounded',
+    label: 'settings.font.rounded',
+    value:
+      '"SF Pro Rounded", "Quicksand", "Hiragino Maru Gothic ProN", "YouYuan", "PingFang SC", "Noto Sans SC", ui-rounded, sans-serif',
+  },
+  {
+    key: 'serif',
+    label: 'settings.font.serif',
+    value:
+      '"Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", Georgia, "Times New Roman", serif',
+  },
+  {
+    key: 'mono',
+    label: 'settings.font.mono',
+    value:
+      '"JetBrains Mono", "Fira Code", "Cascadia Code", "Sarasa Mono SC", "SF Mono", Consolas, ui-monospace, monospace',
+  },
+] as const
+
 export const Colors = {
   [Color.Default]: {
     primary: '#2563eb',

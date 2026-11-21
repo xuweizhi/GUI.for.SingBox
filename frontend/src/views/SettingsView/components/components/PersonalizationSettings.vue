@@ -1,9 +1,12 @@
 <script lang="ts" setup>
+import { computed, ref, watch } from 'vue'
+
 import { BrowserOpenURL } from '@/bridge'
 import {
   ColorOptions,
   Colors,
   DefaultFontFamily,
+  FontPresetOptions,
   NavLayoutOptions,
   ThemeOptions,
   UiDensityOptions,
@@ -25,7 +28,31 @@ const pages = routes.flatMap((route) => {
 const appStore = useAppStore()
 const appSettings = useAppSettingsStore()
 
+const matchedFontPreset = computed(
+  () => FontPresetOptions.find((opt) => opt.value === appSettings.app.fontFamily)?.key ?? 'custom',
+)
+const isCustomFont = ref(matchedFontPreset.value === 'custom')
+
+watch(
+  () => appSettings.app.fontFamily,
+  () => {
+    isCustomFont.value = matchedFontPreset.value === 'custom'
+  },
+)
+
+const activeFontKey = computed(() => (isCustomFont.value ? 'custom' : matchedFontPreset.value))
+
+const selectFontPreset = (value: string) => {
+  isCustomFont.value = false
+  appSettings.app.fontFamily = value
+}
+
+const selectCustomFont = () => {
+  isCustomFont.value = true
+}
+
 const resetFontFamily = () => {
+  isCustomFont.value = false
   appSettings.app.fontFamily = DefaultFontFamily
 }
 
@@ -169,17 +196,53 @@ const swatchBackground = (color: App.Color) => {
 
     <div class="settings-row">
       <div>{{ $t('settings.fontFamily') }}</div>
-      <Input v-model="appSettings.app.fontFamily" editable class="text-14">
-        <template #suffix>
-          <Button
-            v-tips="'settings.resetFont'"
-            type="text"
-            size="small"
-            icon="reset"
-            @click="resetFontFamily"
-          />
-        </template>
-      </Input>
+      <div class="font-picker-block">
+        <div class="font-chips">
+          <button
+            v-for="opt in FontPresetOptions"
+            :key="opt.key"
+            type="button"
+            class="font-chip"
+            :class="{ 'is-active': activeFontKey === opt.key }"
+            :aria-pressed="activeFontKey === opt.key"
+            @click="selectFontPreset(opt.value)"
+          >
+            <span class="font-chip__sample" :style="{ fontFamily: opt.value }" aria-hidden="true">
+              Aa
+            </span>
+            <span :style="{ fontFamily: opt.value }">{{ $t(opt.label) }}</span>
+          </button>
+          <button
+            type="button"
+            class="font-chip"
+            :class="{ 'is-active': activeFontKey === 'custom' }"
+            :aria-pressed="activeFontKey === 'custom'"
+            @click="selectCustomFont"
+          >
+            <Icon icon="edit" :size="13" color="currentColor" />
+            <span>{{ $t('settings.font.custom') }}</span>
+          </button>
+        </div>
+        <div v-if="activeFontKey === 'custom'" class="font-custom-input">
+          <Input
+            v-model="appSettings.app.fontFamily"
+            :placeholder="$t('settings.font.customPlaceholder')"
+            auto-size
+            clearable
+            class="w-full text-13"
+          >
+            <template #suffix>
+              <Button
+                v-tips="'settings.resetFont'"
+                type="text"
+                size="small"
+                icon="reset"
+                @click="resetFontFamily"
+              />
+            </template>
+          </Input>
+        </div>
+      </div>
     </div>
 
     <div class="settings-row">
@@ -496,6 +559,71 @@ const swatchBackground = (color: App.Color) => {
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.45);
   flex-shrink: 0;
+}
+
+.font-picker-block {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 8px;
+}
+
+.font-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.font-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--control-radius, 8px);
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-color) 65%, var(--surface-bg));
+  color: var(--color);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    background-color 0.14s ease,
+    color 0.14s ease,
+    transform 0.12s ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--accent-text) 55%, var(--border-color));
+    transform: translateY(-1px);
+  }
+
+  &.is-active {
+    border-color: var(--accent-text);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    box-shadow: var(--active-indicator-shadow);
+    font-weight: 600;
+  }
+}
+
+.font-chip__sample {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.font-custom-input {
+  width: 100%;
+  max-width: 440px;
 }
 
 @media (max-width: 900px) {

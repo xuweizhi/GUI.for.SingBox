@@ -91,6 +91,8 @@ vi.mock('@/stores', () => {
       color: 'default',
       primaryColor: '#2563eb',
       secondaryColor: '#1d4ed8',
+      fontFamily:
+        'system-ui, "Microsoft YaHei UI", "Source Han Sans CN", "Twemoji Mozilla", sans-serif',
       pages: [
         'Overview',
         'NetCheck',
@@ -166,6 +168,8 @@ describe('layout and workspace interactions', () => {
     mocks.appSettingsStore.app.navLayout = 'sidebar'
     mocks.appSettingsStore.app.uiDensity = 'comfortable'
     mocks.appSettingsStore.app.color = 'default'
+    mocks.appSettingsStore.app.fontFamily =
+      'system-ui, "Microsoft YaHei UI", "Source Han Sans CN", "Twemoji Mozilla", sans-serif'
     mocks.rulesetsStore.addRuleset.mockReset()
     mocks.messageError.mockReset()
   })
@@ -282,6 +286,11 @@ describe('layout and workspace interactions', () => {
           Icon: true,
           Radio: true,
           ColorPicker: true,
+          Button: true,
+          Input: {
+            props: ['modelValue'],
+            template: '<input class="custom-font-input" :value="modelValue" />',
+          },
           Dropdown: {
             template: '<div><slot :show="true" /><slot name="overlay" /></div>',
           },
@@ -303,6 +312,15 @@ describe('layout and workspace interactions', () => {
     expect(layoutButtons).toHaveLength(2)
     await layoutButtons[1]!.trigger('click')
     expect(mocks.appSettingsStore.app.navLayout).toBe('topnav')
+
+    const fontButtons = wrapper.findAll('.font-chip')
+    expect(fontButtons).toHaveLength(6)
+    await fontButtons[4]!.trigger('click')
+    expect(mocks.appSettingsStore.app.fontFamily).toContain('JetBrains Mono')
+    expect(wrapper.find('.custom-font-input').exists()).toBe(false)
+
+    await fontButtons[5]!.trigger('click')
+    expect(wrapper.find('.custom-font-input').exists()).toBe(true)
   })
 
   it('renders horizontal topnav links in AppShell when navLayout is topnav', async () => {
