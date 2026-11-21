@@ -9,6 +9,7 @@ import { useBool } from '@/hooks'
 import { useAppSettingsStore, useKernelApiStore } from '@/stores'
 import {
   addToRuleSet,
+  confirm,
   formatBytes,
   formatRelativeTime,
   getDomainSuffixes,
@@ -33,8 +34,69 @@ const TrafficCache: Record<string, TrafficCacheType> = {}
 
 const appSettingsStore = useAppSettingsStore()
 
-const columns = computed(() =>
-  (
+const openDetails = (record: Record<string, any>) => {
+  details.value = JSON.stringify(record, null, 2)
+  toggleDetails()
+}
+
+const closeSingleConnection = async (record: Record<string, any>) => {
+  if (!isActive.value) return
+  try {
+    await deleteConnection(record.id)
+  } catch (error: any) {
+    console.log(error)
+    message.error(error)
+  }
+}
+
+const addRecordToRuleset = async (
+  ruleset: 'direct' | 'proxy' | 'reject',
+  record: Record<string, any>,
+) => {
+  const options: PickerItem<Record<string, any>[]>[] = []
+  if (record.metadata.host) {
+    options.push({
+      label: t('kernel.rules.type.domain'),
+      value: { domain: record.metadata.host } as any,
+      description: record.metadata.host,
+    })
+    getDomainSuffixes(record.metadata.host).forEach((suffix) => {
+      options.push({
+        label: t('kernel.rules.type.domain_suffix'),
+        value: {
+          domain_suffix: suffix,
+        } as any,
+        description: suffix,
+      })
+    })
+  }
+  if (record.metadata.destinationIP) {
+    const prefix = isValidIPv6(record.metadata.destinationIP) ? 128 : 32
+    options.push({
+      label: t('kernel.rules.type.ip_cidr'),
+      value: { ip_cidr: `${record.metadata.destinationIP}/${prefix}` } as any,
+      description: record.metadata.destinationIP,
+    })
+  }
+  if (record.metadata.processPath) {
+    options.push({
+      label: t('kernel.rules.type.process_path'),
+      value: { process_path: record.metadata.processPath } as any,
+      description: record.metadata.processPath,
+    })
+  }
+  const payloads = await picker.multi('rulesets.selectRuleType', options)
+  try {
+    await addToRuleSet(ruleset, payloads)
+    message.success('common.success')
+  } catch (error: any) {
+    message.error(error)
+    console.log(error)
+  }
+}
+
+const columns = computed(() => [
+  ...(
     [
       {
         title: 'home.connections.type',
@@ -146,7 +208,13 @@ const columns = computed(() =>
       appSettingsStore.app.connections.order.indexOf(a.key) -
       appSettingsStore.app.connections.order.indexOf(b.key),
   ),
-)
+  {
+    title: 'common.more',
+    align: 'center',
+    key: '__actions',
+    minWidth: '96px',
+  } as Column,
+])
 
 const columnTitleMap = computed(() => {
   const map: Record<string, string | undefined> = {}
@@ -159,22 +227,11 @@ const columnTitleMap = computed(() => {
 const menu: App.Menu[] = [
   {
     label: 'common.details',
-    handler: (record: Record<string, any>) => {
-      details.value = JSON.stringify(record, null, 2)
-      toggleDetails()
-    },
+    handler: openDetails,
   },
   {
     label: 'home.connections.close',
-    handler: async (record: Record<string, any>) => {
-      if (!isActive.value) return
-      try {
-        await deleteConnection(record.id)
-      } catch (error: any) {
-        console.log(error)
-        message.error(error)
-      }
-    },
+    handler: closeSingleConnection,
   },
   ...(
     [
@@ -182,56 +239,13 @@ const menu: App.Menu[] = [
       ['home.connections.addToProxy', 'proxy'],
       ['home.connections.addToReject', 'reject'],
     ] as const
-  ).map(([label, ruleset]) => {
-    return {
-      label,
-      handler: async (record: Record<string, any>) => {
-        const options: PickerItem<Record<string, any>[]>[] = []
-        if (record.metadata.host) {
-          options.push({
-            label: t('kernel.rules.type.domain'),
-            value: { domain: record.metadata.host } as any,
-            description: record.metadata.host,
-          })
-          getDomainSuffixes(record.metadata.host).forEach((suffix) => {
-            options.push({
-              label: t('kernel.rules.type.domain_suffix'),
-              value: {
-                domain_suffix: suffix,
-              } as any,
-              description: suffix,
-            })
-          })
-        }
-        if (record.metadata.destinationIP) {
-          const prefix = isValidIPv6(record.metadata.destinationIP) ? 128 : 32
-          options.push({
-            label: t('kernel.rules.type.ip_cidr'),
-            value: { ip_cidr: `${record.metadata.destinationIP}/${prefix}` } as any,
-            description: record.metadata.destinationIP,
-          })
-        }
-        if (record.metadata.processPath) {
-          options.push({
-            label: t('kernel.rules.type.process_path'),
-            value: { process_path: record.metadata.processPath } as any,
-            description: record.metadata.processPath,
-          })
-        }
-        const payloads = await picker.multi('rulesets.selectRuleType', options)
-        try {
-          await addToRuleSet(ruleset, payloads)
-          message.success('common.success')
-        } catch (error: any) {
-          message.error(error)
-          console.log(error)
-        }
-      },
-    }
-  }),
+  ).map(([label, ruleset]) => ({
+    label,
+    handler: (record: Record<string, any>) => addRecordToRuleset(ruleset, record),
+  })),
 ]
 
-const details = ref()
+const details = ref('')
 const isActive = ref(true)
 const keywords = ref('')
 const dataSource = ref<(CoreApiConnectionsData['connections'][0] & TrafficCacheType)[]>([])
@@ -257,6 +271,17 @@ const filteredConnections = computed(() =>
 
 const handleCloseAll = async () => {
   const selected = [...filteredConnections.value]
+  if (!selected.length) return
+  try {
+    await confirm(
+      t('home.connections.closeVisible'),
+      t('common.confirmCloseConnections', [selected.length]),
+      { type: 'text', okText: 'home.connections.close', danger: true },
+    )
+  } catch {
+    return
+  }
+
   try {
     await Promise.all(selected.map((connection) => deleteConnection(connection.id)))
     const ids = new Set(selected.map((connection) => connection.id))
@@ -309,7 +334,7 @@ onUnmounted(() => {
 
 <template>
   <div class="flex flex-col h-full">
-    <div class="flex flex-wrap gap-4 items-center">
+    <div class="flex flex-wrap gap-6 items-center">
       <Radio
         v-model="isActive"
         :options="[
@@ -322,7 +347,7 @@ onUnmounted(() => {
         v-model="keywords"
         clearable
         size="small"
-        placeholder="common.keywords"
+        :placeholder="t('common.keywords')"
         class="flex-1 min-w-128"
       />
       <Button
@@ -336,16 +361,19 @@ onUnmounted(() => {
         }}{{ selectedFilterCount ? ' (' + selectedFilterCount + ')' : '' }}
       </Button>
       <Button
+        v-tips="isPause ? 'common.resume' : 'common.pause'"
+        :aria-label="t(isPause ? 'common.resume' : 'common.pause')"
         :icon="isPause ? 'play' : 'pause'"
         size="small"
         type="text"
-        class="ml-8"
         @click="togglePause"
       />
       <Button
         v-if="isActive"
         v-tips="'home.connections.closeVisible'"
+        :aria-label="t('home.connections.closeVisible')"
         icon="close"
+        icon-color="var(--danger-color)"
         size="small"
         type="text"
         @click="handleCloseAll"
@@ -353,12 +381,20 @@ onUnmounted(() => {
       <Button
         v-else
         v-tips="'home.connections.clearVisible'"
+        :aria-label="t('home.connections.clearVisible')"
         icon="clear"
         size="small"
         type="text"
         @click="handleClearClosedConns"
       />
-      <Button icon="settings" size="small" type="text" @click="toggleSettings" />
+      <Button
+        v-tips="'home.connections.sort'"
+        :aria-label="t('home.connections.sort')"
+        icon="settings"
+        size="small"
+        type="text"
+        @click="toggleSettings"
+      />
     </div>
     <div v-if="showFilters" class="connection-filters mt-8">
       <div
@@ -368,7 +404,7 @@ onUnmounted(() => {
         :aria-label="t(label)"
         class="flex flex-col gap-2"
       >
-        <span class="text-12">{{ t(label) }}</span>
+        <span class="text-12 text-muted">{{ t(label) }}</span>
         <MultipleSelect
           :model-value="filters[field] || []"
           :options="filterOptions[field]"
@@ -388,7 +424,84 @@ onUnmounted(() => {
       :menu="menu"
       :data-source="filteredConnections"
       sort="start"
-    />
+    >
+      <template #__actions="{ record }">
+        <div class="inline-flex items-center gap-2">
+          <Button
+            v-tips="'common.details'"
+            :aria-label="t('common.details')"
+            icon="preview"
+            :icon-size="14"
+            size="small"
+            type="text"
+            @click.stop="openDetails(record)"
+          />
+          <Button
+            v-if="isActive"
+            v-tips="'home.connections.close'"
+            :aria-label="t('home.connections.close')"
+            icon="close"
+            :icon-size="14"
+            icon-color="var(--danger-color)"
+            size="small"
+            type="text"
+            @click.stop="closeSingleConnection(record)"
+          />
+          <Dropdown>
+            <Button
+              :aria-label="t('common.more')"
+              icon="more"
+              :icon-size="14"
+              size="small"
+              type="text"
+            />
+            <template #overlay="{ close }">
+              <div class="flex flex-col gap-2 min-w-128 p-6">
+                <Button
+                  type="text"
+                  size="small"
+                  class="justify-start"
+                  @click="
+                    () => {
+                      addRecordToRuleset('direct', record)
+                      close()
+                    }
+                  "
+                >
+                  {{ t('home.connections.addToDirect') }}
+                </Button>
+                <Button
+                  type="text"
+                  size="small"
+                  class="justify-start"
+                  @click="
+                    () => {
+                      addRecordToRuleset('proxy', record)
+                      close()
+                    }
+                  "
+                >
+                  {{ t('home.connections.addToProxy') }}
+                </Button>
+                <Button
+                  type="text"
+                  size="small"
+                  class="justify-start"
+                  @click="
+                    () => {
+                      addRecordToRuleset('reject', record)
+                      close()
+                    }
+                  "
+                >
+                  {{ t('home.connections.addToReject') }}
+                </Button>
+              </div>
+            </template>
+          </Dropdown>
+        </div>
+      </template>
+    </Table>
   </div>
 
   <Modal
@@ -400,7 +513,7 @@ onUnmounted(() => {
     max-width="80"
     mask-closable
   >
-    <CodeEditor v-model="details" />
+    <CodeViewer :model-value="details" lang="json" />
   </Modal>
 
   <Modal
@@ -417,9 +530,12 @@ onUnmounted(() => {
       </Button>
     </template>
     <div v-draggable="[appSettingsStore.app.connections.order, DraggableOptions]">
-      <Card v-for="column in appSettingsStore.app.connections.order" :key="column" class="mb-2">
-        <div class="flex items-center justify-between py-2">
-          <span class="font-bold">{{ t(columnTitleMap[column] || column) }}</span>
+      <Card v-for="column in appSettingsStore.app.connections.order" :key="column" class="mb-6">
+        <div class="flex items-center justify-between py-6 gap-8">
+          <div class="flex items-center gap-8">
+            <Icon icon="drag" :size="15" color="var(--muted-color)" class="cursor-move" />
+            <span class="font-bold">{{ t(columnTitleMap[column] || column) }}</span>
+          </div>
           <Switch v-model="appSettingsStore.app.connections.visibility[column]" />
         </div>
       </Card>

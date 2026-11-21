@@ -16,11 +16,12 @@ const modalSlots = {
     withDirectives(
       h(Button, {
         type: 'text',
-        icon: 'file',
+        size: 'small',
+        icon: 'copy',
         onClick: async () => {
           if (logsStore.isEmpty) return
           await ClipboardSetText(logsStore.kernelLogs.join('\n'))
-          message.success('common.success')
+          message.success('common.copied')
         },
       }),
       [[vTips, 'common.copy']],
@@ -39,17 +40,21 @@ onMounted(() => {
 <template>
   <div class="h-full overflow-y-auto">
     <Empty v-if="logsStore.isEmpty" description="home.overview.noLogs" />
-    <template v-else>
+    <div v-else class="flex flex-col gap-4">
       <div
         v-for="(log, i) in logsStore.kernelLogs"
         :key="i"
-        :style="{
-          background: 'var(--card-bg)',
-        }"
-        class="text-12 my-4 py-2 px-4"
+        class="kernel-log-line select-text font-mono text-12 py-6 px-8 rounded-6 break-all"
       >
         {{ log }}
       </div>
-    </template>
+    </div>
   </div>
 </template>
+
+<style lang="less" scoped>
+.kernel-log-line {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+}
+</style>

@@ -10,7 +10,7 @@ interface Props {
 
 withDefaults(defineProps<Props>(), {
   color: 'default',
-  closable: false,
+  closeable: false,
   size: 'default',
   bordered: true,
 })
@@ -28,69 +28,76 @@ const handleClose = () => {
   <div
     v-if="show"
     :class="['color-' + color, 'size-' + size, { 'border-0': !bordered }]"
-    class="gui-tag px-8 mx-4 rounded-6 inline-block text-12 whitespace-nowrap inline-flex items-center"
+    class="gui-tag px-8 mx-4 rounded-6 text-12 whitespace-nowrap inline-flex items-center"
   >
     <slot></slot>
     <Icon
       v-if="closeable"
       :size="size === 'small' ? 12 : 14"
       icon="close"
-      class="ml-2"
-      @click="handleClose"
+      color="currentColor"
+      class="ml-4 cursor-pointer"
+      @click.stop="handleClose"
     />
   </div>
 </template>
 
 <style lang="less" scoped>
+.gui-tag {
+  line-height: 1.5;
+  font-weight: 500;
+}
+
 .color-cyan {
-  color: #22a3a7;
-  background-color: #e6fffb;
-  border: 1px solid #22a3a7;
+  color: var(--tag-cyan-color);
+  background-color: var(--tag-cyan-bg);
+  border: 1px solid var(--tag-cyan-border);
 }
 .color-green {
-  color: #389e0d;
-  background-color: #f6ffed;
-  border: 1px solid #389e0d;
+  color: var(--tag-green-color);
+  background-color: var(--tag-green-bg);
+  border: 1px solid var(--tag-green-border);
 }
 .color-red {
-  color: #d52e3b;
-  background-color: #fff1f0;
-  border: 1px solid #d52e3b;
+  color: var(--tag-red-color);
+  background-color: var(--tag-red-bg);
+  border: 1px solid var(--tag-red-border);
 }
 .color-default {
-  color: #3d3d3d;
-  background-color: #ffffff;
-  border: 1px solid #898989;
+  color: var(--tag-default-color);
+  background-color: var(--tag-default-bg);
+  border: 1px solid var(--tag-default-border);
 }
 .color-primary {
   color: var(--btn-primary-color);
   background-color: var(--primary-color);
-  border: 1px solid var(--secondary-color);
+  border: 1px solid var(--primary-color);
 }
 .color-orange {
-  color: #d46b08;
-  background-color: #fff7e6;
-  border: 1px solid #d46b08;
+  color: var(--tag-orange-color);
+  background-color: var(--tag-orange-bg);
+  border: 1px solid var(--tag-orange-border);
 }
 .color-gold {
-  color: #d48806;
-  background-color: #fffbe6;
-  border: 1px solid #d48806;
+  color: var(--tag-gold-color);
+  background-color: var(--tag-gold-bg);
+  border: 1px solid var(--tag-gold-border);
 }
 .color-blue {
-  color: #0958d9;
-  background-color: #e6f4ff;
-  border: 1px solid #0958d9;
+  color: var(--tag-blue-color);
+  background-color: var(--tag-blue-bg);
+  border: 1px solid var(--tag-blue-border);
 }
 .color-purple {
-  color: #531dab;
-  background-color: #f9f0ff;
-  border: 1px solid #531dab;
+  color: var(--tag-purple-color);
+  background-color: var(--tag-purple-bg);
+  border: 1px solid var(--tag-purple-border);
 }
 
 .size-small {
-  padding: 0 4px;
+  padding: 1px 6px;
   margin: 0 2px;
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.4;
 }
 </style>

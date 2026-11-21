@@ -30,15 +30,20 @@ const icon = computed(() => iconMap[props.icon] as any)
 
 <template>
   <Transition name="slide-down" appear>
-    <div class="gui-message flex items-center p-8 pl-16 rounded-8 my-4 shadow">
+    <div
+      role="status"
+      aria-live="polite"
+      class="gui-message flex items-center gap-8 py-8 pl-14 pr-8 rounded-8 my-4"
+    >
       <Icon class="shrink-0" :icon="icon" />
-      <div class="text-14 pl-12 break-all">{{ t(content) }}</div>
+      <div class="text-14 break-all">{{ t(content) }}</div>
       <Button
         icon="close"
-        :icon-size="10"
+        :icon-size="12"
+        :aria-label="t('common.close')"
         type="text"
         size="small"
-        class="close px-4 invisible"
+        class="close px-4 shrink-0"
         @click="$emit('close')"
       />
     </div>
@@ -47,11 +52,20 @@ const icon = computed(() => iconMap[props.icon] as any)
 
 <style lang="less" scoped>
 .gui-message {
+  pointer-events: auto;
+  max-width: min(560px, calc(100vw - 24px));
   background: var(--toast-bg);
-  &:hover {
-    .close {
-      visibility: visible;
-    }
+  color: var(--color);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+
+  .close {
+    opacity: 0.55;
+    transition: opacity 0.16s ease;
+  }
+
+  &:hover .close {
+    opacity: 1;
   }
 }
 </style>

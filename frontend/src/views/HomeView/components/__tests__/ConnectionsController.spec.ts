@@ -21,7 +21,9 @@ vi.mock('@/stores', () => ({
     },
   }),
 }))
-vi.mock('@/utils', () => ({}))
+vi.mock('@/utils', () => ({
+  confirm: vi.fn().mockResolvedValue(true),
+}))
 vi.mock('@/constant/app', () => ({ DraggableOptions: {} }))
 vi.mock('@/constant/kernel', () => ({ DefaultConnections: () => ({}) }))
 vi.mock('@/hooks', async () => {
@@ -54,6 +56,9 @@ it('combines live filters, closes only matching IDs, and carries the filters ove
         },
         Modal: true,
         CodeEditor: true,
+        CodeViewer: true,
+        Dropdown: true,
+        Icon: true,
         Card: true,
         Switch: true,
       },

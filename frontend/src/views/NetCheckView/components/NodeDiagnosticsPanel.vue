@@ -21,8 +21,15 @@ const groupOptions = computed(() =>
 
 const displayChain = computed(() => {
   const primary = props.controller.primary.value
-  return primary.chain.join(' -> ')
+  return primary.chain.join(' → ')
 })
+
+const delayColor = (delay?: number | null) => {
+  if (!delay) return 'var(--muted-color)'
+  if (delay < 500) return 'var(--level-1-color)'
+  if (delay < 1000) return 'var(--level-2-color)'
+  return 'var(--level-3-color)'
+}
 
 watchEffect(() => {
   if (!props.coreReady) return
@@ -44,6 +51,7 @@ watchEffect(() => {
         data-action="test-group"
         icon="speedTest"
         size="small"
+        type="primary"
         @click="controller.testGroup()"
       >
         {{ t('netCheck.node.testGroup') }}
@@ -58,43 +66,56 @@ watchEffect(() => {
       </Button>
     </template>
 
-    <div v-if="!coreReady" class="py-8 text-12">
+    <div v-if="!coreReady" class="py-8 text-13 text-muted">
       {{ t('netCheck.node.coreUnavailable') }}
     </div>
     <template v-else>
-      <div class="mb-12">
-        <div class="font-bold line-clamp-1">
-          {{ controller.primary.value.groupName || t('home.nodes.noSelectableNode') }}
+      <div class="node-diag-summary rounded-8 p-12 mb-12">
+        <div class="flex flex-wrap items-center justify-between gap-8">
+          <div class="font-bold text-15 line-clamp-1">
+            {{ controller.primary.value.groupName || t('home.nodes.noSelectableNode') }}
+          </div>
+          <div
+            v-if="controller.primary.value.delay"
+            class="text-12 font-bold font-mono"
+            :style="{ color: delayColor(controller.primary.value.delay) }"
+          >
+            {{ controller.primary.value.delay }} ms
+          </div>
         </div>
-        <div v-if="displayChain" class="text-12 mt-4 line-clamp-1">
+        <div v-if="displayChain" class="text-12 text-muted mt-4 font-mono line-clamp-1">
           {{ displayChain }}
         </div>
-        <div v-if="controller.primary.value.delay" class="text-12 mt-4">
-          {{ controller.primary.value.delay }} ms
-        </div>
-        <div v-if="runtimeDetails" data-runtime-node class="text-12 mt-4 flex flex-col gap-4">
+        <div v-if="runtimeDetails" data-runtime-node class="text-12 mt-8 flex flex-col gap-4">
           <div v-if="runtimeDetails.kind === 'endpoint'">{{ t('netCheck.node.endpoint') }}</div>
           <template v-if="runtimeDetails.via">
             <div>{{ t('netCheck.node.upstreamDns', [runtimeDetails.via]) }}</div>
-            <div>
+            <div class="font-mono">
               {{ t('netCheck.node.transportChain') }} {{ runtimeDetails.chain.join(' → ') }}
             </div>
           </template>
           <div v-else>
             {{ t('netCheck.node.nodeDns') }}
-            {{ runtimeDetails.resolver || t('netCheck.node.unknownResolver') }}
-            <span v-if="runtimeDetails.resolverAddress"
-              >({{ runtimeDetails.resolverAddress }})</span
-            >
+            <span class="font-bold">
+              {{ runtimeDetails.resolver || t('netCheck.node.unknownResolver') }}
+            </span>
+            <span v-if="runtimeDetails.resolverAddress" class="text-muted font-mono">
+              ({{ runtimeDetails.resolverAddress }})
+            </span>
           </div>
-          <div v-if="runtimeDetails.incomplete">{{ t('netCheck.node.incompleteChain') }}</div>
+          <div v-if="runtimeDetails.incomplete" class="text-danger">
+            {{ t('netCheck.node.incompleteChain') }}
+          </div>
         </div>
-        <div v-else-if="runtimeUnavailable" class="text-12 mt-4">
+        <div v-else-if="runtimeUnavailable" class="text-12 text-muted mt-6">
           {{ t('netCheck.node.runtimeUnavailable') }}
         </div>
       </div>
 
-      <div v-if="controller.stale.value && controller.refreshError.value" class="mb-12 text-12">
+      <div
+        v-if="controller.stale.value && controller.refreshError.value"
+        class="mb-12 text-12 text-danger"
+      >
         {{ controller.refreshError.value }}
       </div>
 
@@ -114,9 +135,11 @@ watchEffect(() => {
           v-for="node in controller.nodes.value"
           :key="node.name"
           :data-node="node.name"
-          class="node-row rounded-8 p-8"
+          :class="{ 'is-selected': node.name === controller.selectedGroup.value?.now }"
+          class="node-row rounded-8 p-10 cursor-pointer"
           role="button"
           tabindex="0"
+          :aria-pressed="node.name === controller.selectedGroup.value?.now"
           @click="controller.switchNode(node.name)"
           @keydown.enter.prevent="controller.switchNode(node.name)"
           @keydown.space.prevent="controller.switchNode(node.name)"
@@ -126,7 +149,7 @@ watchEffect(() => {
               <div class="font-bold line-clamp-1">
                 {{ node.name }}
               </div>
-              <div class="text-12 mt-2">
+              <div class="text-12 text-muted mt-2">
                 {{ node.proxy?.type || t('home.nodes.unknownType') }}
               </div>
             </div>
@@ -137,11 +160,20 @@ watchEffect(() => {
               class="delay-button"
               @click.stop="controller.testNode(node.name)"
             >
-              <span v-if="node.delayStatus === 'success'">{{ node.delay }} ms</span>
-              <span v-else-if="node.delayStatus === 'failed'">
+              <span v-if="controller.testingNodes.value.has(node.name)" class="text-muted">
+                ...
+              </span>
+              <span
+                v-else-if="node.delayStatus === 'success'"
+                class="font-bold font-mono"
+                :style="{ color: delayColor(node.delay) }"
+              >
+                {{ node.delay }} ms
+              </span>
+              <span v-else-if="node.delayStatus === 'failed'" class="text-danger">
                 {{ t('home.nodes.unavailable') }}
               </span>
-              <span v-else>{{ t('home.nodes.untested') }}</span>
+              <span v-else class="text-muted">{{ t('home.nodes.untested') }}</span>
             </button>
           </div>
         </div>
@@ -151,14 +183,42 @@ watchEffect(() => {
 </template>
 
 <style scoped lang="less">
+.node-diag-summary {
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
+}
+
 .node-row {
   border: 1px solid var(--border-color, #e5e7eb);
   background: var(--card-bg, #fff);
+  transition:
+    border-color 0.14s ease,
+    background-color 0.14s ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--accent-text) 50%, var(--border-color));
+    background: var(--card-hover-bg);
+  }
+
+  &.is-selected {
+    border-color: var(--accent-text);
+    background: var(--accent-soft);
+  }
 }
 
 .delay-button {
   border: 0;
+  border-radius: 6px;
+  padding: 4px 8px;
   background: transparent;
+  color: inherit;
+  font-size: 12px;
   white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.14s ease;
+
+  &:hover {
+    background: var(--btn-text-hover-bg);
+  }
 }
 </style>

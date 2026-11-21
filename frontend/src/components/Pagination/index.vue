@@ -10,7 +10,15 @@ interface Props {
 const model = defineModel<number>('current', { default: 1 })
 const props = withDefaults(defineProps<Props>(), { size: 'default', pageSize: 9 })
 
-const pageNum = computed(() => Math.ceil(props.total / props.pageSize))
+const pageNum = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
+const isFirstPage = computed(() => model.value <= 1)
+const isLastPage = computed(() => model.value >= pageNum.value)
+
+const range = (start: number, end: number) => {
+  if (end < start) return []
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i)
+}
+
 const pages = computed(() => {
   const total = pageNum.value
   const current = model.value
@@ -24,11 +32,12 @@ const pages = computed(() => {
   }
 })
 
-const range = (start: number, end: number) => {
-  return Array.from({ length: end - start + 1 }, (_, i) => start + i)
+const handlePrev = () => {
+  if (!isFirstPage.value) model.value = Math.max(1, model.value - 1)
 }
-const handlePrev = () => (model.value = Math.max(1, model.value - 1))
-const handleNext = () => (model.value = Math.min(pageNum.value, model.value + 1))
+const handleNext = () => {
+  if (!isLastPage.value) model.value = Math.min(pageNum.value, model.value + 1)
+}
 const handleJump = (page: number | 'prev' | 'next') => {
   if (typeof page === 'number') {
     model.value = page
@@ -43,19 +52,34 @@ const handleJump = (page: number | 'prev' | 'next') => {
 </script>
 
 <template>
-  <div>
-    <Button icon="arrowLeft" type="text" :size="size" @click="handlePrev" />
-    <Button v-if="pages.length === 0" type="text" :size="size"> ... </Button>
+  <nav class="inline-flex items-center gap-2" aria-label="Pagination">
+    <Button
+      icon="arrowLeft"
+      type="text"
+      :size="size"
+      :disabled="isFirstPage"
+      :aria-label="$t('common.prevStep')"
+      @click="handlePrev"
+    />
+    <Button v-if="pages.length === 0" type="text" :size="size" disabled> ... </Button>
     <Button
       v-for="item in pages"
       :key="item"
       :type="item === model ? 'primary' : 'text'"
       :size="size"
+      :aria-current="item === model ? 'page' : undefined"
       class="min-w-32"
       @click="handleJump(item)"
     >
       {{ item === 'prev' || item === 'next' ? '...' : item }}
     </Button>
-    <Button icon="arrowRight" type="text" :size="size" @click="handleNext" />
-  </div>
+    <Button
+      icon="arrowRight"
+      type="text"
+      :size="size"
+      :disabled="isLastPage"
+      :aria-label="$t('common.nextStep')"
+      @click="handleNext"
+    />
+  </nav>
 </template>

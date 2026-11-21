@@ -7,6 +7,7 @@ import { DraggableOptions, ViewOptions } from '@/constant/app'
 import { RequestProxyMode, View } from '@/enums/app'
 import { useSubscribesStore, useAppSettingsStore, usePluginsStore, useAppStore } from '@/stores'
 import {
+  confirm,
   formatBytes,
   formatRelativeTime,
   debounce,
@@ -80,6 +81,15 @@ const appStore = useAppStore()
 const subscribeStore = useSubscribesStore()
 const appSettingsStore = useAppSettingsStore()
 const pluginsStore = usePluginsStore()
+const keywords = ref('')
+
+const filteredSubscribes = computed(() => {
+  const q = keywords.value.trim().toLowerCase()
+  if (!q) return subscribeStore.subscribes
+  return subscribeStore.subscribes.filter(
+    (s) => s.name.toLowerCase().includes(q) || (s.url || '').toLowerCase().includes(q),
+  )
+})
 
 const generateMenus = (subscription: App.Subscription) => {
   const builtInMenus: App.Menu[] = menuList.map((v) => ({
@@ -166,6 +176,17 @@ const handleEditProxies = (id: string, editor = false) => {
   }
 }
 
+const handleCopySubUrl = async (s: App.Subscription) => {
+  if (!s.url) return
+  await ClipboardSetText(s.url)
+  message.success('common.copied')
+}
+
+const handleEditScript = (id: string) => {
+  const m = modal({ title: 'common.edit', width: '90' })
+  m.setContent(SubscribeScript, { id }).open()
+}
+
 const handleUpdateSub = async (s: App.Subscription, options?: Partial<App.Subscription>) => {
   try {
     await subscribeStore.updateSubscribe(s.id, options)
@@ -191,8 +212,19 @@ const handleRefreshUsage = async (id: string) => {
 
 const handleDeleteSub = async (s: App.Subscription) => {
   try {
+    await confirm(t('common.delete'), t('common.confirmDelete', [s.name]), {
+      type: 'text',
+      okText: 'common.delete',
+      danger: true,
+    })
+  } catch {
+    return
+  }
+
+  try {
     await ignoredError(RemoveFile, s.path)
     await subscribeStore.deleteSubscribe(s.id)
+    message.success('common.success')
   } catch (error: any) {
     console.error('deleteSubscribe: ', error)
     message.error(error)
@@ -239,7 +271,16 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
   </div>
 
   <div v-else class="grid-list-header subscriptions-toolbar">
-    <Radio v-model="appSettingsStore.app.subscribesView" :options="ViewOptions" class="mr-auto" />
+    <Radio v-model="appSettingsStore.app.subscribesView" :options="ViewOptions" />
+    <span class="resource-count-badge">{{ subscribeStore.subscribes.length }}</span>
+    <Input
+      v-model="keywords"
+      size="small"
+      clearable
+      auto-size
+      :placeholder="t('common.search')"
+      class="resource-search mr-auto"
+    />
     <div class="subscriptions-actions">
       <CustomAction :actions="appStore.customActions.subscriptions_header" />
       <Button
@@ -258,12 +299,18 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
     </Button>
   </div>
 
+  <Empty v-if="subscribeStore.subscribes.length > 0 && filteredSubscribes.length === 0" />
+
   <div
-    v-draggable="[subscribeStore.subscribes, { ...DraggableOptions, onUpdate: onSortUpdate }]"
+    v-else-if="subscribeStore.subscribes.length > 0"
+    v-draggable="[
+      subscribeStore.subscribes,
+      { ...DraggableOptions, disabled: Boolean(keywords.trim()), onUpdate: onSortUpdate },
+    ]"
     :class="'grid-list-' + appSettingsStore.app.subscribesView"
   >
     <Card
-      v-for="s in subscribeStore.subscribes"
+      v-for="s in filteredSubscribes"
       :key="s.id"
       v-menu="generateMenus(s)"
       :title="s.name"
@@ -281,7 +328,7 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
           v-if="s.type !== 'File' && s.website"
           v-tips="'subscribe.website'"
           icon="link"
-          color="var(--card-color)"
+          color="var(--muted-color)"
           class="mx-4 cursor-pointer shrink-0"
           @click="BrowserOpenURL(s.website)"
         />
@@ -290,28 +337,119 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
       <template v-if="appSettingsStore.app.subscribesView === View.Grid" #extra>
         <Dropdown>
           <Button
-            type="link"
+            type="text"
             size="small"
             icon="more"
             :aria-label="t('common.more') + ' · ' + s.name"
           />
-          <template #overlay>
-            <div class="flex flex-col gap-4 min-w-64 p-4">
+          <template #overlay="{ close }">
+            <div class="flex flex-col gap-2 min-w-128 p-6">
               <Button
                 :disabled="s.disabled"
                 :loading="s.updating"
-                :type="s.disabled ? 'text' : 'text'"
-                @click="handleUpdateSub(s)"
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    handleUpdateSub(s)
+                    close()
+                  }
+                "
               >
                 {{ t('common.update') }}
               </Button>
-              <Button type="text" @click="handleDisableSub(s)">
+              <Button
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    handleEditProxies(s.id)
+                    close()
+                  }
+                "
+              >
+                {{ t('subscribes.editProxies') }}
+              </Button>
+              <Button
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    handleEditProxies(s.id, true)
+                    close()
+                  }
+                "
+              >
+                {{ t('subscribes.editSourceFile') }}
+              </Button>
+              <Button
+                v-if="s.url"
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    handleCopySubUrl(s)
+                    close()
+                  }
+                "
+              >
+                {{ t('subscribes.copySub') }}
+              </Button>
+              <Button
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    handleEditScript(s.id)
+                    close()
+                  }
+                "
+              >
+                {{ t('subscribes.script') }}
+              </Button>
+              <Divider size="small" />
+              <Button
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    handleDisableSub(s)
+                    close()
+                  }
+                "
+              >
                 {{ s.disabled ? t('common.enable') : t('common.disable') }}
               </Button>
-              <Button type="text" @click="handleShowSubForm(s.id)">
+              <Button
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    handleShowSubForm(s.id)
+                    close()
+                  }
+                "
+              >
                 {{ t('common.edit') }}
               </Button>
-              <Button type="text" @click="handleDeleteSub(s)">
+              <Button
+                type="text"
+                size="small"
+                class="justify-start text-danger"
+                @click="
+                  () => {
+                    close()
+                    handleDeleteSub(s)
+                  }
+                "
+              >
                 {{ t('common.delete') }}
               </Button>
             </div>
@@ -323,11 +461,14 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         <Button
           :disabled="s.disabled"
           :loading="s.updating"
-          :type="s.disabled ? 'text' : 'text'"
+          type="text"
           size="small"
           @click="handleUpdateSub(s)"
         >
           {{ t('common.update') }}
+        </Button>
+        <Button type="text" size="small" @click="handleEditProxies(s.id)">
+          {{ t('subscribes.editProxies') }}
         </Button>
         <Button type="text" size="small" @click="handleDisableSub(s)">
           {{ s.disabled ? t('common.enable') : t('common.disable') }}
@@ -335,40 +476,40 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         <Button type="text" size="small" @click="handleShowSubForm(s.id)">
           {{ t('common.edit') }}
         </Button>
-        <Button type="text" size="small" @click="handleDeleteSub(s)">
+        <Button type="text" size="small" class="text-danger" @click="handleDeleteSub(s)">
           {{ t('common.delete') }}
         </Button>
       </template>
+
       <template v-if="appSettingsStore.app.subscribesView === View.List">
         <div style="margin-bottom: 8px">
           <Progress :percent="clacTrafficPercent(s)" :status="clacTrafficStatus(s)" />
         </div>
-        <div>
-          {{ t('subscribes.proxyCount') }}
-          :
-          {{ s.proxies.length }}
-        </div>
-        <div>
-          {{ t('subscribes.upload') }}
-          :
-          {{ usageKnown(s, 'upload') ? formatBytes(s.upload, 2) : '--' }}
-          /
-          {{ t('subscribes.download') }}
-          :
-          {{ usageKnown(s, 'download') ? formatBytes(s.download, 2) : '--' }}
-          /
-          {{ t('subscribes.total') }}
-          :
-          {{ usageKnown(s, 'total') ? formatBytes(s.total, 2) : '--' }}
-        </div>
-        <div>
-          {{ t('subscribes.expire') }}
-          :
-          {{ s.expire ? formatDate(s.expire, 'YYYY-MM-DD HH:mm:ss') : '--' }}
-          /
-          {{ t('common.updateTime') }}
-          :
-          {{ s.updateTime ? formatDate(s.updateTime, 'YYYY-MM-DD HH:mm:ss') : '--' }}
+        <div class="resource-meta-list">
+          <div>
+            {{ t('subscribes.proxyCount') }}:
+            <span class="resource-meta-value">{{ s.proxies.length }}</span>
+          </div>
+          <div>
+            {{ t('subscribes.upload') }}:
+            <span class="resource-meta-value">
+              {{ usageKnown(s, 'upload') ? formatBytes(s.upload, 2) : '--' }}
+            </span>
+            · {{ t('subscribes.download') }}:
+            <span class="resource-meta-value">
+              {{ usageKnown(s, 'download') ? formatBytes(s.download, 2) : '--' }}
+            </span>
+            · {{ t('subscribes.total') }}:
+            <span class="resource-meta-value">
+              {{ usageKnown(s, 'total') ? formatBytes(s.total, 2) : '--' }}
+            </span>
+          </div>
+          <div>
+            {{ t('subscribes.expire') }}:
+            {{ s.expire ? formatDate(s.expire, 'YYYY-MM-DD HH:mm:ss') : '--' }} ·
+            {{ t('common.updateTime') }}:
+            {{ s.updateTime ? formatDate(s.updateTime, 'YYYY-MM-DD HH:mm:ss') : '--' }}
+          </div>
         </div>
       </template>
       <template v-else>
@@ -391,26 +532,26 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
             />
           </div>
           <div class="subscription-meta">
-            {{ t('subscribes.expire') }}
-            :
+            {{ t('subscribes.expire') }}:
             {{ s.expire ? formatRelativeTime(s.expire) : '--' }}
           </div>
           <div class="subscription-meta">
-            {{ t('common.updateTime') }}
-            :
+            {{ t('common.updateTime') }}:
             {{ s.updateTime ? formatRelativeTime(s.updateTime) : '--' }}
           </div>
           <div class="subscription-meta">
-            {{ t('subscribes.proxyCount') }}: {{ s.proxies.length }}
+            {{ t('subscribes.proxyCount') }}:
+            <span class="resource-meta-value">{{ s.proxies.length }}</span>
           </div>
         </div>
       </template>
-      <div v-if="s.type === 'Http'" class="subscription-usage">
+      <div v-if="s.type === 'Http'" class="subscription-usage mt-6">
         <Button
           type="link"
           size="small"
           :disabled="s.disabled || s.updating"
           :loading="refreshingUsage.has(s.id)"
+          style="padding-left: 0"
           @click="handleRefreshUsage(s.id)"
         >
           {{ t('subscribes.refreshUsage') }}
@@ -433,7 +574,7 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-size: 12px;
   color: var(--muted-color);
 }
@@ -463,17 +604,11 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
 }
 @media (max-width: 700px) {
   .subscriptions-toolbar {
-    display: grid;
-    grid-template-columns: 1fr auto;
+    display: flex;
   }
   .subscriptions-add {
-    grid-column: 2;
-    grid-row: 1;
-    min-height: 40px;
-  }
-  .subscriptions-actions {
-    grid-column: 1 / -1;
-    grid-row: 2;
+    margin-left: auto;
+    min-height: 36px;
   }
 }
 </style>

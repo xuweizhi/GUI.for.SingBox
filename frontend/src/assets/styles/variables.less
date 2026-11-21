@@ -5,6 +5,24 @@
   --primary-color: rgb(0, 89, 214);
   --secondary-color: rgb(5, 62, 142);
 
+  // Semantic Status
+  --danger-color-light: #d93025;
+  --danger-hover-bg-light: #b91c1c;
+  --danger-soft-light: rgba(217, 48, 37, 0.1);
+  --danger-color-dark: #f87171;
+  --danger-hover-bg-dark: #dc2626;
+  --danger-soft-dark: rgba(248, 113, 113, 0.16);
+
+  --success-color-light: #1e8e3e;
+  --success-soft-light: rgba(30, 142, 62, 0.1);
+  --success-color-dark: #4ade80;
+  --success-soft-dark: rgba(74, 222, 128, 0.15);
+
+  --warning-color-light: #b45309;
+  --warning-soft-light: rgba(217, 119, 6, 0.12);
+  --warning-color-dark: #fbbf24;
+  --warning-soft-dark: rgba(251, 191, 36, 0.16);
+
   // Color & BackgroundColor
   --color-light: #253248;
   --bg-color-light: #f4f6fa;
@@ -18,35 +36,49 @@
   --accent-text-dark: color-mix(in srgb, var(--primary-color) 48%, white);
 
   // Scrollbar
-  --scrollbar-track-bg-light: rgb(220, 220, 220);
-  --scrollbar-thumb-bg-light: var(--primary-color);
-  --scrollbar-track-bg-dark: rgb(73, 73, 73);
-  --scrollbar-thumb-bg-dark: var(--primary-color);
+  --scrollbar-track-bg-light: rgba(15, 23, 42, 0.06);
+  --scrollbar-thumb-bg-light: rgba(37, 50, 72, 0.25);
+  --scrollbar-track-bg-dark: rgba(255, 255, 255, 0.05);
+  --scrollbar-thumb-bg-dark: rgba(164, 177, 197, 0.3);
 
   // Button
-  --btn-normal-color-light: #000000;
-  --btn-normal-bg-light: rgb(255, 255, 255);
+  --btn-normal-color-light: #253248;
+  --btn-normal-bg-light: #ffffff;
+  --btn-normal-border-color-light: #cfd8e5;
   --btn-normal-hover-color-light: var(--primary-color);
+  --btn-normal-hover-bg-light: #f8fafd;
   --btn-normal-hover-border-color-light: var(--primary-color);
   --btn-normal-active-color-light: var(--secondary-color);
   --btn-normal-active-border-color-light: var(--secondary-color);
 
-  --btn-normal-color-dark: #000000;
-  --btn-normal-bg-dark: rgb(255, 255, 255);
-  --btn-normal-hover-color-dark: var(--primary-color);
-  --btn-normal-hover-border-color-dark: var(--primary-color);
-  --btn-normal-active-color-dark: var(--secondary-color);
-  --btn-normal-active-border-color-dark: var(--secondary-color);
+  --btn-normal-color-dark: #e7edf5;
+  --btn-normal-bg-dark: #252e3f;
+  --btn-normal-border-color-dark: #3b475d;
+  --btn-normal-hover-color-dark: var(--accent-text);
+  --btn-normal-hover-bg-dark: #2c374c;
+  --btn-normal-hover-border-color-dark: var(--accent-text);
+  --btn-normal-active-color-dark: #ffffff;
+  --btn-normal-active-border-color-dark: var(--accent-text);
 
-  --btn-primary-color-light: rgb(255, 255, 255);
+  --btn-primary-color-light: #ffffff;
   --btn-primary-bg-light: var(--primary-color);
   --btn-primary-hover-bg-light: var(--secondary-color);
   --btn-primary-active-bg-light: var(--primary-color);
 
-  --btn-primary-color-dark: rgb(255, 255, 255);
+  --btn-primary-color-dark: #ffffff;
   --btn-primary-bg-dark: var(--primary-color);
-  --btn-primary-hover-bg-dark: var(--secondary-color);
+  --btn-primary-hover-bg-dark: color-mix(in srgb, var(--primary-color) 82%, white);
   --btn-primary-active-bg-dark: var(--primary-color);
+
+  --btn-danger-color-light: #ffffff;
+  --btn-danger-bg-light: #d93025;
+  --btn-danger-hover-bg-light: #b91c1c;
+  --btn-danger-active-bg-light: #991b1b;
+
+  --btn-danger-color-dark: #ffffff;
+  --btn-danger-bg-dark: #dc2626;
+  --btn-danger-hover-bg-dark: #ef4444;
+  --btn-danger-active-bg-dark: #b91c1c;
 
   --btn-link-color-light: var(--primary-color);
   --btn-link-bg-light: transparent;
@@ -55,121 +87,175 @@
 
   --btn-link-color-dark: var(--accent-text);
   --btn-link-bg-dark: transparent;
-  --btn-link-hover-color-dark: var(--secondary-color);
-  --btn-link-active-color-dark: var(--primary-color);
+  --btn-link-hover-color-dark: color-mix(in srgb, var(--primary-color) 28%, white);
+  --btn-link-active-color-dark: var(--accent-text);
 
-  --btn-text-color-light: rgb(46, 46, 46);
+  --btn-text-color-light: #253248;
   --btn-text-bg-light: transparent;
-  --btn-text-hover-bg-light: rgb(232, 232, 232);
-  --btn-text-active-bg-light: rgb(206, 206, 206);
+  --btn-text-hover-color-light: #182234;
+  --btn-text-hover-bg-light: rgba(37, 50, 72, 0.08);
+  --btn-text-active-color-light: #182234;
+  --btn-text-active-bg-light: rgba(37, 50, 72, 0.14);
 
-  --btn-text-color-dark: rgb(230, 230, 230);
+  --btn-text-color-dark: #e7edf5;
   --btn-text-bg-dark: transparent;
-  --btn-text-hoer-color-dark: #222222;
-  --btn-text-hover-bg-dark: rgba(255, 255, 255, 0.2);
-  --btn-text-active-color-dark: #161616;
-  --btn-text-active-bg-dark: rgba(255, 255, 255, 0.4);
+  --btn-text-hover-color-dark: #ffffff;
+  --btn-text-hover-bg-dark: rgba(255, 255, 255, 0.1);
+  --btn-text-active-color-dark: #ffffff;
+  --btn-text-active-bg-dark: rgba(255, 255, 255, 0.18);
 
   // Radio
-  --radio-normal-color-light: #000;
-  --radio-normal-bg-light: rgba(255, 255, 255, 1);
+  --radio-normal-color-light: #3b4b63;
+  --radio-normal-bg-light: transparent;
   --radio-normal-hover-color-light: var(--primary-color);
-  --radio-primary-color-light: #fff;
+  --radio-primary-color-light: #ffffff;
   --radio-primary-bg-light: var(--primary-color);
   --radio-primary-hover-bg-light: var(--secondary-color);
   --radio-primary-active-bg-light: var(--primary-color);
 
-  --radio-normal-color-dark: #ededed;
-  --radio-normal-bg-dark: rgba(255, 255, 255, 0.06);
-  --radio-normal-hover-color-dark: var(--primary-color);
-  --radio-primary-color-dark: #fff;
+  --radio-normal-color-dark: #cdd7e5;
+  --radio-normal-bg-dark: transparent;
+  --radio-normal-hover-color-dark: var(--accent-text);
+  --radio-primary-color-dark: #ffffff;
   --radio-primary-bg-dark: var(--primary-color);
-  --radio-primary-hover-bg-dark: var(--secondary-color);
+  --radio-primary-hover-bg-dark: color-mix(in srgb, var(--primary-color) 82%, white);
   --radio-primary-active-bg-dark: var(--primary-color);
 
   // Card
   --card-color-light: #253248;
-  --card-bg-light: #fff;
-  --card-hover-bg-light: #fff;
+  --card-bg-light: #ffffff;
+  --card-hover-bg-light: #ffffff;
   --card-active-bg-light: #f7f9fc;
 
-  --card-color-dark: rgb(255, 255, 255);
+  --card-color-dark: #e7edf5;
   --card-bg-dark: #202735;
-  --card-hover-bg-dark: #242d3c;
-  --card-active-bg-dark: rgba(255, 255, 255, 0.04);
+  --card-hover-bg-dark: #252e3f;
+  --card-active-bg-dark: #293346;
 
   // Progress
-  --progress-bg-light: rgba(0, 0, 0, 0.08);
+  --progress-bg-light: rgba(37, 50, 72, 0.1);
   --progress-inner-bg-light: var(--primary-color);
 
-  --progress-bg-dark: rgba(221, 221, 221, 0.08);
-  --progress-inner-bg-dark: var(--primary-color);
+  --progress-bg-dark: rgba(221, 229, 240, 0.12);
+  --progress-inner-bg-dark: var(--accent-text);
 
   // Dropdown
-  --dropdown-bg-light: rgba(255, 255, 255, 0.8);
-  --dropdown-bg-dark: rgba(62, 62, 62, 0.8);
+  --dropdown-bg-light: rgba(255, 255, 255, 0.96);
+  --dropdown-bg-dark: rgba(32, 39, 53, 0.96);
 
   // Modal
-  --modal-bg-light: #f6f6f6;
-  --modal-mask-bg-light: rgba(255, 255, 255, 0.4);
-  --modal-bg-dark: #343434;
-  --modal-mask-bg-dark: rgba(0, 0, 0, 0.4);
+  --modal-bg-light: #ffffff;
+  --modal-mask-bg-light: rgba(15, 23, 42, 0.42);
+  --modal-bg-dark: #1d2432;
+  --modal-mask-bg-dark: rgba(0, 0, 0, 0.58);
 
   // Switch
   --switch-on-bg-light: var(--primary-color);
   --switch-on-hover-bg-light: var(--secondary-color);
-  --switch-on-dot-bg-light: #fff;
+  --switch-on-dot-bg-light: #ffffff;
   --switch-on-bg-dark: var(--primary-color);
-  --switch-on-hover-bg-dark: var(--secondary-color);
-  --switch-on-dot-bg-dark: #fff;
+  --switch-on-hover-bg-dark: color-mix(in srgb, var(--primary-color) 82%, white);
+  --switch-on-dot-bg-dark: #ffffff;
 
-  --switch-off-bg-light: rgba(0, 0, 0, 0.06);
-  --switch-off-hover-bg-light: rgba(0, 0, 0, 0.1);
-  --switch-off-dot-bg-light: #fff;
-  --switch-off-bg-dark: rgba(255, 255, 255, 0.1);
-  --switch-off-hover-bg-dark: rgba(255, 255, 255, 0.06);
-  --switch-off-dot-bg-dark: #fff;
+  --switch-off-bg-light: rgba(37, 50, 72, 0.16);
+  --switch-off-hover-bg-light: rgba(37, 50, 72, 0.24);
+  --switch-off-dot-bg-light: #ffffff;
+  --switch-off-bg-dark: rgba(255, 255, 255, 0.16);
+  --switch-off-hover-bg-dark: rgba(255, 255, 255, 0.24);
+  --switch-off-dot-bg-dark: #ffffff;
 
   // Input
-  --input-color-light: #000;
-  --input-bg-light: rgba(255, 255, 255, 1);
-  --input-color-dark: #fff;
-  --input-bg-dark: rgba(255, 255, 255, 0.06);
+  --input-color-light: #1e293b;
+  --input-bg-light: #ffffff;
+  --input-color-dark: #e7edf5;
+  --input-bg-dark: #181f2c;
 
   // ColorPicker
-  --color-picker-bg-light: #fff;
-  --color-picker-bg-dark: rgba(255, 255, 255, 0.06);
+  --color-picker-bg-light: #ffffff;
+  --color-picker-bg-dark: #181f2c;
 
   // Divider
-  --divider-color-light: #c6c6c6;
-  --divider-color-dark: #4d4d4d;
+  --divider-color-light: #dce3ed;
+  --divider-color-dark: #354052;
 
   // Select
-  --select-bg-light: rgba(255, 255, 255, 1);
-  --select-bg-dark: rgba(255, 255, 255, 0.06);
+  --select-bg-light: #ffffff;
+  --select-bg-dark: #181f2c;
 
   // Toast
-  --toast-bg-light: #fff;
-  --toast-bg-dark: #343434;
+  --toast-bg-light: #ffffff;
+  --toast-bg-dark: #232c3d;
 
   // Menu
-  --menu-bg-light: rgba(255, 255, 255, 0.8);
-  --menu-bg-dark: rgba(62, 62, 62, 0.8);
+  --menu-bg-light: rgba(255, 255, 255, 0.96);
+  --menu-bg-dark: rgba(32, 39, 53, 0.96);
 
   // Table
-  --table-tr-odd-bg-light: rgb(247, 247, 247);
-  --table-tr-even-bg-light: rgb(238, 238, 238);
-  --table-tr-odd-hover-bg-light: rgb(202, 202, 202);
-  --table-tr-even-hover-bg-light: rgb(202, 202, 202);
-  --table-tr-odd-bg-dark: #2e2e2e;
-  --table-tr-even-bg-dark: rgb(37, 37, 37);
-  --table-tr-odd-hover-bg-dark: rgb(61, 61, 61);
-  --table-tr-even-hover-bg-dark: rgb(61, 61, 61);
+  --table-tr-odd-bg-light: #ffffff;
+  --table-tr-even-bg-light: #f7f9fc;
+  --table-tr-odd-hover-bg-light: #ebf1f8;
+  --table-tr-even-hover-bg-light: #ebf1f8;
+  --table-tr-odd-bg-dark: #1c2331;
+  --table-tr-even-bg-dark: #212938;
+  --table-tr-odd-hover-bg-dark: #2a3447;
+  --table-tr-even-hover-bg-dark: #2a3447;
+
+  // Tag (Light)
+  --tag-default-color-light: #3b4b63;
+  --tag-default-bg-light: #f1f5f9;
+  --tag-default-border-light: #cbd5e1;
+  --tag-cyan-color-light: #0e7490;
+  --tag-cyan-bg-light: #ecfeff;
+  --tag-cyan-border-light: #67e8f9;
+  --tag-green-color-light: #15803d;
+  --tag-green-bg-light: #f0fdf4;
+  --tag-green-border-light: #86efac;
+  --tag-red-color-light: #b91c1c;
+  --tag-red-bg-light: #fef2f2;
+  --tag-red-border-light: #fca5a5;
+  --tag-orange-color-light: #c2410c;
+  --tag-orange-bg-light: #fff7ed;
+  --tag-orange-border-light: #fdba74;
+  --tag-gold-color-light: #a16207;
+  --tag-gold-bg-light: #fefce8;
+  --tag-gold-border-light: #fde047;
+  --tag-blue-color-light: #1d4ed8;
+  --tag-blue-bg-light: #eff6ff;
+  --tag-blue-border-light: #93c5fd;
+  --tag-purple-color-light: #6d28d9;
+  --tag-purple-bg-light: #f5f3ff;
+  --tag-purple-border-light: #c4b5fd;
+
+  // Tag (Dark)
+  --tag-default-color-dark: #cbd5e1;
+  --tag-default-bg-dark: rgba(148, 163, 184, 0.14);
+  --tag-default-border-dark: rgba(148, 163, 184, 0.32);
+  --tag-cyan-color-dark: #67e8f9;
+  --tag-cyan-bg-dark: rgba(34, 211, 238, 0.14);
+  --tag-cyan-border-dark: rgba(34, 211, 238, 0.35);
+  --tag-green-color-dark: #86efac;
+  --tag-green-bg-dark: rgba(74, 222, 128, 0.14);
+  --tag-green-border-dark: rgba(74, 222, 128, 0.35);
+  --tag-red-color-dark: #fca5a5;
+  --tag-red-bg-dark: rgba(248, 113, 113, 0.15);
+  --tag-red-border-dark: rgba(248, 113, 113, 0.38);
+  --tag-orange-color-dark: #fdba74;
+  --tag-orange-bg-dark: rgba(251, 146, 60, 0.15);
+  --tag-orange-border-dark: rgba(251, 146, 60, 0.38);
+  --tag-gold-color-dark: #fde047;
+  --tag-gold-bg-dark: rgba(250, 204, 21, 0.14);
+  --tag-gold-border-dark: rgba(250, 204, 21, 0.35);
+  --tag-blue-color-dark: #93c5fd;
+  --tag-blue-bg-dark: rgba(96, 165, 250, 0.15);
+  --tag-blue-border-dark: rgba(96, 165, 250, 0.38);
+  --tag-purple-color-dark: #d8b4fe;
+  --tag-purple-bg-dark: rgba(192, 132, 252, 0.15);
+  --tag-purple-border-dark: rgba(192, 132, 252, 0.38);
 
   // Delay color
   --level-0-color: #808080;
   --level-1-color: #29b280;
-  --level-2-color: #b68b1f;
+  --level-2-color: #d99b26;
   --level-3-color: #ea6060;
-  --level-4-color: #f00e0e;
+  --level-4-color: #ef4444;
 }

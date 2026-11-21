@@ -44,7 +44,7 @@ const toggle = () => {
       border,
       model ? 'on' : 'off',
       border === 'square' ? 'rounded-4' : 'rounded-full',
-      { 'cursor-not-allowed': disabled },
+      { 'cursor-not-allowed is-disabled': disabled },
     ]"
     class="gui-switch relative cursor-pointer h-24 inline-flex items-center text-12 duration-200"
     @click="toggle"
@@ -66,9 +66,13 @@ const toggle = () => {
 <style lang="less" scoped>
 .gui-switch {
   min-width: 50px;
-  // .slot {
-  //   transition: margin 0.2s;
-  // }
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease;
+  &.is-disabled {
+    opacity: 0.55;
+  }
 }
 
 .small {
@@ -88,12 +92,14 @@ const toggle = () => {
 .on {
   color: #fff;
   background-color: var(--switch-on-bg);
+  border: 1px solid transparent;
   &:hover {
     background-color: var(--switch-on-hover-bg);
   }
   .dot {
     left: calc(100% - 22px);
     background-color: var(--switch-on-dot-bg);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 
   .slot {
@@ -125,12 +131,14 @@ const toggle = () => {
 .off {
   color: var(--card-color);
   background-color: var(--switch-off-bg);
+  border: 1px solid var(--border-color);
   &:hover {
     background-color: var(--switch-off-hover-bg);
   }
   .dot {
-    left: 4px;
+    left: 3px;
     background-color: var(--switch-off-dot-bg);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
   }
 
   .slot {
@@ -140,7 +148,7 @@ const toggle = () => {
 
   &.small {
     .dot {
-      left: 4px;
+      left: 3px;
     }
     .slot {
       margin-left: 20px;

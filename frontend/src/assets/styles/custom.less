@@ -83,9 +83,78 @@ body {
   }
 }
 
-:where(a, button, [role='button'], input, textarea, select):focus-visible {
+:where(
+  a,
+  button,
+  [role='button'],
+  [role='switch'],
+  [role='combobox'],
+  [role='tab'],
+  [role='option'],
+  [role='menuitem'],
+  input,
+  textarea,
+  select
+):focus-visible {
   outline: 2px solid var(--accent-text);
-  outline-offset: 3px;
+  outline-offset: 2px;
+}
+
+.font-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+
+.text-muted {
+  color: var(--muted-color);
+}
+
+.text-danger {
+  color: var(--danger-color);
+}
+
+.resource-meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted-color);
+  line-height: 1.6;
+}
+
+.resource-meta-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resource-meta-value {
+  color: var(--card-color);
+  font-weight: 500;
+}
+
+.resource-count-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-color);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+}
+
+.resource-search {
+  width: 220px;
+}
+
+@media (max-width: 700px) {
+  .resource-search {
+    width: 100%;
+    order: 10;
+    flex-basis: 100%;
+  }
 }
 
 @media (max-width: 1100px) {

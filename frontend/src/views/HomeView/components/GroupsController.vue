@@ -204,15 +204,19 @@ const handleGroupDelay = (group: string) => {
       update,
       destroy,
       success: msgSuccess,
-    } = message.info('Testing...', 99999, () => {
-      handle.cancel()
-      message.warn('common.canceled')
-    })
+    } = message.info(
+      t('home.nodes.testingProgress', [0, names.length, 0, 0]),
+      99999,
+      () => {
+        handle.cancel()
+        message.warn('common.canceled')
+      },
+    )
     const handle = nodeLatencyScheduler.submit({
       ...taskOptions(names),
       onState: (_name, phase) => {
         if (disposed || !['queued', 'testing', 'retry-queued'].includes(phase)) return
-        update(`Testing... ${completed} / ${names.length}, success: ${success} failure: ${failure}`)
+        update(t('home.nodes.testingProgress', [completed, names.length, success, failure]))
       },
       onResult: (result) => {
         if (disposed) return
@@ -220,7 +224,7 @@ const handleGroupDelay = (group: string) => {
         completed++
         if (result.ok) success++
         else failure++
-        update(`Testing... ${completed} / ${names.length}, success: ${success} failure: ${failure}`)
+        update(t('home.nodes.testingProgress', [completed, names.length, success, failure]))
       },
     })
     handles.add(handle)
@@ -231,7 +235,12 @@ const handleGroupDelay = (group: string) => {
         return
       }
       msgSuccess(
-        `Completed. ${summary.completed} / ${summary.total}, success: ${summary.success} failure: ${summary.failure}`,
+        t('home.nodes.testingCompleted', [
+          summary.completed,
+          summary.total,
+          summary.success,
+          summary.failure,
+        ]),
       )
       const timer = setTimeout(() => {
         destroyTimers.delete(timer)
@@ -313,77 +322,101 @@ onScopeDispose(() => {
 
 <template>
   <div class="m-8 mt-0 sticky top-0 z-3">
-    <div
-      class="sticky flex gap-8 items-center p-8 rounded-8 backdrop-blur-sm"
-      style="background-color: var(--card-bg)"
-    >
+    <div class="groups-toolbar flex flex-wrap gap-8 items-center p-10 rounded-12 backdrop-blur-sm">
       <Switch v-model="appSettings.app.kernel.autoClose" label="home.controller.autoClose" />
       <Switch v-model="appSettings.app.kernel.unAvailable" label="home.controller.unAvailable" />
       <Switch v-model="appSettings.app.kernel.cardMode" label="home.controller.cardMode" />
       <Switch v-model="appSettings.app.kernel.sortByDelay" label="home.controller.sortBy" />
-      <Button type="primary" size="small" @click="toggleMoreSettings"> ... </Button>
-      <div class="ml-auto flex items-center">
-        <Button v-tips="'home.overview.expandAll'" type="text" icon="expand" @click="expandAll" />
+      <div class="ml-auto flex items-center gap-4">
+        <Button
+          v-tips="'common.more'"
+          :aria-label="t('common.more')"
+          type="text"
+          size="small"
+          icon="settings3"
+          @click="toggleMoreSettings"
+        />
+        <Button
+          v-tips="'home.overview.expandAll'"
+          :aria-label="t('home.overview.expandAll')"
+          type="text"
+          size="small"
+          icon="expand"
+          @click="expandAll"
+        />
         <Button
           v-tips="'home.overview.collapseAll'"
+          :aria-label="t('home.overview.collapseAll')"
           type="text"
+          size="small"
           icon="collapse"
           @click="collapseAll"
         />
         <Button
           v-tips="'home.overview.refresh'"
+          :aria-label="t('home.overview.refresh')"
           :loading="loading"
           icon="refresh"
           type="text"
+          size="small"
           @click="handleRefresh"
         />
       </div>
     </div>
   </div>
+
   <div v-for="group in groups" :key="group.name" class="m-8">
     <div
-      class="sticky z-2 flex gap-8 items-center p-8 rounded-8 backdrop-blur-sm"
-      style="top: 52px; background-color: var(--card-bg)"
+      class="group-header sticky z-2 flex flex-wrap gap-8 items-center p-10 rounded-12 cursor-pointer backdrop-blur-sm"
       @click="toggleExpanded(group.name)"
     >
-      <div class="text-14 flex items-center gap-2 text-nowrap overflow-hidden">
-        <img v-if="group.icon" :src="group.icon" class="w-24 h-24 mr-4" draggable="false" />
-        <span class="font-bold text-18">{{ group.name }}</span>
-        <span class="mx-8">
-          {{ group.type }}
-        </span>
-        <span> :: </span>
+      <div class="text-14 flex items-center gap-6 flex-wrap min-w-0">
+        <img v-if="group.icon" :src="group.icon" class="w-24 h-24 shrink-0" draggable="false" />
+        <span class="font-bold text-16">{{ group.name }}</span>
+        <Tag size="small" color="blue">{{ group.type }}</Tag>
+        <Tag size="small" color="default">{{ group.all.length }}</Tag>
+        <span class="text-muted">·</span>
         <template v-for="(chain, index) in group.chains" :key="chain">
-          <span v-if="index !== 0" style="color: gray"> / </span>
+          <span v-if="index !== 0" class="text-muted">→</span>
           <Button type="text" size="small" @click.stop="locateGroup(group, chain)">
             {{ chain }}
           </Button>
         </template>
       </div>
-      <div class="ml-auto flex items-center" @click.stop>
+      <div class="ml-auto flex items-center gap-4" @click.stop>
         <Input
           v-model="filterKeywordsMap[group.name]"
           :placeholder="t('common.keywords')"
           editable
           clearable
+          size="small"
         >
           <template #editable>
             <Button
               type="text"
+              size="small"
               icon="filter"
-              :icon-color="isFiltered(group.name) ? 'var(--primary-color)' : ''"
+              :aria-label="t('common.keywords')"
+              :icon-color="isFiltered(group.name) ? 'var(--accent-text)' : ''"
             />
           </template>
         </Input>
         <Button
           v-tips="'home.overview.delayTest'"
+          :aria-label="t('home.overview.delayTest')"
           :data-test="`group-delay-${group.name}`"
           :loading="isLoading(group.name)"
           icon="speedTest"
           type="text"
+          size="small"
           @click="handleGroupDelay(group.name)"
         />
-        <Button type="text" @click="toggleExpanded(group.name)">
+        <Button
+          type="text"
+          size="small"
+          :aria-expanded="isExpanded(group.name)"
+          @click="toggleExpanded(group.name)"
+        >
           <Icon
             :class="{ 'action-expand-expanded': isExpanded(group.name) }"
             class="action-expand origin-center duration-200"
@@ -398,40 +431,43 @@ onScopeDispose(() => {
         <div
           v-else-if="appSettings.app.kernel.cardMode"
           :class="`grid-cols-${appSettings.app.kernel.cardColumns}`"
-          class="grid gap-8"
+          class="groups-card-grid grid gap-8"
         >
           <Card
             v-for="proxy in group.all"
             :key="proxy.name"
             :title="proxy.name"
             :selected="proxy.name === group.now"
-            class="cursor-pointer"
+            interactive
             @click="useProxyWithCatchError(group, proxy)"
           >
-            <Button
-              :data-test="`proxy-delay-${proxy.name}`"
-              :style="{ color: delayColor(proxy.delay) }"
-              :loading="isLoading(proxy.name)"
-              type="text"
-              size="small"
-              style="margin-left: -2px; padding-left: 2px"
-              @click.stop="handleProxyDelay(proxy.name)"
-            >
-              <div class="text-12">
-                {{ proxy.delay && proxy.delay + 'ms' }}
+            <div class="flex items-center justify-between gap-4">
+              <div class="text-12 text-muted">
+                {{ proxy.type }}{{ proxy.udp ? ' · UDP' : '' }}
               </div>
-            </Button>
-            <div class="text-12 my-2">{{ proxy.type }} {{ proxy.udp ? ':: udp' : '' }}</div>
+              <Button
+                :data-test="`proxy-delay-${proxy.name}`"
+                :style="{ color: delayColor(proxy.delay) }"
+                :loading="isLoading(proxy.name)"
+                type="text"
+                size="small"
+                @click.stop="handleProxyDelay(proxy.name)"
+              >
+                <span class="text-12 font-bold">
+                  {{ proxy.delay ? proxy.delay + ' ms' : t('home.nodes.untested') }}
+                </span>
+              </Button>
+            </div>
           </Card>
         </div>
-        <div v-else class="grid grid-cols-32 gap-8">
+        <div v-else class="flex flex-wrap gap-6 p-4">
           <div
             v-for="proxy in group.all"
             :key="proxy.name"
             v-tips.fast="proxy.name"
             :style="{ background: delayColor(proxy.delay) }"
-            :class="proxy.name === group.now ? 'rounded-full shadow' : ''"
-            class="w-12 h-12 rounded-4 flex items-center justify-center"
+            :class="proxy.name === group.now ? 'rounded-full shadow ring-active' : ''"
+            class="w-16 h-16 rounded-4 flex items-center justify-center cursor-pointer"
             @click="useProxyWithCatchError(group, proxy)"
           >
             <Icon v-if="isLoading(proxy.name)" icon="loading" :size="12" class="rotation" />
@@ -523,23 +559,55 @@ onScopeDispose(() => {
 </template>
 
 <style lang="less" scoped>
+.groups-toolbar,
+.group-header {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+}
+
+.group-header {
+  top: 56px;
+  transition: border-color 0.16s ease;
+  &:hover {
+    border-color: color-mix(in srgb, var(--accent-text) 45%, var(--border-color));
+  }
+}
+
+.ring-active {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
 .expand-enter-active,
 .expand-leave-active {
   transform-origin: top;
   transition:
-    transform 0.2s ease-in-out,
-    opacity 0.2s ease-in-out;
+    transform 0.18s ease-in-out,
+    opacity 0.18s ease-in-out;
 }
 
 .expand-enter-from,
 .expand-leave-to {
-  transform: scaleY(0);
+  opacity: 0;
+  transform: scaleY(0.95);
 }
 
 .action-expand {
   transform: rotate(-90deg);
   &-expanded {
     transform: rotate(0deg);
+  }
+}
+
+@media (max-width: 900px) {
+  .groups-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .groups-card-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 }
 </style>

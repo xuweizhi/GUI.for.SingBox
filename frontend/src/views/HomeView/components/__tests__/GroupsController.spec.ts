@@ -51,7 +51,12 @@ vi.mock('@/utils', () => ({
   sleep: vi.fn(),
   message: { info: mocks.info, error: mocks.error, warn: mocks.warn, success: vi.fn() },
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, params?: unknown[]) =>
+      Array.isArray(params) ? `${key}:${params.join('/')}` : key,
+  }),
+}))
 
 import GroupsController from '@/views/HomeView/components/GroupsController.vue'
 
@@ -95,6 +100,7 @@ const mountController = () =>
         Transition: false,
         Modal: true,
         Radio: true,
+        Tag: true,
       },
       directives: { tips: {} },
     },
@@ -120,6 +126,7 @@ const mountKeepAliveController = () =>
           Transition: false,
           Modal: true,
           Radio: true,
+          Tag: true,
         },
         directives: { tips: {} },
       },
@@ -180,9 +187,7 @@ describe('GroupsController latency tasks', () => {
     expect(mocks.store.proxies.JP.history).toEqual([{ delay: 0 }])
     expect(mocks.error).not.toHaveBeenCalled()
     await vi.waitFor(() =>
-      expect(mocks.complete).toHaveBeenCalledWith(
-        expect.stringMatching(/2 \/ 2.*success: 1 failure: 1/),
-      ),
+      expect(mocks.complete).toHaveBeenCalledWith('home.nodes.testingCompleted:2/2/1/1'),
     )
   })
 

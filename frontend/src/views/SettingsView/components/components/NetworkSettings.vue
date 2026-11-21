@@ -64,7 +64,7 @@ const handleClearGithubMirror = () => {
   <Card>
     <div class="settings-row">
       <div class="text-16 font-bold">{{ $t('settings.requestProxy.name') }}</div>
-      <div class="flex items-center gap-4">
+      <div class="flex items-center gap-6">
         <Button
           v-if="showProxyTest"
           :loading="testing"
@@ -89,7 +89,8 @@ const handleClearGithubMirror = () => {
       >
         <template #suffix>
           <Button
-            v-tips="'settings.userAgent.reset'"
+            v-tips="'settings.requestProxy.resetCustom'"
+            :aria-label="$t('settings.requestProxy.resetCustom')"
             type="text"
             size="small"
             icon="reset"
@@ -113,6 +114,7 @@ const handleClearGithubMirror = () => {
         <template #suffix>
           <Button
             v-tips="'settings.userAgent.reset'"
+            :aria-label="$t('settings.userAgent.reset')"
             type="text"
             size="small"
             icon="reset"
@@ -128,13 +130,15 @@ const handleClearGithubMirror = () => {
       </div>
       <Input
         v-model.lazy="appSettings.app.githubApiToken"
-        editable
+        type="password"
+        clearable
         :max-width="false"
-        class="text-14"
+        class="text-14 w-full"
       >
         <template #suffix>
           <Button
-            v-tips="'settings.userAgent.reset'"
+            v-tips="'settings.githubapi.reset'"
+            :aria-label="$t('settings.githubapi.reset')"
             type="text"
             size="small"
             icon="reset"
@@ -165,6 +169,7 @@ const handleClearGithubMirror = () => {
         <template #suffix>
           <Button
             v-tips="'settings.githubDownloadAcceleration.reset'"
+            :aria-label="$t('settings.githubDownloadAcceleration.reset')"
             type="text"
             size="small"
             icon="reset"

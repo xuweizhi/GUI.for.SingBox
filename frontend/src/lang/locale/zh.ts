@@ -19,6 +19,8 @@ export default {
     external: '以下路径需要在目标主机提供对应文件',
     replace:
       '恢复将替换本实例的配置和管理资源，刷新已打开的 WebUI 并重新装载定时任务。WebUI 登录 Token 和当前运行核心保留，需要时从首页重启核心以应用新配置。',
+    noHistory: '暂无自动备份快照',
+    clickSnapshotHint: '点击下方快照可预览内容并选择恢复',
     resources: {
       profiles: '配置',
       subscribes: '订阅',
@@ -95,6 +97,20 @@ export default {
     minimizeAll: '最小化所有',
     retry: '重试',
     bootstrapFailed: '初始化失败，请检查日志后重试',
+    search: '搜索...',
+    confirmDelete: '确定要删除“{0}”吗？此操作不可撤销。',
+    confirmSignOut: '确定要退出当前 WebUI 登录吗？',
+    confirmCloseConnections: '确定要关闭当前匹配的 {0} 条活动连接吗？',
+    confirmStopCore: '确定要停止核心吗？所有代理连接将被中断。',
+    showPassword: '显示密码',
+    hidePassword: '隐藏密码',
+    commandPalette: '命令面板',
+    coreRunning: '核心运行中',
+    coreStopped: '核心已停止',
+    activeProfile: '当前配置',
+    switchTheme: '切换主题',
+    notSupported: '当前日志类型不支持此操作',
+    notMatched: '未在日志中匹配到有效域名或 IP',
   },
   kernel: {
     rule: '规则',
@@ -202,6 +218,8 @@ export default {
       icon: '图标',
       hidden: '隐藏',
       cycle: '策略组存在循环引用：{0}',
+      reservedTag: '策略名称 direct 和 block 为系统保留名称。',
+      missingNodeGroup: '未找到节点组：{0}',
       role: {
         name: '用途',
         proxy: '代理节点',
@@ -482,6 +500,13 @@ export default {
   netCheck: {
     target: {
       description: '输入目标 URL 或域名，检查当前核心代理的 HTTP 连通性，并补充一个 TCP 直连探测。',
+      placeholder: '输入目标 URL 或域名，按 Enter 开始检测',
+    },
+    status: {
+      success: '通过',
+      failed: '失败',
+      skipped: '跳过',
+      running: '进行中',
     },
     actions: {
       run: '开始检测',
@@ -572,6 +597,7 @@ export default {
       stop: '停止核心',
       restart: '重启核心',
       viewlog: '查看日志',
+      logs: '运行日志',
       start: '启动核心',
       noLogs: '日志为空',
       tunMode: 'TUN模式',
@@ -580,6 +606,9 @@ export default {
       totalTraffic: '总流量',
       connections: '活动连接',
       memory: '内存',
+      clickToInspect: '点击查看详情',
+      clickToToggleMemory: '点击切换内存口径',
+      allGroups: '全部策略组',
       transmit: '上行速率',
       receive: '下行速率',
       settings: '核心设置',
@@ -619,6 +648,8 @@ export default {
       sortByDelay: '按延迟排序',
       testGroup: '整组测速',
       testProgress: '已完成 {0}/{1}，成功 {2}，失败 {3}',
+      testingProgress: '测速中 {0}/{1}，成功 {2}，失败 {3}',
+      testingCompleted: '测速完成 {0}/{1}，成功 {2}，失败 {3}',
       attempts: '次',
       queued: '排队中',
       retryQueued: '待补测',
@@ -971,6 +1002,7 @@ export default {
       system: '使用系统代理',
       kernel: '使用核心代理',
       custom: '自定义代理',
+      resetCustom: '重置自定义代理',
       test: '测试',
       testSuccess: '代理测试成功',
       empty: '未配置代理',
@@ -1020,6 +1052,7 @@ export default {
     githubapi: {
       name: 'GitHub REST API 访问令牌',
       tips: '可获得更高的速率限制',
+      reset: '重置 GitHub 访问令牌',
     },
     githubDownloadAcceleration: {
       name: 'GitHub 下载加速',

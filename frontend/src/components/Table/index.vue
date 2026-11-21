@@ -35,8 +35,9 @@ const sortFunc = computed(
 
 const { t } = useI18n.global
 
-const handleChangeSortField = (field: string) => {
-  if (sortField.value === field) {
+const handleChangeSortField = (column: Column) => {
+  if (!column.sort) return
+  if (sortField.value === column.key) {
     if (sortReverse.value) {
       sortReverse.value = false
       return
@@ -45,7 +46,7 @@ const handleChangeSortField = (field: string) => {
     sortReverse.value = true
     return
   }
-  sortField.value = field
+  sortField.value = column.key
   sortReverse.value = true
 }
 
@@ -71,34 +72,38 @@ const renderCell = (column: Column, record: Recordable) => {
 </script>
 
 <template>
-  <div class="gui-table overflow-auto">
+  <div class="gui-table overflow-auto rounded-8">
     <table class="w-full text-12 border-collapse">
       <thead>
-        <tr class="sticky top-0 shadow">
+        <tr class="sticky top-0 gui-table__head-row">
           <th
             v-for="column in tableColumns"
             :key="column.key"
-            class="px-4 py-8 whitespace-nowrap cursor-pointer"
+            :class="{ 'cursor-pointer gui-table__th--sortable': !!column.sort }"
+            class="px-8 py-10 whitespace-nowrap"
+            @click="handleChangeSortField(column)"
           >
             <div
               :style="{
-                justifyContent: { left: 'flext-start', center: 'center', right: 'flex-end' }[
+                justifyContent: { left: 'flex-start', center: 'center', right: 'flex-end' }[
                   column.align || 'left'
                 ],
                 minWidth: column.minWidth || 'auto',
               }"
-              class="flex items-center"
-              @click="handleChangeSortField(column.key)"
+              class="flex items-center gap-4"
             >
-              {{ t(column.title) }}
-              <div v-if="sortField === column.key && sortFunc">
-                <span class="px-4"> {{ sortReverse ? '↑' : '↓' }} </span>
-              </div>
+              <span>{{ t(column.title) }}</span>
+              <span v-if="column.sort" class="gui-table__sort-icon" aria-hidden="true">
+                <template v-if="sortField === column.key">
+                  {{ sortReverse ? '↓' : '↑' }}
+                </template>
+                <template v-else>⇅</template>
+              </span>
             </div>
           </th>
         </tr>
       </thead>
-      <tbody>
+      <tbody v-if="tableData.length">
         <tr
           v-for="record in tableData"
           :key="record.id"
@@ -118,16 +123,34 @@ const renderCell = (column: Column, record: Recordable) => {
         </tr>
       </tbody>
     </table>
+    <div v-if="tableData.length === 0" class="py-32">
+      <Empty :icon-size="48" />
+    </div>
   </div>
 </template>
 
 <style lang="less" scoped>
+.gui-table {
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+}
+
+.gui-table__head-row {
+  z-index: 1;
+  background: var(--table-tr-even-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.gui-table__th--sortable:hover {
+  color: var(--accent-text);
+}
+
+.gui-table__sort-icon {
+  font-size: 11px;
+  color: var(--muted-color);
+}
+
 table {
-  thead {
-    tr {
-      background: var(--table-tr-odd-bg);
-    }
-  }
   tbody {
     tr {
       &:nth-child(odd) {

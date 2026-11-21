@@ -244,11 +244,11 @@ defineExpose({ modalSlots })
               />
             </div>
             <div class="flex items-center justify-between">
-              <Dropdown :trigger="['hover']" placement="bottom">
+              <Dropdown placement="bottom">
                 <Button type="text" size="small" style="margin-left: -2px; padding-left: 2px">
                   {{ t('common.more') }}
                 </Button>
-                <template #overlay>
+                <template #overlay="{ close }">
                   <div class="flex flex-col gap-4 min-w-96 p-4">
                     <Button
                       v-for="format in rulesetFormats"
@@ -256,7 +256,12 @@ defineExpose({ modalSlots })
                       :disabled="!!isAlreadyAdded(ruleset, format)"
                       type="text"
                       size="small"
-                      @click="handleAddRuleset(ruleset, format)"
+                      @click="
+                        () => {
+                          close()
+                          handleAddRuleset(ruleset, format)
+                        }
+                      "
                     >
                       <template v-if="isAlreadyAdded(ruleset, format)">
                         {{ t(`ruleset.format.${format}`) }} {{ t('common.added') }}
@@ -269,18 +274,23 @@ defineExpose({ modalSlots })
                 </template>
               </Dropdown>
 
-              <Dropdown :trigger="['hover']" placement="bottom">
+              <Dropdown placement="bottom">
                 <Button type="link" size="small">
                   {{ t('rulesets.addToProfile') }}
                 </Button>
-                <template #overlay>
+                <template #overlay="{ close }">
                   <div class="flex flex-col gap-4 min-w-96 p-4">
                     <Button
                       v-for="format in rulesetFormats"
                       :key="format"
                       type="text"
                       size="small"
-                      @click="handleAddRulesetToProfile(ruleset, format)"
+                      @click="
+                        () => {
+                          close()
+                          handleAddRulesetToProfile(ruleset, format)
+                        }
+                      "
                     >
                       {{ t(`ruleset.format.${format}`) }}
                     </Button>

@@ -50,11 +50,24 @@ const minimizeAll = () => {
     class="fixed right-32 bottom-32 flex flex-col gap-8 z-9999"
   >
     <Dropdown v-if="appStore.modalMinimized.length" placement="top">
-      <Button icon="adjust" class="shadow" />
-      <template #overlay>
-        <Card title="common.modalList">
+      <Button
+        icon="adjust"
+        :aria-label="$t('common.modalList')"
+        class="shadow"
+      />
+      <template #overlay="{ close }">
+        <Card :title="$t('common.modalList')">
           <template #extra>
-            <Button size="small" type="link" @click="openAll">
+            <Button
+              size="small"
+              type="link"
+              @click="
+                () => {
+                  openAll()
+                  close()
+                }
+              "
+            >
               {{ $t('common.openAll') }}
             </Button>
             <Button size="small" type="link" @click="minimizeAll">
@@ -65,12 +78,27 @@ const minimizeAll = () => {
             <div
               v-for="modal in appStore.modalMinimized"
               :key="modal.id"
-              class="flex items-center justify-between"
+              class="flex items-center justify-between gap-4"
             >
-              <Button class="flex-1" type="text" @click="modal.openFn">
+              <Button
+                class="flex-1 justify-start"
+                type="text"
+                @click="
+                  () => {
+                    modal.openFn()
+                    close()
+                  }
+                "
+              >
                 {{ $t(modal.title()) }}
               </Button>
-              <Button icon="close" type="text" size="small" @click="modal.closeFn" />
+              <Button
+                icon="close"
+                type="text"
+                size="small"
+                :aria-label="$t('common.close')"
+                @click="modal.closeFn"
+              />
             </div>
           </div>
         </Card>
@@ -79,8 +107,10 @@ const minimizeAll = () => {
     <Button
       v-if="kernelApiStore.needRestart || kernelApiStore.restarting"
       v-tips="'home.overview.restart'"
+      :aria-label="$t('home.overview.restart')"
       :loading="kernelApiStore.restarting"
       icon="restart"
+      type="primary"
       class="rounded-full w-42 h-42 shadow"
       @click="handleRestartCore"
     />

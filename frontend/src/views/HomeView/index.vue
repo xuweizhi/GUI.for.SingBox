@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { ref, watch, useTemplateRef } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import logo from '@/assets/logo'
-import { ControllerCloseMode } from '@/enums/app'
 import { useAppSettingsStore, useProfilesStore, useKernelApiStore } from '@/stores'
-import { APP_TITLE, debounce, message, modal } from '@/utils'
+import { APP_TITLE, message, modal } from '@/utils'
 
 import GroupsController from './components/GroupsController.vue'
 import KernelLogs from './components/KernelLogs.vue'
@@ -13,7 +12,6 @@ import OverView from './components/OverView.vue'
 import QuickStart from './components/QuickStart.vue'
 
 const showController = ref(false)
-const controllerRef = useTemplateRef('controllerRef')
 
 const { t } = useI18n()
 
@@ -46,28 +44,10 @@ const handleShowKernelLogs = () => {
   m.setContent(KernelLogs).open()
 }
 
-let scrollEventCount = 0
-const resetScrollEventCount = debounce(() => (scrollEventCount = 0), 100)
-
-const onMouseWheel = (e: WheelEvent) => {
-  if (!kernelApiStore.running) return
-
-  const isScrollingDown = e.deltaY > 0
-
-  if (
-    isScrollingDown ||
-    appSettingsStore.app.kernel.controllerCloseMode === ControllerCloseMode.All
-  ) {
-    const currentScrollTop = controllerRef.value?.scrollTop ?? 0
-    if (isScrollingDown || currentScrollTop === 0) {
-      scrollEventCount += 1
-    }
-    if (scrollEventCount >= appSettingsStore.app.kernel.controllerSensitivity) {
-      showController.value = isScrollingDown || currentScrollTop !== 0
-    }
+const onKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && showController.value) {
+    showController.value = false
   }
-
-  resetScrollEventCount()
 }
 
 watch(showController, (v) => {
@@ -77,102 +57,117 @@ watch(showController, (v) => {
     kernelApiStore.refreshConfig()
   }
 })
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="home-view relative overflow-hidden h-full" @wheel.passive="onMouseWheel">
+  <div class="home-view relative h-full">
     <div
       v-if="(!kernelApiStore.running && !kernelApiStore.stopping) || kernelApiStore.starting"
-      class="w-full h-[90%] flex flex-col items-center justify-center"
+      class="w-full min-h-[85%] flex flex-col items-center justify-center py-24"
     >
       <img :src="logo" draggable="false" class="w-128 mb-16" />
 
       <template v-if="profilesStore.profiles.length === 0">
-        <p>{{ t('home.noProfile', [APP_TITLE]) }}</p>
+        <p class="text-muted mb-16">{{ t('home.noProfile', [APP_TITLE]) }}</p>
         <Button type="primary" @click="handleShowQuickStart">{{ t('home.quickStart') }}</Button>
       </template>
 
       <template v-else>
-        <div class="home-profile-options flex flex-wrap justify-center gap-8 mb-32">
+        <div class="home-profile-options flex flex-wrap justify-center gap-12 mb-32">
           <Card
             v-for="p in profilesStore.profiles.slice(0, profilesStore.profiles.length > 4 ? 3 : 4)"
             :key="p.id"
             :selected="appSettingsStore.app.kernel.profile === p.id"
+            interactive
             @click="appSettingsStore.app.kernel.profile = p.id"
           >
             <div
-              class="w-128 h-full flex items-center justify-center py-24 text-center cursor-pointer font-bold text-12"
+              class="w-128 h-full flex items-center justify-center py-24 text-center font-bold text-13"
             >
               {{ p.name }}
             </div>
           </Card>
           <Dropdown v-if="profilesStore.profiles.length > 4" placement="top">
-            <Card class="h-full">
+            <Card interactive class="h-full">
               <div
-                class="w-128 h-full flex items-center justify-center py-24 text-center cursor-pointer font-bold text-12"
+                class="w-128 h-full flex items-center justify-center py-24 text-center font-bold text-13"
               >
-                ...
+                {{ t('common.more') }} ({{ profilesStore.profiles.length - 3 }})
               </div>
             </Card>
-            <template #overlay>
-              <div class="flex flex-col py-8">
+            <template #overlay="{ close }">
+              <div class="flex flex-col gap-2 p-6 min-w-160">
                 <Button
                   v-for="p in profilesStore.profiles.slice(3)"
                   :key="p.id"
-                  @click="appSettingsStore.app.kernel.profile = p.id"
+                  type="text"
+                  class="justify-between"
+                  @click="
+                    () => {
+                      appSettingsStore.app.kernel.profile = p.id
+                      close()
+                    }
+                  "
                 >
-                  <div class="min-w-32 w-full flex items-center justify-between">
-                    {{ p.name }}
-                    <Icon v-if="appSettingsStore.app.kernel.profile === p.id" icon="selected" />
-                  </div>
+                  <span>{{ p.name }}</span>
+                  <Icon
+                    v-if="appSettingsStore.app.kernel.profile === p.id"
+                    icon="selected"
+                    color="var(--accent-text)"
+                  />
                 </Button>
               </div>
             </template>
           </Dropdown>
-          <Card @click="handleShowQuickStart">
+          <Card interactive @click="handleShowQuickStart">
             <div
-              class="w-128 h-full flex items-center justify-center py-24 text-center cursor-pointer font-bold text-12"
+              class="w-128 h-full flex items-center justify-center py-24 text-center font-bold text-13 text-muted"
             >
-              {{ t('home.quickStart') }}
+              + {{ t('home.quickStart') }}
             </div>
           </Card>
         </div>
-        <Button :loading="kernelApiStore.starting" type="primary" @click="handleStartKernel">
+        <Button
+          :loading="kernelApiStore.starting"
+          type="primary"
+          size="large"
+          @click="handleStartKernel"
+        >
           {{ t('home.overview.start') }}
         </Button>
-        <Button type="link" size="small" class="mt-4" @click="handleShowKernelLogs">
+        <Button type="link" size="small" class="mt-8" @click="handleShowKernelLogs">
           {{ t('home.overview.viewlog') }}
         </Button>
       </template>
     </div>
 
     <template v-else-if="!kernelApiStore.coreStateLoading">
-      <div :class="{ 'blur-3xl': showController }">
-        <OverView />
-        <Divider class="controller-trigger">
+      <div v-show="!showController" class="home-overview-scroll">
+        <OverView @open-groups="showController = true" />
+        <Divider class="controller-trigger mt-16">
           <Button type="link" size="small" @click="showController = true">
-            {{ t('home.controller.name') }}
+            {{ t('home.overview.allGroups') }}
           </Button>
         </Divider>
       </div>
 
-      <div
-        ref="controllerRef"
-        :class="showController ? 'translate-y-0' : 'translate-y-full'"
-        class="controller-panel absolute inset-0 pb-32 overflow-y-auto duration-400"
-      >
+      <div v-if="showController" class="controller-panel pb-32">
+        <div class="controller-panel__bar flex items-center justify-between gap-8 mb-12">
+          <div class="font-bold text-16">{{ t('home.overview.allGroups') }}</div>
+          <Button
+            type="normal"
+            size="small"
+            icon="arrowLeft"
+            @click="showController = false"
+          >
+            {{ t('router.overview') }}
+          </Button>
+        </div>
         <GroupsController />
       </div>
-
-      <Button
-        v-show="showController"
-        class="controller-close fixed left-1/2 -translate-x-1/2 bottom-12 z-2"
-        style="background-color: var(--card-bg)"
-        type="text"
-        size="small"
-        icon="close"
-        @click="showController = false"
-      />
     </template>
   </div>
 </template>
@@ -181,15 +176,10 @@ watch(showController, (v) => {
 .home-profile-options {
   max-width: 800px;
 }
+.controller-panel__bar {
+  padding: 0 8px;
+}
 @media (max-width: 700px) {
-  .home-view {
-    overflow-y: auto;
-  }
-  .home-view > .w-full {
-    height: auto;
-    min-height: 100%;
-    padding: 16px 0;
-  }
   .home-profile-options {
     width: 100%;
     display: grid;

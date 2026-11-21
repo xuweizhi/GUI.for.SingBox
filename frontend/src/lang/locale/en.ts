@@ -19,6 +19,8 @@ export default {
     external: 'These paths require files on the destination host',
     replace:
       'Restoring replaces the managed configuration, reloads open WebUI sessions and reschedules tasks. The login token and running core are preserved. Restart the core from Home to apply the restored configuration.',
+    noHistory: 'No automatic snapshots yet',
+    clickSnapshotHint: 'Click a snapshot below to preview and restore',
     resources: {
       profiles: 'Profiles',
       subscribes: 'Subscriptions',
@@ -95,6 +97,20 @@ export default {
     minimizeAll: 'Minimize all',
     retry: 'Retry',
     bootstrapFailed: 'Initialization failed. Check the logs and retry.',
+    search: 'Search...',
+    confirmDelete: 'Are you sure you want to delete "{0}"? This action cannot be undone.',
+    confirmSignOut: 'Are you sure you want to sign out of WebUI?',
+    confirmCloseConnections: 'Are you sure you want to close {0} matching active connections?',
+    confirmStopCore: 'Are you sure you want to stop the core? Active connections will be interrupted.',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
+    commandPalette: 'Command Palette',
+    coreRunning: 'Core running',
+    coreStopped: 'Core stopped',
+    activeProfile: 'Active profile',
+    switchTheme: 'Switch theme',
+    notSupported: 'This log type is not supported',
+    notMatched: 'No valid domain or IP found in this log entry',
   },
   kernel: {
     rule: 'Rule',
@@ -203,6 +219,8 @@ export default {
       icon: 'Icon',
       hidden: 'Hidden',
       cycle: 'Outbound groups contain a circular reference: {0}',
+      reservedTag: 'Strategy names direct and block are reserved.',
+      missingNodeGroup: 'Node group not found: {0}',
       role: {
         name: 'Purpose',
         proxy: 'Proxy Nodes',
@@ -488,6 +506,13 @@ export default {
     target: {
       description:
         'Enter a target URL or hostname to check HTTP reachability through the current core proxy and run a direct TCP probe.',
+      placeholder: 'Enter target URL or hostname and press Enter',
+    },
+    status: {
+      success: 'Passed',
+      failed: 'Failed',
+      skipped: 'Skipped',
+      running: 'Running',
     },
     actions: {
       run: 'Run Check',
@@ -580,6 +605,7 @@ export default {
       stop: 'Stop Core',
       restart: 'Restart Core',
       viewlog: 'view log',
+      logs: 'Runtime Logs',
       start: 'Click to Start',
       noLogs: 'Log is empty',
       tunMode: 'TUN Mode',
@@ -588,6 +614,9 @@ export default {
       totalTraffic: 'Total Traffic',
       connections: 'Connections',
       memory: 'Memory',
+      clickToInspect: 'Click to inspect',
+      clickToToggleMemory: 'Click to toggle RSS',
+      allGroups: 'All Policy Groups',
       transmit: 'Transmit',
       receive: 'Receive',
       settings: 'Core Settings',
@@ -629,6 +658,8 @@ export default {
       sortByDelay: 'Sort by latency',
       testGroup: 'Test Group',
       testProgress: 'Completed {0}/{1}, success {2}, failed {3}',
+      testingProgress: 'Testing {0}/{1}, succeeded {2}, failed {3}',
+      testingCompleted: 'Completed {0}/{1}, succeeded {2}, failed {3}',
       attempts: 'attempts',
       queued: 'Queued',
       retryQueued: 'Waiting to retry',
@@ -984,6 +1015,7 @@ export default {
       system: 'Use system proxy',
       kernel: 'Use core proxy',
       custom: 'Custom proxy',
+      resetCustom: 'Reset custom proxy',
       test: 'Test',
       testSuccess: 'Proxy test succeeded',
       empty: 'Proxy is not configured',
@@ -1033,6 +1065,7 @@ export default {
     githubapi: {
       name: 'GitHub REST API Token',
       tips: 'Provides a higher rate limit',
+      reset: 'Reset GitHub API Token',
     },
     githubDownloadAcceleration: {
       name: 'GitHub Download Acceleration',

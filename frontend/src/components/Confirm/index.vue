@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 
 import useI18n from '@/lang'
 
@@ -9,6 +9,7 @@ export type ConfirmOptions = {
   type: 'text' | 'markdown'
   cancelText?: string
   okText?: string
+  danger?: boolean
 }
 
 interface Props {
@@ -46,40 +47,102 @@ const handleCancel = () => {
   emits('cancel')
   emits('finish')
 }
+
+const onKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') {
+    e.stopPropagation()
+    e.preventDefault()
+    if (props.cancel) handleCancel()
+    else handleConfirm()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown, true))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
 </script>
 
 <template>
-  <Transition name="slide-down" appear>
-    <div class="gui-confirm flex flex-col p-8 rounded-8 shadow">
-      <div class="font-bold break-all px-4 py-8">{{ t(title) }}</div>
+  <div
+    class="gui-overlay-mask fixed inset-0 flex items-center justify-center p-16 backdrop-blur-sm"
+    @click.self="!cancel && handleConfirm()"
+  >
+    <Transition name="dialog-pop" appear>
       <div
-        v-if="options.type === 'markdown'"
-        class="flex-1 overflow-y-auto text-12 leading-relaxed p-6 break-all whitespace-pre-wrap select-text"
+        role="alertdialog"
+        aria-modal="true"
+        :aria-label="t(title)"
+        class="gui-confirm flex flex-col rounded-12"
       >
-        <MarkdownViewer :content="content" />
+        <div class="gui-confirm__header font-bold text-16 break-all px-16 py-12">
+          {{ t(title) }}
+        </div>
+        <div
+          v-if="options.type === 'markdown'"
+          class="gui-confirm__body flex-1 overflow-y-auto text-13 leading-relaxed px-16 py-12 break-all whitespace-pre-wrap select-text"
+        >
+          <MarkdownViewer :content="content" />
+        </div>
+        <div
+          v-else
+          class="gui-confirm__body flex-1 overflow-y-auto text-13 leading-relaxed px-16 py-12 break-all whitespace-pre-wrap select-text"
+        >
+          {{ content }}
+        </div>
+        <div class="gui-confirm__footer flex items-center justify-end gap-8 px-16 py-12">
+          <Button v-if="cancel" size="small" @click="handleCancel">
+            {{ t(options.cancelText || 'common.cancel') }}
+          </Button>
+          <Button
+            size="small"
+            :type="options.danger ? 'danger' : 'primary'"
+            @click="handleConfirm"
+          >
+            {{ t(options.okText || 'common.confirm') }}
+          </Button>
+        </div>
       </div>
-      <div
-        v-else
-        class="flex-1 overflow-y-auto text-12 leading-relaxed p-6 break-all whitespace-pre-wrap select-text"
-      >
-        {{ content }}
-      </div>
-      <div class="form-action gap-4">
-        <Button v-if="cancel" size="small" @click="handleCancel">
-          {{ t(options.cancelText || 'common.cancel') }}
-        </Button>
-        <Button size="small" type="primary" @click="handleConfirm">
-          {{ t(options.okText || 'common.confirm') }}
-        </Button>
-      </div>
-    </div>
-  </Transition>
+    </Transition>
+  </div>
 </template>
 
 <style lang="less" scoped>
+.gui-overlay-mask {
+  z-index: 99999;
+  background: var(--modal-mask-bg);
+}
+
 .gui-confirm {
-  min-width: 340px;
-  max-width: 60%;
-  background: var(--toast-bg);
+  width: min(460px, 100%);
+  max-height: min(76dvh, 640px);
+  background: var(--modal-bg);
+  color: var(--color);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+  overflow: hidden;
+}
+
+.gui-confirm__header {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.gui-confirm__body {
+  min-height: 0;
+}
+
+.gui-confirm__footer {
+  border-top: 1px solid var(--border-color);
+}
+
+.dialog-pop-enter-active,
+.dialog-pop-leave-active {
+  transition:
+    transform 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.16s ease;
+}
+
+.dialog-pop-enter-from,
+.dialog-pop-leave-to {
+  opacity: 0;
+  transform: scale(0.96) translateY(8px);
 }
 </style>

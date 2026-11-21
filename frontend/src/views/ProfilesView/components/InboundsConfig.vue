@@ -95,21 +95,34 @@ defineExpose({ handleAdd })
 <template>
   <Empty v-if="model.length === 0">
     <template #description>
-      <div class="flex gap-8">
+      <div class="flex flex-wrap justify-center gap-8">
         <Button v-for="inbound in inbounds" :key="inbound.label" @click="inbound.value">
           {{ t('common.add') }} {{ inbound.label }}
         </Button>
       </div>
     </template>
   </Empty>
-  <div v-draggable="[model, { ...DraggableOptions, handle: '.drag' }]">
-    <Card v-for="(inbound, index) in model" :key="inbound.id" :title="inbound.tag" class="mb-8">
-      <template #title-prefix>
-        <Icon icon="drag" class="drag cursor-move" />
-      </template>
-      <template #extra>
-        <Button icon="delete" type="text" size="small" @click="handleDelete(index)" />
-      </template>
+  <template v-else>
+    <div class="flex justify-end mb-8">
+      <Button icon="add" type="primary" size="small" @click="handleAdd">
+        {{ t('common.add') }}
+      </Button>
+    </div>
+    <div v-draggable="[model, { ...DraggableOptions, handle: '.drag' }]">
+      <Card v-for="(inbound, index) in model" :key="inbound.id" :title="inbound.tag" class="mb-8">
+        <template #title-prefix>
+          <Icon icon="drag" class="drag cursor-move" color="var(--muted-color)" />
+        </template>
+        <template #extra>
+          <Button
+            icon="delete"
+            icon-color="var(--danger-color)"
+            type="text"
+            size="small"
+            :aria-label="t('common.delete')"
+            @click="handleDelete(index)"
+          />
+        </template>
       <div class="form-item">
         {{ t('kernel.inbounds.enable') }}
         <Switch v-model="inbound.enable" />
@@ -199,5 +212,6 @@ defineExpose({ handleAdd })
         </div>
       </div>
     </Card>
-  </div>
+    </div>
+  </template>
 </template>

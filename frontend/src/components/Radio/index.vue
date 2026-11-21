@@ -28,12 +28,14 @@ const handleSelect = (val: string | number | boolean) => {
 </script>
 
 <template>
-  <div :class="[size]" class="gui-radio inline-flex rounded-8 text-12">
+  <div role="radiogroup" :class="[size]" class="gui-radio inline-flex rounded-8 text-12">
     <button
       v-for="o in options"
       :key="o.value.toString()"
       v-tips.slow="o.label"
       type="button"
+      role="radio"
+      :aria-checked="o.value === model"
       :aria-pressed="o.value === model"
       :class="{ active: o.value === model }"
       class="gui-radio-button cursor-pointer px-12 py-6 duration-200"
@@ -59,9 +61,7 @@ const handleSelect = (val: string | number | boolean) => {
     border: 0;
     border-radius: 5px;
     white-space: nowrap;
-    &:nth-child(1) {
-      border-left: none;
-    }
+    font-weight: 500;
     &:hover {
       color: var(--radio-normal-hover-color);
     }
@@ -70,6 +70,7 @@ const handleSelect = (val: string | number | boolean) => {
     color: var(--radio-primary-color);
     background-color: var(--radio-primary-bg);
     &:hover {
+      color: var(--radio-primary-color);
       background-color: var(--radio-primary-hover-bg);
     }
     &:active {
@@ -80,7 +81,7 @@ const handleSelect = (val: string | number | boolean) => {
 
 .small {
   .gui-radio-button {
-    font-size: 10px;
+    font-size: 12px;
     padding: 4px 8px;
   }
 }

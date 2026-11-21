@@ -23,6 +23,7 @@ const props = defineProps<{ native?: App.Profile['native'] }>()
 let updateGroupId = 0
 const showEditModal = ref(false)
 const showSortModal = ref(false)
+const proxySearch = ref('')
 const expandedSet = ref<Set<string>>(new Set(['Built-in', 'Subscription', 'NodeGroup']))
 const SubscribesNameMap = ref<Record<string, string>>({})
 
@@ -63,6 +64,19 @@ const proxyGroup = ref([
   },
 ])
 
+const filteredProxyGroups = computed(() => {
+  const q = proxySearch.value.trim().toLowerCase()
+  if (!q) return proxyGroup.value
+  return proxyGroup.value
+    .map((group) => ({
+      ...group,
+      proxies: group.proxies.filter(
+        (p) => p.tag.toLowerCase().includes(q) || p.type.toLowerCase().includes(q),
+      ),
+    }))
+    .filter((group) => group.proxies.length > 0)
+})
+
 const preProxyOptions = computed(() => [
   { label: t('kernel.outbounds.noPreProxy'), value: '' },
   ...model.value
@@ -76,6 +90,7 @@ const preProxyOptions = computed(() => [
 
 const handleAdd = () => {
   updateGroupId = -1
+  proxySearch.value = ''
   fields.value = DefaultOutbound()
   showEditModal.value = true
 }
@@ -124,7 +139,7 @@ const handleAddEnd = () => {
   if (updateGroupId === -1) next.unshift(fields.value)
   const cycle = findOutboundGraphIssues(next, nodeGroupsStore.nodeGroups)[0]
   if (cycle?.type === 'reserved-tag') {
-    message.error('Strategy names direct and block are reserved.')
+    message.error(t('kernel.outbounds.reservedTag'))
     return false
   }
   if (cycle) {
@@ -157,6 +172,7 @@ const handleAddEnd = () => {
 
 const handleEditGroup = (index: number) => {
   updateGroupId = index
+  proxySearch.value = ''
   fields.value = deepClone(model.value[index]!)
   showEditModal.value = true
 }
@@ -252,7 +268,7 @@ const toggleExpanded = (key: string) => {
   }
 }
 
-const isExpanded = (key: string) => expandedSet.value.has(key)
+const isExpanded = (key: string) => Boolean(proxySearch.value.trim()) || expandedSet.value.has(key)
 
 const showLost = () => message.warn('kernel.outbounds.notFound')
 
@@ -280,51 +296,71 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
     </template>
   </Empty>
 
-  <div v-draggable="[model, DraggableOptions]">
-    <Card v-for="(outbound, index) in model" :key="outbound.id" class="mb-2">
-      <div class="flex items-center py-2">
-        <div class="font-bold flex items-center" style="min-width: 90px">
-          <img v-if="outbound.icon" :src="outbound.icon" class="w-18 h-18 mr-4" />
-          <span
-            v-if="hasLost(outbound)"
-            class="cursor-pointer"
-            style="color: rgb(200, 193, 11)"
-            @click="showLost"
-          >
-            [ ! ]
-          </span>
-          <span
-            v-if="needToAdd(outbound)"
-            class="cursor-pointer"
-            style="color: red"
-            @click="showNeedToAdd"
-          >
-            [ ! ]
-          </span>
-          {{ outbound.tag }}
-          <Tag size="small" color="blue" class="ml-4">
-            {{ t(getOutboundRoleLabel(getOutboundRole(outbound))) }}
-          </Tag>
-        </div>
-        <Button type="link" size="small" @click="handleSortGroup(index)">
-          (
-          {{ t('kernel.outbounds.refsOutbound') }}:{{ clacOutboundsCount(outbound) }}
-          /
-          {{ t('kernel.outbounds.refsSubscription') }}:{{ clacSubscriptionsCount(outbound) }}
-          /
-          {{ t('router.nodeGroups') }}:{{ clacNodeGroupsCount(outbound) }}
-          )
-        </Button>
-        <div class="ml-auto">
-          <Button v-if="hasLost(outbound)" type="text" @click="handleClearGroup(outbound)">
-            {{ t('common.clear') }}
+  <template v-else>
+    <div class="flex justify-end mb-8">
+      <Button icon="add" type="primary" size="small" @click="handleAdd">
+        {{ t('common.add') }}
+      </Button>
+    </div>
+
+    <div v-draggable="[model, DraggableOptions]">
+      <Card v-for="(outbound, index) in model" :key="outbound.id" class="mb-6">
+        <div class="flex flex-wrap items-center py-6 gap-6">
+          <Icon icon="drag" :size="15" color="var(--muted-color)" class="cursor-move shrink-0" />
+          <div class="font-bold flex items-center gap-4" style="min-width: 90px">
+            <img v-if="outbound.icon" :src="outbound.icon" class="w-18 h-18" />
+            <Button
+              v-if="hasLost(outbound)"
+              v-tips="'kernel.outbounds.notFound'"
+              icon="warn"
+              icon-color="var(--warning-color)"
+              type="text"
+              size="small"
+              @click="showLost"
+            />
+            <Button
+              v-if="needToAdd(outbound)"
+              v-tips="'kernel.outbounds.needToAdd'"
+              icon="error"
+              icon-color="var(--danger-color)"
+              type="text"
+              size="small"
+              @click="showNeedToAdd"
+            />
+            <span>{{ outbound.tag }}</span>
+            <Tag size="small" color="blue">
+              {{ t(getOutboundRoleLabel(getOutboundRole(outbound))) }}
+            </Tag>
+          </div>
+          <Button type="link" size="small" @click="handleSortGroup(index)">
+            {{ t('kernel.outbounds.refsOutbound') }}: {{ clacOutboundsCount(outbound) }} ·
+            {{ t('kernel.outbounds.refsSubscription') }}: {{ clacSubscriptionsCount(outbound) }} ·
+            {{ t('router.nodeGroups') }}: {{ clacNodeGroupsCount(outbound) }}
           </Button>
-          <Button icon="edit" type="text" size="small" @click="handleEditGroup(index)" />
-          <Button icon="delete" type="text" size="small" @click="handleDeleteGroup(index)" />
+          <div class="ml-auto flex items-center gap-2">
+            <Button v-if="hasLost(outbound)" type="text" size="small" @click="handleClearGroup(outbound)">
+              {{ t('common.clear') }}
+            </Button>
+            <Button
+              icon="edit"
+              type="text"
+              size="small"
+              :aria-label="t('common.edit')"
+              @click="handleEditGroup(index)"
+            />
+            <Button
+              icon="delete"
+              icon-color="var(--danger-color)"
+              type="text"
+              size="small"
+              :aria-label="t('common.delete')"
+              @click="handleDeleteGroup(index)"
+            />
+          </div>
         </div>
-      </div>
-    </Card>
-  </div>
+      </Card>
+    </div>
+  </template>
 
   <Modal
     v-model:open="showSortModal"
@@ -336,8 +372,8 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
   >
     <Divider>{{ t('kernel.outbounds.refs') }}</Divider>
     <Empty v-if="fields.outbounds.length === 0" />
-    <div v-draggable="[fields.outbounds, DraggableOptions]">
-      <Button v-for="proxy in fields.outbounds" :key="proxy.id" type="link">
+    <div v-draggable="[fields.outbounds, DraggableOptions]" class="flex flex-wrap gap-6">
+      <Button v-for="proxy in fields.outbounds" :key="proxy.id" type="normal" size="small" icon="drag">
         {{ proxy.tag }}
       </Button>
     </div>
@@ -367,15 +403,11 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
         {{ t('kernel.outbounds.preProxy') }}
         <Select v-model="fields.pre_proxy" :options="preProxyOptions" />
       </div>
-      <div class="text-12 opacity-70 mb-12">{{ t('kernel.outbounds.preProxyHint') }}</div>
+      <div class="text-12 text-muted mb-12">{{ t('kernel.outbounds.preProxyHint') }}</div>
       <div class="form-item">
         {{ t('kernel.outbounds.hidden') }}
         <Switch v-model="fields.hidden" />
       </div>
-      <!-- <div class="form-item">
-        {{ t('kernel.outbounds.interrupt_exist_connections') }}
-        <Switch v-model="fields.interrupt_exist_connections" />
-      </div> -->
       <div class="form-item">
         {{ t('kernel.outbounds.include') }}
         <Input v-model="fields.include" placeholder="keywords1|keywords2" />
@@ -416,14 +448,26 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
         }}
       </Divider>
 
-      <div v-for="group in proxyGroup" :key="group.id" class="group">
+      <div class="mb-8">
+        <Input
+          v-model="proxySearch"
+          size="small"
+          clearable
+          :placeholder="t('common.search')"
+          class="w-full"
+        />
+      </div>
+
+      <Empty v-if="filteredProxyGroups.length === 0" :icon-size="42" />
+
+      <div v-for="group in filteredProxyGroups" :key="group.id" class="group mb-6">
         <Button
           :type="isExpanded(group.id) ? 'link' : 'text'"
-          class="sticky top-0 backdrop-blur-sm w-full"
+          class="sticky top-0 backdrop-blur-sm w-full justify-start"
           @click="toggleExpanded(group.id)"
         >
           {{ t(group.name) }}
-          <div class="ml-auto mr-8">{{ group.proxies.length }}</div>
+          <div class="ml-auto mr-8 text-muted">{{ group.proxies.length }}</div>
           <Icon
             :class="{ 'rotate-z': isExpanded(group.id) }"
             icon="arrowRight"
@@ -440,16 +484,19 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
             "
           />
           <template v-else>
-            <div class="w-full grid grid-cols-4 gap-8 p-8">
+            <div class="outbound-proxy-grid p-8">
               <Button
                 v-for="proxy in group.proxies"
                 :key="proxy.id"
-                :type="isInuse(group.id, proxy.id) ? 'link' : 'text'"
+                :type="isInuse(group.id, proxy.id) ? 'primary' : 'normal'"
+                size="small"
+                class="outbound-proxy-item"
                 @click="handleAddProxy(group.id, proxy.id, proxy.tag)"
               >
-                {{ proxy.tag }}
-                <br />
-                {{ proxy.type }}
+                <div class="min-w-0 text-left w-full">
+                  <div class="line-clamp-1 font-bold">{{ proxy.tag }}</div>
+                  <div class="text-12 opacity-75 line-clamp-1">{{ proxy.type }}</div>
+                </div>
               </Button>
             </div>
           </template>
@@ -461,9 +508,19 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
 
 <style lang="less" scoped>
 .action-expand {
-  transition: all 0.2s;
+  transition: transform 0.2s;
 }
 .rotate-z {
   transform: rotateZ(90deg);
+}
+.outbound-proxy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.outbound-proxy-item {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 6px 10px;
 }
 </style>

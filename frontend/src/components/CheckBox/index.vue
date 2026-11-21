@@ -50,17 +50,22 @@ const handleSelect = (val: string) => {
 </script>
 
 <template>
-  <div :class="[size]" class="gui-checkbox inline-flex rounded-8 text-12">
+  <div role="group" :class="[size]" class="gui-checkbox inline-flex text-12">
     <button
       v-for="o in props.options"
       :key="o.value"
       type="button"
+      role="checkbox"
+      :aria-checked="isActive(o.value)"
       :aria-pressed="isActive(o.value)"
       :class="{ active: isActive(o.value) }"
-      class="gui-checkbox-button cursor-pointer px-12 py-6 transition duration-200"
+      class="gui-checkbox-button cursor-pointer inline-flex items-center gap-6 px-10 py-6 transition duration-200"
       @click="handleSelect(o.value)"
     >
-      {{ t(o.label) }}
+      <span class="gui-checkbox-box" aria-hidden="true">
+        <Icon v-if="isActive(o.value)" icon="selected" :size="12" color="var(--btn-primary-color)" />
+      </span>
+      <span>{{ t(o.label) }}</span>
     </button>
   </div>
 </template>
@@ -69,39 +74,51 @@ const handleSelect = (val: string) => {
 .gui-checkbox {
   max-width: 100%;
   flex-wrap: wrap;
-  gap: 3px;
-  padding: 3px;
-  background: var(--bg-color);
-  border: 1px solid var(--border-color);
+  gap: 6px;
+
   &-button {
-    color: var(--radio-normal-color);
-    background-color: var(--radio-normal-bg);
+    color: var(--color);
+    background-color: var(--card-bg);
     flex-shrink: 0;
-    border: 0;
-    border-radius: 5px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
     white-space: nowrap;
-    &:nth-child(1) {
-      border-left: none;
-    }
+    font-weight: 500;
     &:hover {
-      color: var(--radio-normal-hover-color);
+      border-color: color-mix(in srgb, var(--accent-text) 55%, var(--border-color));
+      color: var(--accent-text);
     }
   }
+
+  &-box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    border: 1.5px solid var(--border-color);
+    background: var(--input-bg);
+    flex-shrink: 0;
+    transition:
+      background-color 0.16s ease,
+      border-color 0.16s ease;
+  }
+
   .active {
-    color: var(--radio-primary-color);
-    background-color: var(--radio-primary-bg);
-    &:hover {
-      background-color: var(--radio-primary-hover-bg);
-    }
-    &:active {
-      background-color: var(--radio-primary-active-bg);
+    color: var(--accent-text);
+    background-color: var(--accent-soft);
+    border-color: var(--accent-text);
+    .gui-checkbox-box {
+      background-color: var(--primary-color);
+      border-color: var(--primary-color);
     }
   }
 }
 
 .small {
   .gui-checkbox-button {
-    font-size: 10px;
+    font-size: 12px;
     padding: 4px 8px;
   }
 }

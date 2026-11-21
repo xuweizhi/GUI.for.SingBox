@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, computed, useTemplateRef, type Ref, h } from 'vue'
+import { ref, inject, computed, useTemplateRef, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useNodeGroupsStore, useProfilesStore } from '@/stores'
@@ -14,7 +14,6 @@ import {
 } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
-import Dropdown from '@/components/Dropdown/index.vue'
 
 interface Props {
   id?: string
@@ -33,7 +32,6 @@ enum Step {
 
 const props = withDefaults(defineProps<Props>(), {
   id: '',
-  isUpdate: false,
   step: Step.Name,
 })
 
@@ -107,7 +105,7 @@ const handleNextStep = () => currentStep.value++
 const handleSave = async () => {
   const graphIssues = findOutboundGraphIssues(profile.value.outbounds, nodeGroupsStore.nodeGroups)
   if (graphIssues.some((issue) => issue.type === 'reserved-tag')) {
-    message.error('Strategy names direct and block are reserved.')
+    message.error(t('kernel.outbounds.reservedTag'))
     return
   }
   const cycle = graphIssues.find((issue) => issue.type === 'cycle')
@@ -121,7 +119,7 @@ const handleSave = async () => {
   }
   const missingNodeGroup = graphIssues.find((issue) => issue.type === 'missing-node-group')
   if (missingNodeGroup) {
-    message.error(`Node group not found: ${missingNodeGroup.targetId}`)
+    message.error(t('kernel.outbounds.missingNodeGroup', [missingNodeGroup.targetId]))
     return
   }
   const primaryProxy = getPrimaryProxyOutbound(profile.value)
@@ -142,23 +140,18 @@ const handleSave = async () => {
   loading.value = false
 }
 
-const handleAdd = () => {
-  const map: Record<number, Ref> = {
-    [Step.Inbounds]: inboundsRef,
-    [Step.Outbounds]: outboundsRef,
-    [Step.Route]: routeRef,
-    [Step.Dns]: dnsRef,
-  }
-  map[currentStep.value]!.value.handleAdd()
-}
-
 const handlePreview = async () => {
   try {
     const config = await generateConfig(profile.value)
-    alert(profile.value.name, JSON.stringify(config, null, 2))
+    alert(profile.value.name || t('common.preview'), JSON.stringify(config, null, 2))
   } catch (error: any) {
     message.error(error.message || error)
   }
+}
+
+const goToStep = (index: number) => {
+  if (!profile.value.name && index !== Step.Name) return
+  currentStep.value = index
 }
 
 if (props.id) {
@@ -171,54 +164,24 @@ if (props.id) {
 const modalSlots = {
   title: () =>
     h(
-      Dropdown,
-      {},
-      {
-        default: () =>
-          h(
-            'div',
-            {
-              class: 'font-bold',
-            },
-            `${t(stepItems[currentStep.value]!.title)} （${currentStep.value + 1} / ${stepItems.length}）`,
-          ),
-        overlay: () =>
-          h(
-            'div',
-            {
-              class: 'p-4 flex flex-col',
-            },
-            stepItems.map((step, index) =>
-              h(
-                Button,
-                {
-                  type: currentStep.value === index ? 'link' : 'text',
-                  disabled: !profile.value.name && currentStep.value !== index,
-                  onClick: () => (currentStep.value = index),
-                },
-                () => t(step.title),
-              ),
-            ),
-          ),
-      },
+      'div',
+      { class: 'font-bold text-16 line-clamp-1' },
+      profile.value.name
+        ? `${profile.value.name} · ${t(stepItems[currentStep.value]!.title)}`
+        : t(stepItems[currentStep.value]!.title),
     ),
 
   toolbar: () => [
-    h(Button, {
-      type: 'text',
-      icon: 'file',
-      onClick: handlePreview,
-    }),
-    h(Button, {
-      type: 'text',
-      icon: 'add',
-      style: {
-        display: [Step.Inbounds, Step.Outbounds, Step.Route, Step.Dns].includes(currentStep.value)
-          ? ''
-          : 'none',
+    h(
+      Button,
+      {
+        type: 'text',
+        size: 'small',
+        icon: 'preview',
+        onClick: handlePreview,
       },
-      onClick: handleAdd,
-    }),
+      () => t('common.preview'),
+    ),
   ],
   action: () => [
     h(
@@ -265,14 +228,32 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div>
-    <div v-if="currentStep === Step.Name">
+  <div class="profile-form flex flex-col gap-12">
+    <nav class="profile-stepper" role="tablist" :aria-label="t('router.profiles')">
+      <button
+        v-for="(item, index) in stepItems"
+        :key="item.title"
+        type="button"
+        role="tab"
+        :aria-selected="currentStep === index"
+        :disabled="!profile.name && index !== Step.Name"
+        :class="{ 'is-active': currentStep === index }"
+        class="profile-stepper__item"
+        @click="goToStep(index)"
+      >
+        <span class="profile-stepper__index">{{ index + 1 }}</span>
+        <span>{{ t(item.title) }}</span>
+      </button>
+    </nav>
+
+    <div v-if="currentStep === Step.Name" class="form-item">
+      {{ t('profile.name') }} *
       <Input
         v-model="profile.name"
         autofocus
-        :border="false"
+        clearable
         :placeholder="t('profile.name')"
-        class="w-full"
+        class="flex-1"
       />
     </div>
     <div v-if="currentStep === Step.General">
@@ -311,3 +292,65 @@ defineExpose({ modalSlots })
     </div>
   </div>
 </template>
+
+<style lang="less" scoped>
+.profile-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.profile-stepper__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--muted-color);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--color);
+    border-color: color-mix(in srgb, var(--accent-text) 45%, var(--border-color));
+  }
+
+  &.is-active {
+    background: var(--accent-soft);
+    border-color: var(--accent-text);
+    color: var(--accent-text);
+    font-weight: 600;
+    .profile-stepper__index {
+      background: var(--primary-color);
+      color: var(--btn-primary-color);
+    }
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.profile-stepper__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--bg-color);
+  font-size: 11px;
+  font-weight: 700;
+}
+</style>

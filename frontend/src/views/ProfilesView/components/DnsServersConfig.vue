@@ -102,17 +102,39 @@ const renderServer = (server: App.DnsServerConfig) => {
     </template>
   </Empty>
 
-  <div v-draggable="[model, DraggableOptions]">
-    <Card v-for="(server, index) in model" :key="server.id" class="mb-2">
-      <div class="flex items-center py-2">
-        <component :is="renderServer(server)" />
-        <div class="ml-auto">
-          <Button icon="edit" type="text" size="small" @click="handleEdit(index)" />
-          <Button icon="delete" type="text" size="small" @click="handleDeleteRule(index)" />
+  <template v-else>
+    <div class="flex justify-end mb-8">
+      <Button icon="add" type="primary" size="small" @click="handleAdd">
+        {{ t('common.add') }}
+      </Button>
+    </div>
+
+    <div v-draggable="[model, DraggableOptions]">
+      <Card v-for="(server, index) in model" :key="server.id" class="mb-6">
+        <div class="flex items-center py-6 gap-6">
+          <Icon icon="drag" :size="15" color="var(--muted-color)" class="cursor-move shrink-0" />
+          <component :is="renderServer(server)" />
+          <div class="ml-auto flex items-center gap-2">
+            <Button
+              icon="edit"
+              type="text"
+              size="small"
+              :aria-label="t('common.edit')"
+              @click="handleEdit(index)"
+            />
+            <Button
+              icon="delete"
+              icon-color="var(--danger-color)"
+              type="text"
+              size="small"
+              :aria-label="t('common.delete')"
+              @click="handleDeleteRule(index)"
+            />
+          </div>
         </div>
-      </div>
-    </Card>
-  </div>
+      </Card>
+    </div>
+  </template>
 
   <Modal
     v-model:open="showEditModal"

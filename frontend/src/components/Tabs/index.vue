@@ -43,16 +43,22 @@ const currentComponent = computed(() => {
 </script>
 
 <template>
-  <div :class="{ 'flex-col': isTop }" class="gui-tabs flex">
+  <div :class="{ 'flex-col is-top': isTop, 'is-left': !isTop }" class="gui-tabs flex">
     <div
-      :class="{ 'justify-center mb-8': isTop, 'flex-col': !isTop }"
+      role="tablist"
+      :aria-orientation="isTop ? 'horizontal' : 'vertical'"
+      :class="{ 'gui-tabs-tab--top mb-12': isTop, 'gui-tabs-tab--left flex-col': !isTop }"
       :style="{ width: isTop ? 'auto' : tabWidth }"
-      class="gui-tabs-tab flex"
+      class="gui-tabs-tab flex gap-4"
     >
       <Button
         v-for="tab in items"
         :key="tab.key"
+        role="tab"
+        :aria-selected="isActive(tab)"
         :type="isActive(tab) ? 'link' : 'text'"
+        :class="{ 'is-active': isActive(tab) }"
+        class="gui-tabs-item"
         @click="handleChange(tab.key)"
       >
         {{ t(tab.tab) }}
@@ -61,6 +67,7 @@ const currentComponent = computed(() => {
     </div>
 
     <div
+      role="tabpanel"
       class="gui-tabs-content flex flex-col overflow-y-auto"
       :style="{ width: isTop ? 'auto' : contentWidth }"
     >
@@ -70,3 +77,65 @@ const currentComponent = computed(() => {
     </div>
   </div>
 </template>
+
+<style lang="less" scoped>
+.gui-tabs-tab--top {
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 6px;
+}
+
+.gui-tabs-item {
+  position: relative;
+  &.is-active {
+    background: var(--accent-soft);
+    font-weight: 600;
+  }
+}
+
+.gui-tabs-tab--left .gui-tabs-item {
+  justify-content: flex-start;
+  &.is-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--accent-text);
+  }
+}
+
+.gui-tabs-tab--top .gui-tabs-item.is-active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -7px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent-text);
+}
+
+@media (max-width: 760px) {
+  .gui-tabs.is-left {
+    flex-direction: column;
+    gap: 12px;
+
+    > .gui-tabs-tab {
+      width: 100% !important;
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+
+    > .gui-tabs-content {
+      width: 100% !important;
+    }
+
+    .gui-tabs-tab--left .gui-tabs-item.is-active::before {
+      display: none;
+    }
+  }
+}
+</style>

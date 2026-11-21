@@ -206,7 +206,7 @@ const setTarget = (outbound: App.Outbound, value: string) => {
 }
 
 .policy-note {
-  color: var(--level-3-color);
+  color: var(--muted-color);
 }
 
 .semantic-warning {

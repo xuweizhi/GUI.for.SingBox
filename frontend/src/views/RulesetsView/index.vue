@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n, I18nT } from 'vue-i18n'
 
 import { RemoveFile, WriteFile } from '@/bridge'
@@ -10,6 +10,7 @@ import { View } from '@/enums/app'
 import { RulesetFormat, RulesetType, RuleType } from '@/enums/kernel'
 import { useRulesetsStore, useAppSettingsStore, useProfilesStore } from '@/stores'
 import {
+  confirm,
   debounce,
   formatRelativeTime,
   ignoredError,
@@ -39,6 +40,15 @@ const { t } = useI18n()
 const rulesetsStore = useRulesetsStore()
 const appSettingsStore = useAppSettingsStore()
 const profilesStore = useProfilesStore()
+const keywords = ref('')
+
+const filteredRulesets = computed(() => {
+  const q = keywords.value.trim().toLowerCase()
+  if (!q) return rulesetsStore.rulesets
+  return rulesetsStore.rulesets.filter(
+    (r) => r.name.toLowerCase().includes(q) || (r.path || '').toLowerCase().includes(q),
+  )
+})
 
 const handleImportRuleset = async () => {
   const m = modal({
@@ -91,8 +101,19 @@ const handleUpdateRuleset = async (r: App.RuleSet) => {
 
 const handleDeleteRuleset = async (r: App.RuleSet) => {
   try {
+    await confirm(t('common.delete'), t('common.confirmDelete', [r.name]), {
+      type: 'text',
+      okText: 'common.delete',
+      danger: true,
+    })
+  } catch {
+    return
+  }
+
+  try {
     await ignoredError(RemoveFile, r.path)
     await rulesetsStore.deleteRuleset(r.id)
+    message.success('common.success')
   } catch (error: any) {
     console.error('deleteRuleset: ', error)
     message.error(error)
@@ -112,6 +133,7 @@ const handleClearRuleset = async (id: string) => {
   try {
     await WriteFile(r.path, JSON.stringify(EmptyRuleSet, null, 2))
     rulesetsStore.editRuleset(r.id, r)
+    message.success('common.success')
   } catch (error: any) {
     message.error(error)
     console.error(error)
@@ -224,7 +246,16 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
   </div>
 
   <div v-else class="grid-list-header">
-    <Radio v-model="appSettingsStore.app.rulesetsView" :options="ViewOptions" class="mr-auto" />
+    <Radio v-model="appSettingsStore.app.rulesetsView" :options="ViewOptions" />
+    <span class="resource-count-badge">{{ rulesetsStore.rulesets.length }}</span>
+    <Input
+      v-model="keywords"
+      size="small"
+      clearable
+      auto-size
+      :placeholder="t('common.search')"
+      class="resource-search mr-auto"
+    />
     <Button type="link" @click="handleImportRuleset">
       {{ t('rulesets.hub') }}
     </Button>
@@ -240,12 +271,18 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
     </Button>
   </div>
 
+  <Empty v-if="rulesetsStore.rulesets.length > 0 && filteredRulesets.length === 0" />
+
   <div
-    v-draggable="[rulesetsStore.rulesets, { ...DraggableOptions, onUpdate: onSortUpdate }]"
+    v-else-if="rulesetsStore.rulesets.length > 0"
+    v-draggable="[
+      rulesetsStore.rulesets,
+      { ...DraggableOptions, disabled: Boolean(keywords.trim()), onUpdate: onSortUpdate },
+    ]"
     :class="'grid-list-' + appSettingsStore.app.rulesetsView"
   >
     <Card
-      v-for="r in rulesetsStore.rulesets"
+      v-for="r in filteredRulesets"
       :key="r.id"
       v-menu="generateMenus(r)"
       :title="r.name"
@@ -260,24 +297,108 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
 
       <template v-if="appSettingsStore.app.rulesetsView === View.Grid" #extra>
         <Dropdown>
-          <Button type="link" size="small" icon="more" />
-          <template #overlay>
-            <div class="flex flex-col gap-4 min-w-64 p-4">
+          <Button
+            type="text"
+            size="small"
+            icon="more"
+            :aria-label="t('common.more') + ' · ' + r.name"
+          />
+          <template #overlay="{ close }">
+            <div class="flex flex-col gap-2 min-w-128 p-6">
               <Button
                 :disabled="r.disabled"
                 :loading="r.updating"
-                :type="r.disabled ? 'text' : 'text'"
-                @click="handleUpdateRuleset(r)"
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    close()
+                    handleUpdateRuleset(r)
+                  }
+                "
               >
                 {{ t('common.update') }}
               </Button>
-              <Button type="text" @click="handleDisableRuleset(r)">
+              <Button
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    close()
+                    handleAddRulesetToProfile(r.id)
+                  }
+                "
+              >
+                {{ t('rulesets.addToProfile') }}
+              </Button>
+              <Button
+                v-if="r.format === RulesetFormat.Source"
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    close()
+                    handleEditRulesetList(r.id)
+                  }
+                "
+              >
+                {{ t('rulesets.editRuleset') }}
+              </Button>
+              <Button
+                v-if="r.format === RulesetFormat.Source"
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    close()
+                    handleClearRuleset(r.id)
+                  }
+                "
+              >
+                {{ t('common.clear') }}
+              </Button>
+              <Divider size="small" />
+              <Button
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    close()
+                    handleDisableRuleset(r)
+                  }
+                "
+              >
                 {{ r.disabled ? t('common.enable') : t('common.disable') }}
               </Button>
-              <Button type="text" @click="handleShowRulesetForm(r.id, true)">
+              <Button
+                type="text"
+                size="small"
+                class="justify-start"
+                @click="
+                  () => {
+                    close()
+                    handleShowRulesetForm(r.id, true)
+                  }
+                "
+              >
                 {{ t('common.edit') }}
               </Button>
-              <Button type="text" @click="handleDeleteRuleset(r)">
+              <Button
+                type="text"
+                size="small"
+                class="justify-start text-danger"
+                @click="
+                  () => {
+                    close()
+                    handleDeleteRuleset(r)
+                  }
+                "
+              >
                 {{ t('common.delete') }}
               </Button>
             </div>
@@ -289,11 +410,22 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
         <Button
           :disabled="r.disabled"
           :loading="r.updating"
-          :type="r.disabled ? 'text' : 'text'"
+          type="text"
           size="small"
           @click="handleUpdateRuleset(r)"
         >
           {{ t('common.update') }}
+        </Button>
+        <Button type="text" size="small" @click="handleAddRulesetToProfile(r.id)">
+          {{ t('rulesets.addToProfile') }}
+        </Button>
+        <Button
+          v-if="r.format === RulesetFormat.Source"
+          type="text"
+          size="small"
+          @click="handleEditRulesetList(r.id)"
+        >
+          {{ t('rulesets.editRuleset') }}
         </Button>
         <Button type="text" size="small" @click="handleDisableRuleset(r)">
           {{ r.disabled ? t('common.enable') : t('common.disable') }}
@@ -301,41 +433,33 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
         <Button type="text" size="small" @click="handleShowRulesetForm(r.id, true)">
           {{ t('common.edit') }}
         </Button>
-        <Button type="text" size="small" @click="handleDeleteRuleset(r)">
+        <Button type="text" size="small" class="text-danger" @click="handleDeleteRuleset(r)">
           {{ t('common.delete') }}
         </Button>
       </template>
 
-      <div v-if="r.format === RulesetFormat.Binary">
-        {{ t('ruleset.format.name') }}
-        :
-        {{ r.format || '--' }}
+      <div class="resource-meta-list">
+        <div class="flex items-center gap-6 mb-4">
+          <Tag size="small" :color="r.format === RulesetFormat.Binary ? 'purple' : 'cyan'">
+            {{ t('ruleset.format.' + r.format) }}
+          </Tag>
+          <Tag v-if="r.format === RulesetFormat.Source" size="small" color="default">
+            {{ t('rulesets.rulesetCount') }}: {{ r.count }}
+          </Tag>
+        </div>
+        <div class="resource-meta-row">
+          <span>{{ t('common.updateTime') }}</span>
+          <span class="resource-meta-value">
+            {{
+              r.updateTime
+                ? appSettingsStore.app.rulesetsView === View.Grid
+                  ? formatRelativeTime(r.updateTime)
+                  : formatDate(r.updateTime, 'YYYY-MM-DD HH:mm:ss')
+                : '--'
+            }}
+          </span>
+        </div>
       </div>
-
-      <template v-if="appSettingsStore.app.rulesetsView === View.Grid">
-        <div v-if="r.format === RulesetFormat.Source">
-          {{ t('rulesets.rulesetCount') }}
-          :
-          {{ r.count }}
-        </div>
-        <div>
-          {{ t('common.updateTime') }}
-          :
-          {{ r.updateTime ? formatRelativeTime(r.updateTime) : '--' }}
-        </div>
-      </template>
-      <template v-else>
-        <div v-if="r.format === RulesetFormat.Source">
-          {{ t('rulesets.rulesetCount') }}
-          :
-          {{ r.count }}
-        </div>
-        <div>
-          {{ t('common.updateTime') }}
-          :
-          {{ r.updateTime ? formatDate(r.updateTime, 'YYYY-MM-DD HH:mm:ss') : '--' }}
-        </div>
-      </template>
     </Card>
   </div>
 </template>

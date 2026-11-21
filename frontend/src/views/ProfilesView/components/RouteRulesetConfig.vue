@@ -74,39 +74,62 @@ const handleUse = (ruleset: any) => {
     </template>
   </Empty>
 
-  <div v-draggable="[model, DraggableOptions]">
-    <Card v-for="(ruleset, index) in model" :key="ruleset.id" class="mb-2">
-      <div class="flex items-center py-2">
-        <div class="font-bold">
-          <span
-            v-if="hasLost(ruleset)"
-            class="cursor-pointer"
-            :style="{ color: 'rgb(200, 193, 11)' }"
-            @click="showLost"
-          >
-            [ ! ]
-          </span>
-          <Tag color="cyan">{{ ruleset.tag }}</Tag>
-          <Tag>
-            {{ t('kernel.route.rule_set.type.' + ruleset.type) }}
-            {{
-              t(
-                'kernel.route.rule_set.format.' +
-                  (ruleset.type === RulesetType.Inline ? RulesetFormat.Source : ruleset.format),
-              )
-            }}
-          </Tag>
-          <template v-if="ruleset.type === RulesetType.Inline">
-            {{ ruleset.rules }}
-          </template>
+  <template v-else>
+    <div class="flex justify-end mb-8">
+      <Button icon="add" type="primary" size="small" @click="handleAdd">
+        {{ t('common.add') }}
+      </Button>
+    </div>
+
+    <div v-draggable="[model, DraggableOptions]">
+      <Card v-for="(ruleset, index) in model" :key="ruleset.id" class="mb-6">
+        <div class="flex items-center py-6 gap-6">
+          <Icon icon="drag" :size="15" color="var(--muted-color)" class="cursor-move shrink-0" />
+          <div class="font-bold flex items-center flex-wrap gap-4 flex-1 min-w-0">
+            <Button
+              v-if="hasLost(ruleset)"
+              v-tips="'kernel.route.rule_set.notFound'"
+              icon="warn"
+              icon-color="var(--warning-color)"
+              type="text"
+              size="small"
+              @click="showLost"
+            />
+            <Tag color="cyan">{{ ruleset.tag }}</Tag>
+            <Tag>
+              {{ t('kernel.route.rule_set.type.' + ruleset.type) }}
+              {{
+                t(
+                  'kernel.route.rule_set.format.' +
+                    (ruleset.type === RulesetType.Inline ? RulesetFormat.Source : ruleset.format),
+                )
+              }}
+            </Tag>
+            <template v-if="ruleset.type === RulesetType.Inline">
+              <span class="text-12 text-muted font-mono break-all">{{ ruleset.rules }}</span>
+            </template>
+          </div>
+          <div class="ml-auto flex items-center gap-2 shrink-0">
+            <Button
+              icon="edit"
+              type="text"
+              size="small"
+              :aria-label="t('common.edit')"
+              @click="handleEdit(index)"
+            />
+            <Button
+              icon="delete"
+              icon-color="var(--danger-color)"
+              type="text"
+              size="small"
+              :aria-label="t('common.delete')"
+              @click="handleDelete(index)"
+            />
+          </div>
         </div>
-        <div class="ml-auto">
-          <Button icon="edit" type="text" size="small" @click="handleEdit(index)" />
-          <Button icon="delete" type="text" size="small" @click="handleDelete(index)" />
-        </div>
-      </div>
-    </Card>
-  </div>
+      </Card>
+    </div>
+  </template>
 
   <Modal
     v-model:open="showEditModal"

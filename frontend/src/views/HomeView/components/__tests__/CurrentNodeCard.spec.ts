@@ -85,6 +85,7 @@ const mountCard = () =>
           template: '<div class="card"><slot name="extra" /><slot /></div>',
         },
         Tag: { template: '<span class="tag"><slot /></span>' },
+        Icon: true,
         NodeSelectorModal: {
           props: ['open'],
           template: '<div class="selector-modal" :data-open="open" />',

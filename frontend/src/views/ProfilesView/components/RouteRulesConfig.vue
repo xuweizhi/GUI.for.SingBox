@@ -201,6 +201,12 @@ const renderRule = (rule: App.Rule) => {
     </template>
   </Empty>
 
+  <div v-else class="flex justify-end mb-8">
+    <Button icon="add" type="primary" size="small" @click="handleAdd">
+      {{ t('common.add') }}
+    </Button>
+  </div>
+
   <Divider v-if="isInsertionPointMissing">
     <Button type="text" size="small" @click="handleAddInsertionPoint">
       {{ t('kernel.addInsertionPoint') }}
@@ -208,7 +214,7 @@ const renderRule = (rule: App.Rule) => {
   </Divider>
 
   <div v-draggable="[model, DraggableOptions]">
-    <Card v-for="(rule, index) in model" :key="rule.id" class="mb-2">
+    <Card v-for="(rule, index) in model" :key="rule.id" class="mb-6">
       <div v-if="rule.type === RuleType.InsertionPoint" class="text-center font-bold">
         <Divider class="cursor-move">
           <Button icon="add" type="text" size="small" @click="handleAdd">
@@ -216,31 +222,47 @@ const renderRule = (rule: App.Rule) => {
           </Button>
         </Divider>
       </div>
-      <div v-else class="flex items-start py-2 gap-8">
+      <div v-else class="flex items-start py-6 gap-8">
+        <Icon icon="drag" :size="15" color="var(--muted-color)" class="cursor-move shrink-0 mt-2" />
         <div class="shrink-0">
           <Switch v-model="rule.enable" border="square" size="small" />
         </div>
-        <div class="font-bold flex-1 rule-content">
-          <span
+        <div class="font-bold flex-1 rule-content flex items-center gap-4 flex-wrap">
+          <Button
             v-if="hasLost(rule)"
-            class="cursor-pointer"
-            :style="{ color: 'rgb(200, 193, 11)' }"
+            v-tips="'kernel.route.rules.invalid'"
+            icon="warn"
+            icon-color="var(--warning-color)"
+            type="text"
+            size="small"
             @click="showLost"
-          >
-            [ ! ]
-          </span>
-          {{ renderRule(rule) }}
+          />
+          <span>{{ renderRule(rule) }}</span>
         </div>
-        <div class="ml-auto shrink-0">
+        <div class="ml-auto shrink-0 flex items-center gap-2">
           <Button
             v-if="rule.type === RuleType.RuleSet && rule.payload && hasLost(rule)"
             type="text"
+            size="small"
             @click="handleClearRuleset(rule)"
           >
             {{ t('common.clear') }}
           </Button>
-          <Button icon="edit" type="text" size="small" @click="handleEdit(index)" />
-          <Button icon="delete" type="text" size="small" @click="handleDelete(index)" />
+          <Button
+            icon="edit"
+            type="text"
+            size="small"
+            :aria-label="t('common.edit')"
+            @click="handleEdit(index)"
+          />
+          <Button
+            icon="delete"
+            icon-color="var(--danger-color)"
+            type="text"
+            size="small"
+            :aria-label="t('common.delete')"
+            @click="handleDelete(index)"
+          />
         </div>
       </div>
     </Card>

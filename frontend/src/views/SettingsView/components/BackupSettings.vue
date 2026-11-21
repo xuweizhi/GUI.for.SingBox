@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onActivated, reactive, ref, shallowRef } from 'vue'
+import { computed, onActivated, reactive, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useWebuiAuthStore } from '@/stores'
@@ -14,9 +14,12 @@ interface Preview {
   external: string[]
 }
 
+type BusyAction = '' | 'history' | 'export' | 'import' | 'snapshot' | 'upload' | 'download' | 'restore'
+
 const { t } = useI18n()
 const auth = useWebuiAuthStore()
-const busy = ref(false)
+const busyAction = ref<BusyAction>('')
+const busy = computed(() => busyAction.value !== '')
 const auto = ref(false)
 const history = ref<string[]>([])
 const picker = ref<HTMLInputElement>()
@@ -36,15 +39,15 @@ const request = async (action: string, init: RequestInit = {}) => {
   return response
 }
 
-const run = async (operation: () => Promise<void>) => {
+const run = async (action: BusyAction, operation: () => Promise<void>) => {
   if (busy.value) return
-  busy.value = true
+  busyAction.value = action
   try {
     await operation()
   } catch (error) {
     message.error(error)
   } finally {
-    busy.value = false
+    busyAction.value = ''
   }
 }
 
@@ -54,16 +57,16 @@ const refreshHistory = async () => {
   history.value = state.files
 }
 
-onActivated(() => void run(refreshHistory))
+onActivated(() => void run('history', refreshHistory))
 
 const toggle = () =>
-  run(async () => {
+  run('history', async () => {
     await request('history', { method: 'PUT', body: JSON.stringify({ enabled: !auto.value }) })
     await refreshHistory()
   })
 
 const exportZip = () =>
-  run(async () => {
+  run('export', async () => {
     const response = await withConfigMutation(() => request('export', { method: 'POST' }))
     const url = URL.createObjectURL(await response.blob())
     const link = document.createElement('a')
@@ -85,18 +88,18 @@ const chooseFile = (event: Event) => {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (file) void run(() => inspect(file, file.name))
+  if (file) void run('import', () => inspect(file, file.name))
 }
 
 const chooseSnapshot = (name: string) =>
-  run(async () => {
+  run('snapshot', async () => {
     const response = await request('snapshot?name=' + encodeURIComponent(name))
     await inspect(await response.blob(), name)
   })
 
 const restore = async () => {
   if (!selected.value || busy.value) return false
-  busy.value = true
+  busyAction.value = 'restore'
   try {
     await withConfigMutation(() => request('restore', { method: 'POST', body: selected.value }))
     window.location.reload()
@@ -104,12 +107,12 @@ const restore = async () => {
     message.error(error)
     return false
   } finally {
-    busy.value = false
+    busyAction.value = ''
   }
 }
 
 const webdav = (upload: boolean) =>
-  run(async () => {
+  run(upload ? 'upload' : 'download', async () => {
     const action = upload ? 'webdav-upload' : 'webdav-download'
     const send = () =>
       request(action, {
@@ -126,42 +129,70 @@ const webdav = (upload: boolean) =>
 <template>
   <div class="flex flex-col gap-12">
     <Card :title="t('backup.local')">
-      <p>{{ t('backup.contents') }}</p>
+      <p class="text-13 text-muted mt-0 mb-12">{{ t('backup.contents') }}</p>
       <div class="flex flex-wrap gap-8">
-        <Button :disabled="busy" @click="exportZip">{{ t('backup.export') }}</Button>
-        <Button :disabled="busy" @click="picker?.click()">{{ t('backup.import') }}</Button>
+        <Button
+          type="primary"
+          :loading="busyAction === 'export'"
+          :disabled="busy && busyAction !== 'export'"
+          @click="exportZip"
+        >
+          {{ t('backup.export') }}
+        </Button>
+        <Button
+          :loading="busyAction === 'import'"
+          :disabled="busy && busyAction !== 'import'"
+          @click="picker?.click()"
+        >
+          {{ t('backup.import') }}
+        </Button>
         <input ref="picker" hidden type="file" accept=".zip,application/zip" @change="chooseFile" />
       </div>
     </Card>
     <Card :title="t('backup.history')">
       <Switch :model-value="auto" :disabled="busy" label="backup.auto" @change="toggle" />
-      <div v-if="history.length" class="flex flex-col items-start gap-4 mt-8">
+      <div v-if="history.length" class="flex flex-col items-start gap-4 mt-12">
+        <div class="text-12 text-muted">{{ t('backup.clickSnapshotHint') }}</div>
         <Button
           v-for="name in history"
           :key="name"
           type="link"
-          :disabled="busy"
+          size="small"
+          :loading="busyAction === 'snapshot'"
+          :disabled="busy && busyAction !== 'snapshot'"
           @click="chooseSnapshot(name)"
         >
           {{ name }}
         </Button>
       </div>
+      <div v-else class="text-12 text-muted mt-10">
+        {{ t('backup.noHistory') }}
+      </div>
     </Card>
     <Card title="WebDAV">
       <div class="flex flex-col gap-8">
-        <label for="backup-dav-url">{{ t('backup.davUrl') }}</label>
+        <label for="backup-dav-url" class="text-13 font-bold">{{ t('backup.davUrl') }}</label>
         <Input v-model="dav.url" input-id="backup-dav-url" placeholder="https://…/backup.zip" />
-        <label for="backup-dav-user">{{ t('backup.username') }}</label>
+        <label for="backup-dav-user" class="text-13 font-bold">{{ t('backup.username') }}</label>
         <Input v-model="dav.username" input-id="backup-dav-user" />
-        <label for="backup-dav-password">{{ t('backup.password') }}</label>
+        <label for="backup-dav-password" class="text-13 font-bold">{{ t('backup.password') }}</label>
         <Input v-model="dav.password" type="password" input-id="backup-dav-password" />
-        <div class="flex flex-wrap gap-8">
-          <Button :disabled="busy || !dav.url" @click="webdav(true)">{{
-            t('backup.upload')
-          }}</Button>
-          <Button :disabled="busy || !dav.url" @click="webdav(false)">{{
-            t('backup.download')
-          }}</Button>
+        <div class="flex flex-wrap gap-8 mt-4">
+          <Button
+            type="primary"
+            :loading="busyAction === 'upload'"
+            :disabled="!dav.url || (busy && busyAction !== 'upload')"
+            @click="webdav(true)"
+          >
+            {{ t('backup.upload') }}
+          </Button>
+          <Button
+            :loading="busyAction === 'download'"
+            :disabled="!dav.url || (busy && busyAction !== 'download')"
+            @click="webdav(false)"
+          >
+            {{ t('backup.download') }}
+          </Button>
         </div>
       </div>
     </Card>
@@ -169,25 +200,47 @@ const webdav = (upload: boolean) =>
       v-model:open="showPreview"
       title="backup.preview"
       submit-text="backup.restore"
+      submit-type="danger"
       :on-ok="restore"
     >
-      <div v-if="preview">
-        <strong>{{ source }}</strong>
-        <p>
-          {{ new Date(preview.created).toLocaleString() }} ·
-          {{ t('backup.files', [preview.files, formatBytes(preview.bytes)]) }}
-        </p>
-        <div v-for="(count, key) in preview.counts" :key="key">
-          {{ t('backup.resources.' + key) }} · {{ count }}
+      <div v-if="preview" class="flex flex-col gap-10">
+        <div>
+          <strong>{{ source }}</strong>
+          <p class="text-12 text-muted my-4">
+            {{ new Date(preview.created).toLocaleString() }} ·
+            {{ t('backup.files', [preview.files, formatBytes(preview.bytes)]) }}
+          </p>
+        </div>
+        <div class="backup-preview-counts rounded-8 p-10 flex flex-col gap-4 text-13">
+          <div v-for="(count, key) in preview.counts" :key="key" class="flex justify-between">
+            <span class="text-muted">{{ t('backup.resources.' + key) }}</span>
+            <strong>{{ count }}</strong>
+          </div>
         </div>
         <template v-if="preview.external.length">
-          <p>{{ t('backup.external') }}</p>
-          <ul>
+          <p class="text-13 font-bold my-0">{{ t('backup.external') }}</p>
+          <ul class="my-0 pl-16 text-12 font-mono">
             <li v-for="name in preview.external" :key="name" class="break-all">{{ name }}</li>
           </ul>
         </template>
-        <p>{{ t('backup.replace') }}</p>
+        <div class="backup-replace-warning rounded-8 p-10 text-12">
+          {{ t('backup.replace') }}
+        </div>
       </div>
     </Modal>
   </div>
 </template>
+
+<style lang="less" scoped>
+.backup-preview-counts {
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
+}
+
+.backup-replace-warning {
+  color: var(--warning-color);
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
+  line-height: 1.6;
+}
+</style>

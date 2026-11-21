@@ -20,12 +20,7 @@ import type { ResourceSelectProps } from '@/components/ResourceSelect/index.vue'
 const ContainerCssText = `
     position: fixed;
     z-index: 99999;
-    top: 84px;
-    left: 0;
-    right: 0;
-    display: flex;
-    justify-content: center;
-    max-height: 70%;
+    inset: 0;
 `
 
 interface MessageInstance {
@@ -45,9 +40,13 @@ class Message {
     this.container.style.cssText = `
         position: fixed;
         z-index: 999999;
-        top: 80px;
+        top: 16px;
         left: 50%;
         transform: translateX(-50%);
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
     `
     document.body.appendChild(this.container)
     this.instances = {}

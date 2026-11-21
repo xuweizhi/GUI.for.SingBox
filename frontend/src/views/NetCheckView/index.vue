@@ -38,6 +38,7 @@ const syncNodeController = async (running: boolean) => {
 }
 
 const handleRun = async () => {
+  if (networkCheck.running.value) return
   runError.value = ''
 
   try {
@@ -73,38 +74,47 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="net-check flex flex-col gap-12 p-12">
-    <Card :title="t('router.netcheck')">
-      <div class="flex flex-col gap-8">
-        <div class="text-12">
+  <div class="net-check flex flex-col gap-16 pb-16">
+    <Card>
+      <div class="flex flex-col gap-10 py-14">
+        <div class="text-13 text-muted">
           {{ t('netCheck.target.description') }}
         </div>
         <div class="flex flex-wrap items-center gap-8">
-          <Input v-model="networkCheck.input.value" class="flex-1 min-w-240" />
+          <Input
+            v-model="networkCheck.input.value"
+            clearable
+            :placeholder="t('netCheck.target.placeholder')"
+            class="flex-1 min-w-240"
+            @keydown.enter="handleRun"
+          />
           <Button
             data-action="run-check"
             type="primary"
             icon="speedTest"
-            :disabled="networkCheck.running.value"
+            :loading="networkCheck.running.value"
             @click="handleRun"
           >
             {{ t('netCheck.actions.run') }}
           </Button>
-          <Button :disabled="networkCheck.running.value" @click="clearResults">
+          <Button
+            :disabled="networkCheck.running.value || networkCheck.groups.value.length === 0"
+            @click="clearResults"
+          >
             {{ t('netCheck.actions.clear') }}
           </Button>
         </div>
-        <div v-if="runError" class="text-12">
+        <div v-if="runError" role="alert" class="net-check__error rounded-8 px-12 py-8 text-12">
           {{ renderText(runError) }}
         </div>
       </div>
     </Card>
 
     <Card :title="t('netCheck.results.title')">
-      <div v-if="networkCheck.groups.value.length === 0" class="text-12">
+      <div v-if="networkCheck.groups.value.length === 0" class="py-16 text-center text-13 text-muted">
         {{ t('netCheck.results.empty') }}
       </div>
-      <div v-else class="flex flex-col gap-8">
+      <div v-else class="flex flex-col gap-12">
         <NetCheckGroupCard
           v-for="group in networkCheck.groups.value"
           :key="group.id"
@@ -122,3 +132,11 @@ onUnmounted(() => {
     />
   </div>
 </template>
+
+<style lang="less" scoped>
+.net-check__error {
+  color: var(--danger-color);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger-color) 35%, transparent);
+}
+</style>

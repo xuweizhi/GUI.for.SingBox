@@ -48,12 +48,14 @@ watch(
 
 <template>
   <SplashView v-if="loading">
-    <Progress
-      :percent="percent"
-      :status="hasError ? 'danger' : 'primary'"
-      :radius="10"
-      type="circle"
-    />
+    <div class="rotation">
+      <Progress
+        :percent="percent"
+        :status="hasError ? 'danger' : 'primary'"
+        :radius="10"
+        type="circle"
+      />
+    </div>
   </SplashView>
   <RouterView v-else-if="authStore.status !== 'authenticated'" />
   <SplashView v-else-if="!initialized">

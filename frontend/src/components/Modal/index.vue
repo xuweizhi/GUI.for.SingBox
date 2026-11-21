@@ -3,11 +3,11 @@ export const IS_IN_MODAL = 'IS_IN_MODAL'
 </script>
 
 <script setup lang="ts">
-import { computed, markRaw, nextTick, provide, ref, watch } from 'vue'
+import { computed, markRaw, nextTick, onUnmounted, provide, ref, useTemplateRef, watch } from 'vue'
 
 import { useBool } from '@/hooks'
 import { useAppStore } from '@/stores'
-import { message, sampleID } from '@/utils'
+import { sampleID } from '@/utils'
 
 export interface Props {
   title?: string
@@ -22,6 +22,7 @@ export interface Props {
   submit?: boolean
   cancelText?: string
   submitText?: string
+  submitType?: 'primary' | 'danger'
   maskClosable?: boolean
   class?: string
   container?: string
@@ -62,6 +63,7 @@ const props = withDefaults(defineProps<Props>(), {
   submit: true,
   cancelText: 'common.cancel',
   submitText: 'common.save',
+  submitType: 'primary',
   maskClosable: false,
   class: undefined,
   container: 'body',
@@ -82,6 +84,8 @@ const open = defineModel<boolean>('open', { default: false })
 const hasOpened = ref(open.value)
 const cancelLoading = ref(false)
 const submitLoading = ref(false)
+const dialogRef = useTemplateRef<HTMLElement>('dialogRef')
+let previouslyFocused: HTMLElement | null = null
 
 const modalZindex = ref()
 const appStore = useAppStore()
@@ -242,20 +246,17 @@ const handleDestroy = () => handleAction(false, !isMinimize.value, true)
 const onMaskClick = () => (props.maskClosable ? handleCancel() : Promise.resolve())
 
 const contentStyle = computed(() => ({
-  maxHeight: props.maxHeight + '%',
-  maxWidth: props.maxWidth + '%',
+  maxHeight: isMaximize.value ? '100%' : props.maxHeight + '%',
+  maxWidth: isMaximize.value ? '100%' : props.maxWidth + '%',
   minWidth: isMaximize.value ? '100%' : props.minWidth ? props.minWidth + '%' : '0',
   minHeight: isMaximize.value ? '100%' : props.minHeight ? props.minHeight + '%' : '0',
-  width: props.width + '%',
-  height: props.height + '%',
+  width: isMaximize.value ? '100%' : props.width ? props.width + '%' : undefined,
+  height: isMaximize.value ? '100%' : props.height ? props.height + '%' : undefined,
 }))
 
 const shouldRender = computed(
   () => open.value || isMinimize.value || (!props.destroyOnClose && hasOpened.value),
 )
-
-let lastEscTime = 0
-let closeMessage: () => void
 
 const closeFn = () => {
   if (isMinimize.value) {
@@ -265,20 +266,40 @@ const closeFn = () => {
     toggleMaximize()
     return
   }
-  if (props.maskClosable) {
-    return handleCancel()
+  return handleCancel()
+}
+
+const getFocusableElements = () => {
+  if (!dialogRef.value) return []
+  return Array.from(
+    dialogRef.value.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((el) => el.offsetParent !== null || el === document.activeElement)
+}
+
+const handleDialogKeydown = (event: KeyboardEvent) => {
+  if (event.key !== 'Tab') return
+  const focusable = getFocusableElements()
+  if (!focusable.length) return
+  const first = focusable[0]!
+  const last = focusable[focusable.length - 1]!
+  if (event.shiftKey) {
+    if (document.activeElement === first || !dialogRef.value?.contains(document.activeElement)) {
+      event.preventDefault()
+      last.focus()
+    }
+  } else if (document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
   }
-  const now = performance.now()
-  if (now - lastEscTime < 1000) {
-    lastEscTime = 0
-    closeMessage?.()
-    return handleCancel()
-  } else {
-    const { destroy } = message.info('common.pressAgainToClose', 1_000)
-    closeMessage = destroy
-    lastEscTime = now
+}
+
+const restoreFocus = () => {
+  if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+    previouslyFocused.focus()
   }
-  return Promise.resolve()
+  previouslyFocused = null
 }
 
 const minimizeModal = markRaw({
@@ -321,10 +342,16 @@ watch(open, (v) => {
       return
     }
     if (closeState.phase === 'running-hooks') return
+    previouslyFocused = document.activeElement as HTMLElement | null
     hasOpened.value = true
     isMinimize.value = false
     modalZindex.value = ++appStore.modalZIndexCounter
     appStore.modalStack.push(closeFn)
+    nextTick(() => {
+      if (dialogRef.value && !dialogRef.value.contains(document.activeElement)) {
+        dialogRef.value.focus()
+      }
+    })
   } else {
     if (closeState.phase === 'running-hooks') {
       restoreOpen()
@@ -345,12 +372,20 @@ watch(open, (v) => {
       }).catch((error) => console.error(error))
       return
     }
-    closeMessage?.()
     const idx = appStore.modalStack.findIndex((fn) => fn === closeFn)
     if (idx !== -1) {
       appStore.modalStack.splice(idx, 1)
     }
+    restoreFocus()
   }
+})
+
+onUnmounted(() => {
+  const idx = appStore.modalStack.findIndex((fn) => fn === closeFn)
+  if (idx !== -1) {
+    appStore.modalStack.splice(idx, 1)
+  }
+  removeMinimizedModal()
 })
 
 provide('cancel', handleCancel)
@@ -371,68 +406,80 @@ defineExpose({ handleCancel, handleDestroy })
         @click.self="onMaskClick"
       >
         <div
+          ref="dialogRef"
           :style="contentStyle"
           :class="[props.class, { 'is-maximized': isMaximize }]"
           role="dialog"
+          aria-modal="true"
+          tabindex="-1"
           :aria-label="title ? $t(title) : undefined"
-          class="gui-modal-modal transition duration-200 flex flex-col rounded-8 shadow"
+          class="gui-modal-modal transition duration-200 flex flex-col rounded-8 shadow outline-none"
+          @keydown="handleDialogKeydown"
         >
           <div
             v-if="title || slots.title || slots.toolbar"
-            class="flex items-center p-16"
+            class="gui-modal-header flex items-center gap-8 px-16 py-12"
             @dblclick.self="toggleMaximize"
           >
-            <slot name="title">
-              <div v-if="title" class="font-bold">{{ $t(title) }}</div>
-            </slot>
-            <div class="ml-auto">
+            <div class="min-w-0 flex-1">
+              <slot name="title">
+                <div v-if="title" class="font-bold text-16 line-clamp-1">{{ $t(title) }}</div>
+              </slot>
+            </div>
+            <div class="ml-auto flex items-center gap-4 shrink-0">
               <slot name="toolbar"></slot>
               <Button
                 v-if="toolbar.minimize"
                 :aria-label="$t('common.minimize')"
                 icon="minimize2"
                 type="text"
+                size="small"
                 @click="handleMinimize"
               />
               <Button
                 v-if="toolbar.maximize"
                 :aria-label="$t('common.resize')"
+                :icon="isMaximize ? 'maximize2' : 'maximize'"
                 type="text"
+                size="small"
                 @click="toggleMaximize"
-              >
-                <Icon
-                  :class="{ maximize: isMaximize }"
-                  icon="arrowDown"
-                  class="maximize-normal origin-center duration-200"
-                />
-              </Button>
+              />
               <Button
                 v-if="toolbar.close !== false"
                 icon="close"
                 type="text"
+                size="small"
                 :aria-label="$t('common.close')"
                 :loading="cancelLoading"
                 @click="handleCancel"
               />
             </div>
           </div>
-          <div class="gui-modal-content flex-1 overflow-auto mx-16">
+          <div class="gui-modal-content flex-1 overflow-auto px-16 py-12">
             <slot></slot>
           </div>
-          <div v-if="footer" class="flex items-center justify-end py-8 px-16 gap-8">
+          <div
+            v-if="footer"
+            class="gui-modal-footer flex items-center justify-end py-12 px-16 gap-8"
+          >
             <slot name="action"></slot>
             <slot name="cancel">
               <Button
                 v-if="cancel"
                 :loading="cancelLoading"
-                :type="maskClosable ? 'text' : 'normal'"
+                type="normal"
                 @click="handleCancel"
               >
                 {{ $t(cancelText) }}
               </Button>
             </slot>
             <slot name="submit">
-              <Button v-if="submit" :loading="submitLoading" type="primary" @click="handleSubmit">
+              <Button
+                v-if="submit"
+                :loading="submitLoading"
+                :type="submitType"
+                @click="handleSubmit"
+              >
                 {{ $t(submitText) }}
               </Button>
             </slot>
@@ -444,17 +491,27 @@ defineExpose({ handleCancel, handleDestroy })
 </template>
 
 <style lang="less" scoped>
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
 .modal-enter-active .gui-modal-modal,
 .modal-leave-active .gui-modal-modal {
   transition:
-    transform 0.2s ease-in-out,
-    opacity 0.2s ease-in-out;
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.18s ease;
 }
 
 .modal-enter-from .gui-modal-modal,
 .modal-leave-to .gui-modal-modal {
   opacity: 0;
-  transform: scale(0);
+  transform: scale(0.96) translateY(8px);
 }
 
 .gui-modal-mask {
@@ -464,20 +521,34 @@ defineExpose({ handleCancel, handleDestroy })
     background-color: var(--modal-bg);
     border: 1px solid var(--border-color);
     border-radius: 14px;
+    box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+    overflow: hidden;
+
+    &.is-maximized {
+      border-radius: 0;
+      border: 0;
+    }
   }
 }
+
+.gui-modal-header {
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
 .gui-modal-content {
   min-height: 0;
 }
+
+.gui-modal-footer {
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
 @media (max-width: 700px) {
-  .gui-modal-mask .gui-modal-modal {
+  .gui-modal-mask .gui-modal-modal:not(.is-maximized) {
     max-width: calc(100% - 24px) !important;
+    min-width: calc(100% - 24px) !important;
   }
-}
-.maximize-normal {
-  transform: rotate(-180deg);
-}
-.maximize {
-  transform: rotate(0deg);
 }
 </style>
