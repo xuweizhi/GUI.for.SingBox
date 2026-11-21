@@ -1,6 +1,7 @@
 import {
   ColorOptions,
   FontPresetOptions,
+  FontSizeOptions,
   NavLayoutOptions,
   ThemeOptions,
   UiDensityOptions,
@@ -193,6 +194,15 @@ export const getCommands = () => {
             label: font.label,
             cmd: font.key,
             handler: () => (appSettings.app.fontFamily = font.value),
+          })),
+        },
+        {
+          label: 'settings.fontSize.name',
+          cmd: 'Font Size',
+          children: FontSizeOptions.map((size) => ({
+            label: size.label,
+            cmd: `${size.value}px`,
+            handler: () => (appSettings.app.fontSize = size.value),
           })),
         },
         {

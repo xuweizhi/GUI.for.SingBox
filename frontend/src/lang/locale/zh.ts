@@ -1052,6 +1052,16 @@ export default {
       custom: '自定义',
       customPlaceholder: '输入 CSS font-family，如 "PingFang SC", sans-serif',
     },
+    fontSize: {
+      name: '字体大小',
+      small: '小',
+      default: '标准',
+      large: '偏大',
+      xlarge: '特大',
+      decrease: '减小字号',
+      increase: '增大字号',
+      reset: '重置字号',
+    },
     lang: {
       name: '语言',
       load: '加载语言文件',

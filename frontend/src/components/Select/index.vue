@@ -320,7 +320,7 @@ const handleTriggerKeydown = (
 }
 
 .small {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 .gui-select__listbox {
@@ -339,7 +339,7 @@ const handleTriggerKeydown = (
   background: transparent;
   color: var(--color);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   text-align: left;
   cursor: pointer;
   transition: background-color 0.12s ease;

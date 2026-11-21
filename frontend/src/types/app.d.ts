@@ -151,6 +151,7 @@ declare global {
       primaryColor: string
       secondaryColor: string
       fontFamily: string
+      fontSize: number
       profilesView: View
       subscribesView: View
       rulesetsView: View

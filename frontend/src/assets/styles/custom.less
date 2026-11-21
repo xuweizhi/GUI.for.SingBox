@@ -7,7 +7,7 @@ body {
   background-attachment: fixed;
   user-select: none;
   -webkit-user-select: none;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-family:
     system-ui,
     -apple-system,
@@ -31,7 +31,7 @@ body {
   margin-top: var(--grid-gap, 16px);
   min-height: 0;
   overflow-y: auto;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-content: start;
@@ -47,7 +47,7 @@ body {
   flex: 1;
   margin-top: 8px;
   overflow-y: auto;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -75,7 +75,7 @@ body {
 }
 
 .form-item {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   padding: 8px 4px;
   display: flex;
   align-items: center;
@@ -120,7 +120,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--muted-color);
   line-height: 1.6;
   user-select: text;
@@ -167,7 +167,7 @@ pre {
   align-items: center;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--muted-color);
   background: var(--card-bg);

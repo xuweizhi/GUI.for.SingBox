@@ -3,7 +3,7 @@
 .generate-text(@i: 1) when (@i <= length(@text-sizes)) {
   @s: extract(@text-sizes, @i);
   .text-@{s} {
-    font-size: unit(@s, px);
+    font-size: calc(unit(@s, px) * var(--font-scale, 1));
   }
   .generate-text(@i + 1);
 }

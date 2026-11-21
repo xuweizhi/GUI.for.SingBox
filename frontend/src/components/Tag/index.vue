@@ -97,7 +97,7 @@ const handleClose = () => {
 .size-small {
   padding: 1px 6px;
   margin: 0 2px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.4;
 }
 </style>

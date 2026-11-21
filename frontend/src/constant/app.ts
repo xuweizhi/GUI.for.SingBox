@@ -37,6 +37,17 @@ export const RulesetHubFilePath = 'data/.cache/ruleset-list.json'
 export const DefaultFontFamily =
   'system-ui, "Microsoft YaHei UI", "Source Han Sans CN", "Twemoji Mozilla", sans-serif'
 
+export const DefaultFontSize = 14
+export const MinFontSize = 12
+export const MaxFontSize = 18
+
+export const FontSizeOptions = [
+  { label: 'settings.fontSize.small', value: 12 },
+  { label: 'settings.fontSize.default', value: 14 },
+  { label: 'settings.fontSize.large', value: 16 },
+  { label: 'settings.fontSize.xlarge', value: 18 },
+] as const
+
 export const FontPresetOptions = [
   {
     key: 'system',

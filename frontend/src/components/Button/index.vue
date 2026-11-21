@@ -171,11 +171,11 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 .small {
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .large {
   padding: 9px 18px;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
   font-weight: 600;
 }
 </style>

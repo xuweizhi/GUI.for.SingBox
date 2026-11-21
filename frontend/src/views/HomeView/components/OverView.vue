@@ -228,7 +228,7 @@ onUnmounted(() => {
 }
 
 .home-stat-card__value {
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale, 1));
   font-weight: 650;
   line-height: 1.4;
 }

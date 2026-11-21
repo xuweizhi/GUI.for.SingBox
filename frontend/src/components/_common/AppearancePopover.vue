@@ -7,6 +7,9 @@ import {
   Colors,
   DefaultFontFamily,
   FontPresetOptions,
+  FontSizeOptions,
+  MaxFontSize,
+  MinFontSize,
   NavLayoutOptions,
   ThemeOptions,
   UiDensityOptions,
@@ -50,6 +53,13 @@ const selectCustomFont = () => {
 const resetFontFamily = () => {
   isCustomFont.value = false
   appSettings.app.fontFamily = DefaultFontFamily
+}
+
+const adjustFontSize = (delta: number) => {
+  appSettings.app.fontSize = Math.min(
+    MaxFontSize,
+    Math.max(MinFontSize, appSettings.app.fontSize + delta),
+  )
 }
 
 const swatchBackground = (color: App.Color) => {
@@ -232,6 +242,46 @@ const onThemeClick = (e: MouseEvent) => {
               />
             </template>
           </Input>
+        </div>
+
+        <div class="appearance-section">
+          <div class="appearance-section__head">
+            <span class="appearance-section__label">{{ t('settings.fontSize.name') }}</span>
+            <span class="appearance-section__value font-mono">{{ appSettings.app.fontSize }}px</span>
+          </div>
+          <div class="font-size-bar">
+            <button
+              type="button"
+              class="size-step-btn"
+              :disabled="appSettings.app.fontSize <= MinFontSize"
+              :aria-label="t('settings.fontSize.decrease')"
+              @click="adjustFontSize(-1)"
+            >
+              A-
+            </button>
+            <div class="size-preset-row">
+              <button
+                v-for="opt in FontSizeOptions"
+                :key="opt.value"
+                type="button"
+                class="size-preset-btn"
+                :class="{ 'is-active': appSettings.app.fontSize === opt.value }"
+                :aria-pressed="appSettings.app.fontSize === opt.value"
+                @click="appSettings.app.fontSize = opt.value"
+              >
+                {{ t(opt.label) }}
+              </button>
+            </div>
+            <button
+              type="button"
+              class="size-step-btn"
+              :disabled="appSettings.app.fontSize >= MaxFontSize"
+              :aria-label="t('settings.fontSize.increase')"
+              @click="adjustFontSize(1)"
+            >
+              A+
+            </button>
+          </div>
         </div>
 
         <div class="appearance-row">
@@ -651,5 +701,72 @@ const onThemeClick = (e: MouseEvent) => {
     color: var(--accent-text);
     font-weight: 600;
   }
+}
+
+.appearance-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.appearance-section__value {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+
+.font-size-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.size-preset-row {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.size-step-btn,
+.size-preset-btn {
+  height: 28px;
+  padding: 0 6px;
+  border-radius: var(--control-radius, 8px);
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-color) 65%, var(--surface-bg));
+  color: var(--color);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    background-color 0.14s ease,
+    color 0.14s ease;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent-text) 55%, var(--border-color));
+    color: var(--accent-text);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.size-step-btn {
+  min-width: 30px;
+  font-weight: 650;
+  flex-shrink: 0;
+}
+
+.size-preset-btn.is-active {
+  border-color: var(--accent-text);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
 }
 </style>

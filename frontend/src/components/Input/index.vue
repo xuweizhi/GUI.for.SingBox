@@ -195,7 +195,7 @@ defineExpose({
       disabled,
     }"
     :style="{
-      height: type === 'code' ? '' : size === 'small' ? '30px' : '36px',
+      minHeight: type === 'code' ? '' : size === 'small' ? '30px' : '36px',
     }"
     class="gui-input inline-flex items-center px-8"
   >
@@ -371,7 +371,7 @@ defineExpose({
 
 .small {
   input {
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
   }
 }
 </style>

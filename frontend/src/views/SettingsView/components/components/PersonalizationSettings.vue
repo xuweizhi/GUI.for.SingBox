@@ -6,7 +6,11 @@ import {
   ColorOptions,
   Colors,
   DefaultFontFamily,
+  DefaultFontSize,
   FontPresetOptions,
+  FontSizeOptions,
+  MaxFontSize,
+  MinFontSize,
   NavLayoutOptions,
   ThemeOptions,
   UiDensityOptions,
@@ -54,6 +58,15 @@ const selectCustomFont = () => {
 const resetFontFamily = () => {
   isCustomFont.value = false
   appSettings.app.fontFamily = DefaultFontFamily
+}
+
+const adjustFontSize = (delta: number) => {
+  const next = Math.min(MaxFontSize, Math.max(MinFontSize, appSettings.app.fontSize + delta))
+  appSettings.app.fontSize = next
+}
+
+const resetFontSize = () => {
+  appSettings.app.fontSize = DefaultFontSize
 }
 
 const onThemeClick = (e: MouseEvent) => {
@@ -241,6 +254,55 @@ const swatchBackground = (color: App.Color) => {
               />
             </template>
           </Input>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div>{{ $t('settings.fontSize.name') }}</div>
+      <div class="font-size-block">
+        <div class="font-size-presets">
+          <button
+            v-for="opt in FontSizeOptions"
+            :key="opt.value"
+            type="button"
+            class="font-chip"
+            :class="{ 'is-active': appSettings.app.fontSize === opt.value }"
+            :aria-pressed="appSettings.app.fontSize === opt.value"
+            @click="appSettings.app.fontSize = opt.value"
+          >
+            <span>{{ $t(opt.label) }}</span>
+            <span class="font-size-px">{{ opt.value }}px</span>
+          </button>
+        </div>
+        <div class="font-size-stepper">
+          <button
+            type="button"
+            class="stepper-btn"
+            :disabled="appSettings.app.fontSize <= MinFontSize"
+            :aria-label="$t('settings.fontSize.decrease')"
+            @click="adjustFontSize(-1)"
+          >
+            A-
+          </button>
+          <span class="stepper-value font-mono">{{ appSettings.app.fontSize }}px</span>
+          <button
+            type="button"
+            class="stepper-btn"
+            :disabled="appSettings.app.fontSize >= MaxFontSize"
+            :aria-label="$t('settings.fontSize.increase')"
+            @click="adjustFontSize(1)"
+          >
+            A+
+          </button>
+          <Button
+            v-if="appSettings.app.fontSize !== DefaultFontSize"
+            v-tips="'settings.fontSize.reset'"
+            type="text"
+            size="small"
+            icon="reset"
+            @click="resetFontSize"
+          />
         </div>
       </div>
     </div>
@@ -624,6 +686,72 @@ const swatchBackground = (color: App.Color) => {
 .font-custom-input {
   width: 100%;
   max-width: 440px;
+}
+
+.font-size-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.font-size-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.font-size-px {
+  font-size: 11px;
+  opacity: 0.72;
+}
+
+.font-size-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border-radius: var(--control-radius, 8px);
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-color) 70%, var(--surface-bg));
+}
+
+.stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: max(3px, calc(var(--control-radius, 8px) - 3px));
+  background: transparent;
+  color: var(--color);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--btn-text-hover-bg);
+    color: var(--accent-text);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.stepper-value {
+  min-width: 42px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-text);
 }
 
 @media (max-width: 900px) {

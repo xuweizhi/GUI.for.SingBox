@@ -84,7 +84,7 @@ const appStore = useAppStore()
     padding: var(--row-pad-y, 14px) 0;
     > :first-child {
       min-width: 0;
-      font-size: 14px;
+      font-size: calc(14px * var(--font-scale, 1));
       font-weight: 600;
     }
     > :last-child {

@@ -255,7 +255,7 @@ const goOverview = () => {
   align-items: center;
   gap: 9px;
   min-width: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 700;
   color: var(--color);
   white-space: nowrap;
@@ -316,7 +316,7 @@ const goOverview = () => {
 
 .sidebar-group__label {
   padding: 0 10px 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -330,10 +330,10 @@ const goOverview = () => {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 38px;
-  padding: 0 10px;
+  min-height: 38px;
+  padding: 6px 10px;
   border-radius: var(--control-radius, 8px);
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--font-scale, 1));
   font-weight: 500;
   color: var(--color);
   white-space: nowrap;
@@ -422,13 +422,13 @@ const goOverview = () => {
 }
 
 .sidebar-core-card__state {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--color);
 }
 
 .sidebar-core-card__profile {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   color: var(--muted-color);
   overflow: hidden;
   text-overflow: ellipsis;

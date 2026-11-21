@@ -93,6 +93,7 @@ vi.mock('@/stores', () => {
       secondaryColor: '#1d4ed8',
       fontFamily:
         'system-ui, "Microsoft YaHei UI", "Source Han Sans CN", "Twemoji Mozilla", sans-serif',
+      fontSize: 14,
       pages: [
         'Overview',
         'NetCheck',
@@ -170,6 +171,7 @@ describe('layout and workspace interactions', () => {
     mocks.appSettingsStore.app.color = 'default'
     mocks.appSettingsStore.app.fontFamily =
       'system-ui, "Microsoft YaHei UI", "Source Han Sans CN", "Twemoji Mozilla", sans-serif'
+    mocks.appSettingsStore.app.fontSize = 14
     mocks.rulesetsStore.addRuleset.mockReset()
     mocks.messageError.mockReset()
   })
@@ -321,6 +323,17 @@ describe('layout and workspace interactions', () => {
 
     await fontButtons[5]!.trigger('click')
     expect(wrapper.find('.custom-font-input').exists()).toBe(true)
+
+    const sizePresetButtons = wrapper.findAll('.size-preset-btn')
+    expect(sizePresetButtons).toHaveLength(4)
+    await sizePresetButtons[2]!.trigger('click')
+    expect(mocks.appSettingsStore.app.fontSize).toBe(16)
+
+    const stepButtons = wrapper.findAll('.size-step-btn')
+    await stepButtons[1]!.trigger('click')
+    expect(mocks.appSettingsStore.app.fontSize).toBe(17)
+    await stepButtons[0]!.trigger('click')
+    expect(mocks.appSettingsStore.app.fontSize).toBe(16)
   })
 
   it('renders horizontal topnav links in AppShell when navLayout is topnav', async () => {

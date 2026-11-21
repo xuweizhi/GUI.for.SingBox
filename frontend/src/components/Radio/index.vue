@@ -88,7 +88,7 @@ const handleSelect = (val: string | number | boolean) => {
 
 .small {
   .gui-radio-button {
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     padding: 4px 8px;
   }
 }

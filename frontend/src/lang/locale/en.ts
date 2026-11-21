@@ -1065,6 +1065,16 @@ export default {
       custom: 'Custom',
       customPlaceholder: 'Enter CSS font-family, e.g. "Inter", sans-serif',
     },
+    fontSize: {
+      name: 'Font Size',
+      small: 'Small',
+      default: 'Standard',
+      large: 'Large',
+      xlarge: 'Extra Large',
+      decrease: 'Decrease font size',
+      increase: 'Increase font size',
+      reset: 'Reset font size',
+    },
     lang: {
       name: 'Language',
       load: 'Load language files',

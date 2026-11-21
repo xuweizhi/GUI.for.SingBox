@@ -88,11 +88,13 @@ describe('app settings store helpers', () => {
         uiStyle: 'invalid' as any,
         navLayout: 'unknown' as any,
         uiDensity: '' as any,
+        fontSize: 99,
       }),
     ).toEqual({
       uiStyle: 'modern',
       navLayout: 'sidebar',
       uiDensity: 'comfortable',
+      fontSize: 18,
     })
 
     expect(
@@ -100,11 +102,16 @@ describe('app settings store helpers', () => {
         uiStyle: 'glass',
         navLayout: 'topnav',
         uiDensity: 'compact',
+        fontSize: 16,
       }),
     ).toEqual({
       uiStyle: 'glass',
       navLayout: 'topnav',
       uiDensity: 'compact',
+      fontSize: 16,
     })
+
+    expect(normalizeAppearanceSettings({ fontSize: 6 })).toMatchObject({ fontSize: 12 })
+    expect(normalizeAppearanceSettings({})).toMatchObject({ fontSize: 14 })
   })
 })

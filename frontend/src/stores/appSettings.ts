@@ -9,10 +9,13 @@ import {
   DefaultConcurrencyLimit,
   DefaultControllerSensitivity,
   DefaultFontFamily,
+  DefaultFontSize,
   DefaultPluginHubSources,
   DefaultTestTimeout,
   DefaultTestURL,
   MaxConcurrencyLimit,
+  MaxFontSize,
+  MinFontSize,
   UserFilePath,
 } from '@/constant/app'
 import { DefaultConnections, DefaultCoreConfig } from '@/constant/kernel'
@@ -36,8 +39,14 @@ const VALID_UI_STYLES = new Set<string>(Object.values(UiStyle))
 const VALID_NAV_LAYOUTS = new Set<string>(Object.values(NavLayout))
 const VALID_UI_DENSITIES = new Set<string>(Object.values(UiDensity))
 
+const normalizeFontSize = (value: unknown) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return DefaultFontSize
+  return Math.min(MaxFontSize, Math.max(MinFontSize, Math.round(parsed)))
+}
+
 export const normalizeAppearanceSettings = (
-  settings: Partial<Pick<App.AppSettings, 'uiStyle' | 'navLayout' | 'uiDensity'>>,
+  settings: Partial<Pick<App.AppSettings, 'uiStyle' | 'navLayout' | 'uiDensity' | 'fontSize'>>,
 ) => ({
   uiStyle: VALID_UI_STYLES.has(String(settings.uiStyle))
     ? (settings.uiStyle as UiStyle)
@@ -48,6 +57,7 @@ export const normalizeAppearanceSettings = (
   uiDensity: VALID_UI_DENSITIES.has(String(settings.uiDensity))
     ? (settings.uiDensity as UiDensity)
     : UiDensity.Comfortable,
+  fontSize: normalizeFontSize(settings.fontSize),
 })
 
 export const normalizeLogSettings = (settings: App.AppSettings['log'] | undefined) => {
@@ -138,6 +148,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     primaryColor: '#2563eb',
     secondaryColor: '#1d4ed8',
     fontFamily: DefaultFontFamily,
+    fontSize: DefaultFontSize,
     profilesView: View.Grid,
     subscribesView: View.Grid,
     rulesetsView: View.Grid,
@@ -276,6 +287,11 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     fontFamily(fontFamily: string) {
       document.body.style.fontFamily = fontFamily.trim() || DefaultFontFamily
     },
+    fontSize(fontSize: number) {
+      const size = normalizeFontSize(fontSize)
+      document.documentElement.style.setProperty('--font-size-base', `${size}px`)
+      document.documentElement.style.setProperty('--font-scale', (size / DefaultFontSize).toFixed(4))
+    },
     uiStyle(style: App.UiStyle) {
       document.body.setAttribute('ui-style', VALID_UI_STYLES.has(style) ? style : UiStyle.Modern)
     },
@@ -293,6 +309,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     applyAppSettings.color(settings.color, settings.primaryColor, settings.secondaryColor)
     applyAppSettings.lang(settings.lang)
     applyAppSettings.fontFamily(settings.fontFamily)
+    applyAppSettings.fontSize(settings.fontSize)
     applyAppSettings.uiStyle(settings.uiStyle)
     applyAppSettings.uiDensity(settings.uiDensity)
     const lastModifiedSettings = stringify(settings)
@@ -328,6 +345,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
   watch(themeMode, setAppTheme, { immediate: true })
   applyAppSettings.uiStyle(app.value.uiStyle)
   applyAppSettings.uiDensity(app.value.uiDensity)
+  applyAppSettings.fontSize(app.value.fontSize)
 
   return { setupAppSettings, app, themeMode }
 })

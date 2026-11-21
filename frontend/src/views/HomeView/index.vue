@@ -492,14 +492,14 @@ const tabs = computed(() => [
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 4px 12px;
   border: 0;
   border-radius: var(--control-radius, 8px);
   background: transparent;
   color: var(--muted-color);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;

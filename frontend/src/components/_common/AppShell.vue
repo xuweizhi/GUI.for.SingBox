@@ -286,7 +286,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 700;
   color: var(--color);
   white-space: nowrap;
@@ -294,7 +294,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 .topbar-title {
   margin: 0;
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   line-height: 1.3;
   font-weight: 650;
   white-space: nowrap;
@@ -325,10 +325,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 11px;
+  min-height: 32px;
+  padding: 4px 11px;
   border-radius: var(--control-radius, 8px);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 500;
   color: var(--muted-color);
   white-space: nowrap;
@@ -373,7 +373,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   background: transparent;
   color: var(--muted-color);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -452,7 +452,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   background: color-mix(in srgb, var(--bg-color) 75%, var(--surface-bg));
   color: var(--muted-color);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 500;
   cursor: pointer;
   transition:
