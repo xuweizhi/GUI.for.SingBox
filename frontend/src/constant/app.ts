@@ -40,6 +40,7 @@ export const DefaultFontFamily =
 export const DefaultFontSize = 14
 export const MinFontSize = 12
 export const MaxFontSize = 18
+export const MaxCustomFontPresets = 20
 
 export const FontSizeOptions = [
   { label: 'settings.fontSize.small', value: 12 },

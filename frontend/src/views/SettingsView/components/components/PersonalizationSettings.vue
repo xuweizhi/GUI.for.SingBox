@@ -1,13 +1,10 @@
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue'
-
 import { BrowserOpenURL } from '@/bridge'
+import FontPresetSelector from '@/components/_common/FontPresetSelector.vue'
 import {
   ColorOptions,
   Colors,
-  DefaultFontFamily,
   DefaultFontSize,
-  FontPresetOptions,
   FontSizeOptions,
   MaxFontSize,
   MinFontSize,
@@ -31,34 +28,6 @@ const pages = routes.flatMap((route) => {
 
 const appStore = useAppStore()
 const appSettings = useAppSettingsStore()
-
-const matchedFontPreset = computed(
-  () => FontPresetOptions.find((opt) => opt.value === appSettings.app.fontFamily)?.key ?? 'custom',
-)
-const isCustomFont = ref(matchedFontPreset.value === 'custom')
-
-watch(
-  () => appSettings.app.fontFamily,
-  () => {
-    isCustomFont.value = matchedFontPreset.value === 'custom'
-  },
-)
-
-const activeFontKey = computed(() => (isCustomFont.value ? 'custom' : matchedFontPreset.value))
-
-const selectFontPreset = (value: string) => {
-  isCustomFont.value = false
-  appSettings.app.fontFamily = value
-}
-
-const selectCustomFont = () => {
-  isCustomFont.value = true
-}
-
-const resetFontFamily = () => {
-  isCustomFont.value = false
-  appSettings.app.fontFamily = DefaultFontFamily
-}
 
 const adjustFontSize = (delta: number) => {
   const next = Math.min(MaxFontSize, Math.max(MinFontSize, appSettings.app.fontSize + delta))
@@ -207,55 +176,9 @@ const swatchBackground = (color: App.Color) => {
       <Radio v-model="appSettings.app.lang" :options="appStore.locales" />
     </div>
 
-    <div class="settings-row">
+    <div class="settings-row settings-row--font">
       <div>{{ $t('settings.fontFamily') }}</div>
-      <div class="font-picker-block">
-        <div class="font-chips">
-          <button
-            v-for="opt in FontPresetOptions"
-            :key="opt.key"
-            type="button"
-            class="font-chip"
-            :class="{ 'is-active': activeFontKey === opt.key }"
-            :aria-pressed="activeFontKey === opt.key"
-            @click="selectFontPreset(opt.value)"
-          >
-            <span class="font-chip__sample" :style="{ fontFamily: opt.value }" aria-hidden="true">
-              Aa
-            </span>
-            <span :style="{ fontFamily: opt.value }">{{ $t(opt.label) }}</span>
-          </button>
-          <button
-            type="button"
-            class="font-chip"
-            :class="{ 'is-active': activeFontKey === 'custom' }"
-            :aria-pressed="activeFontKey === 'custom'"
-            @click="selectCustomFont"
-          >
-            <Icon icon="edit" :size="13" color="currentColor" />
-            <span>{{ $t('settings.font.custom') }}</span>
-          </button>
-        </div>
-        <div v-if="activeFontKey === 'custom'" class="font-custom-input">
-          <Input
-            v-model="appSettings.app.fontFamily"
-            :placeholder="$t('settings.font.customPlaceholder')"
-            auto-size
-            clearable
-            class="w-full text-13"
-          >
-            <template #suffix>
-              <Button
-                v-tips="'settings.resetFont'"
-                type="text"
-                size="small"
-                icon="reset"
-                @click="resetFontFamily"
-              />
-            </template>
-          </Input>
-        </div>
-      </div>
+      <FontPresetSelector variant="settings" />
     </div>
 
     <div class="settings-row">
@@ -623,17 +546,12 @@ const swatchBackground = (color: App.Color) => {
   flex-shrink: 0;
 }
 
-.font-picker-block {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  gap: 8px;
-}
+.settings-row--font {
+  align-items: start;
 
-.font-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  > :first-child {
+    padding-top: 6px;
+  }
 }
 
 .font-chip {
@@ -667,25 +585,6 @@ const swatchBackground = (color: App.Color) => {
     box-shadow: var(--active-indicator-shadow);
     font-weight: 600;
   }
-}
-
-.font-chip__sample {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 20px;
-  padding: 0 4px;
-  border-radius: 4px;
-  background: color-mix(in srgb, currentColor 10%, transparent);
-  font-size: 11.5px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.font-custom-input {
-  width: 100%;
-  max-width: 440px;
 }
 
 .font-size-block {
@@ -757,6 +656,12 @@ const swatchBackground = (color: App.Color) => {
 @media (max-width: 900px) {
   .style-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .settings-row--font > :first-child {
+    padding-top: 0;
   }
 }
 

@@ -141,6 +141,13 @@ declare global {
       children?: Menu[]
     }
 
+    type CustomFontPreset = {
+      id: string
+      label: string
+      fontFamily: string
+      stylesheetUrl?: string
+    }
+
     type AppSettings = {
       lang: Lang | string
       theme: Theme
@@ -152,6 +159,7 @@ declare global {
       secondaryColor: string
       fontFamily: string
       fontSize: number
+      customFontPresets: CustomFontPreset[]
       profilesView: View
       subscribesView: View
       rulesetsView: View
@@ -594,6 +602,7 @@ declare global {
 
 export type AppEnv = App.AppEnv
 export type Menu = App.Menu
+export type CustomFontPreset = App.CustomFontPreset
 export type AppSettings = App.AppSettings
 export type PluginConfiguration = App.PluginConfiguration
 export type Plugin = App.Plugin

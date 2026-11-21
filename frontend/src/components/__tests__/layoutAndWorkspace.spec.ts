@@ -94,6 +94,7 @@ vi.mock('@/stores', () => {
       fontFamily:
         'system-ui, "Microsoft YaHei UI", "Source Han Sans CN", "Twemoji Mozilla", sans-serif',
       fontSize: 14,
+      customFontPresets: [] as App.CustomFontPreset[],
       pages: [
         'Overview',
         'NetCheck',
@@ -154,6 +155,7 @@ vi.mock('@/views/HomeView/components/QuickStart.vue', () => ({
 
 import AppearancePopover from '@/components/_common/AppearancePopover.vue'
 import AppShell from '@/components/_common/AppShell.vue'
+import FontPresetSelector from '@/components/_common/FontPresetSelector.vue'
 import NavigationBar from '@/components/_common/NavigationBar.vue'
 import CommonController from '@/views/HomeView/components/CommonController.vue'
 import HomeView from '@/views/HomeView/index.vue'
@@ -172,6 +174,7 @@ describe('layout and workspace interactions', () => {
     mocks.appSettingsStore.app.fontFamily =
       'system-ui, "Microsoft YaHei UI", "Source Han Sans CN", "Twemoji Mozilla", sans-serif'
     mocks.appSettingsStore.app.fontSize = 14
+    mocks.appSettingsStore.app.customFontPresets = []
     mocks.rulesetsStore.addRuleset.mockReset()
     mocks.messageError.mockReset()
   })
@@ -291,7 +294,9 @@ describe('layout and workspace interactions', () => {
           Button: true,
           Input: {
             props: ['modelValue'],
-            template: '<input class="custom-font-input" :value="modelValue" />',
+            emits: ['update:modelValue'],
+            template:
+              '<input class="custom-font-input" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
           },
           Dropdown: {
             template: '<div><slot :show="true" /><slot name="overlay" /></div>',
@@ -316,7 +321,7 @@ describe('layout and workspace interactions', () => {
     expect(mocks.appSettingsStore.app.navLayout).toBe('topnav')
 
     const fontButtons = wrapper.findAll('.font-chip')
-    expect(fontButtons).toHaveLength(6)
+    expect(fontButtons).toHaveLength(7)
     await fontButtons[4]!.trigger('click')
     expect(mocks.appSettingsStore.app.fontFamily).toContain('JetBrains Mono')
     expect(wrapper.find('.custom-font-input').exists()).toBe(false)
@@ -334,6 +339,145 @@ describe('layout and workspace interactions', () => {
     expect(mocks.appSettingsStore.app.fontSize).toBe(17)
     await stepButtons[0]!.trigger('click')
     expect(mocks.appSettingsStore.app.fontSize).toBe(16)
+  })
+
+  it('adds, validates, saves from custom input, switches, and removes custom font presets', async () => {
+    const wrapper = mount(AppearancePopover, {
+      global: {
+        stubs: {
+          Icon: true,
+          Radio: true,
+          ColorPicker: true,
+          Button: true,
+          Input: {
+            props: ['modelValue'],
+            emits: ['update:modelValue'],
+            template:
+              '<input class="custom-font-input" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+          },
+          Dropdown: {
+            template: '<div><slot :show="true" /><slot name="overlay" /></div>',
+          },
+        },
+      },
+    })
+
+    // Open preset creator and verify empty-name and invalid-URL validation
+    await wrapper.get('.font-chip--add').trigger('click')
+    const form = wrapper.get('form.font-preset-creator')
+    await form.trigger('submit')
+    expect(wrapper.get('.font-preset-error').text()).toBe('settings.font.errorEmptyName')
+
+    const inputs = form.findAll('input.font-creator-input')
+    await inputs[0]!.setValue('霞鹜文楷')
+    await inputs[1]!.setValue('"LXGW WenKai", serif')
+    await inputs[2]!.setValue('javascript:alert(1)')
+    await form.trigger('submit')
+    expect(wrapper.get('.font-preset-error').text()).toBe('settings.font.errorInvalidUrl')
+
+    // Save valid preset with stylesheet URL and verify live preview & activation
+    await inputs[2]!.setValue('/fonts/lxgw.css')
+    expect(wrapper.get('.font-preset-preview').attributes('style')).toContain('LXGW WenKai')
+    await form.trigger('submit')
+
+    expect(mocks.appSettingsStore.app.customFontPresets).toEqual([
+      {
+        id: 'custom-font-1',
+        label: '霞鹜文楷',
+        fontFamily: '"LXGW WenKai", serif',
+        stylesheetUrl: '/fonts/lxgw.css',
+      },
+    ])
+    expect(mocks.appSettingsStore.app.fontFamily).toBe('"LXGW WenKai", serif')
+    expect(wrapper.find('.font-chip__web-dot').exists()).toBe(true)
+
+    // Save another preset from ad-hoc custom font input
+    const customChip = wrapper
+      .findAll('.font-chip')
+      .find((btn) => btn.text().includes('settings.font.custom'))!
+    await customChip.trigger('click')
+    await wrapper.get('.custom-font-input').setValue('"Maple Mono", monospace')
+    await wrapper.get('.font-save-preset-btn').trigger('click')
+
+    const prefilledInputs = wrapper.get('form.font-preset-creator').findAll('input.font-creator-input')
+    expect((prefilledInputs[0]!.element as HTMLInputElement).value).toBe('Maple Mono')
+    expect((prefilledInputs[1]!.element as HTMLInputElement).value).toBe('"Maple Mono", monospace')
+    await wrapper.get('form.font-preset-creator').trigger('submit')
+
+    expect(mocks.appSettingsStore.app.customFontPresets).toHaveLength(2)
+    expect(mocks.appSettingsStore.app.fontFamily).toBe('"Maple Mono", monospace')
+
+    // Deleting an inactive preset keeps current fontFamily intact
+    const removeButtons = wrapper.findAll('.font-chip-remove')
+    expect(removeButtons).toHaveLength(2)
+    await removeButtons[0]!.trigger('click')
+    expect(mocks.appSettingsStore.app.customFontPresets).toHaveLength(1)
+    expect(mocks.appSettingsStore.app.fontFamily).toBe('"Maple Mono", monospace')
+
+    // Deleting the active preset falls back to default font family
+    await wrapper.get('.font-chip-remove').trigger('click')
+    expect(mocks.appSettingsStore.app.customFontPresets).toHaveLength(0)
+    expect(mocks.appSettingsStore.app.fontFamily).toContain('system-ui')
+  })
+
+  it('syncs custom presets between settings and popover selectors, blocks duplicates, and enforces limit', async () => {
+    const stubs = {
+      Icon: true,
+      Button: true,
+      Input: {
+        props: ['modelValue'],
+        emits: ['update:modelValue'],
+        template:
+          '<input class="custom-font-input" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+      },
+    }
+    const settingsSelector = mount(FontPresetSelector, {
+      props: { variant: 'settings' },
+      global: { stubs },
+    })
+    const popoverSelector = mount(FontPresetSelector, {
+      props: { variant: 'popover' },
+      global: { stubs },
+    })
+
+    // Enter an ad-hoc custom font in settings, then save it as a preset from popover
+    const customBtn = settingsSelector
+      .findAll('.font-chip')
+      .find((btn) => btn.text().includes('settings.font.custom'))!
+    await customBtn.trigger('click')
+    await settingsSelector.get('.custom-font-input').setValue('"LXGW WenKai", serif')
+    expect(settingsSelector.find('.custom-font-input').exists()).toBe(true)
+
+    await popoverSelector.get('.font-save-preset-btn').trigger('click')
+    await popoverSelector.get('form.font-preset-creator').trigger('submit')
+
+    // Settings selector exits custom mode and highlights the synced custom preset with Aa badge
+    expect(settingsSelector.find('.custom-font-input').exists()).toBe(false)
+    expect(settingsSelector.findAll('.font-chip-group')).toHaveLength(1)
+    expect(settingsSelector.get('.font-chip-group').classes()).toContain('is-active')
+    expect(settingsSelector.get('.font-chip-group .font-chip__sample').text()).toBe('Aa')
+
+    // Duplicate fontFamily is rejected
+    await settingsSelector.get('.font-chip--add').trigger('click')
+    const dupInputs = settingsSelector
+      .get('form.font-preset-creator')
+      .findAll('input.font-creator-input')
+    await dupInputs[0]!.setValue('Another Name')
+    await dupInputs[1]!.setValue('"LXGW WenKai", serif')
+    await settingsSelector.get('form.font-preset-creator').trigger('submit')
+    expect(settingsSelector.get('.font-preset-error').text()).toBe('settings.font.errorDuplicate')
+
+    // At 20 presets, add button is disabled
+    mocks.appSettingsStore.app.customFontPresets = Array.from({ length: 20 }, (_, i) => ({
+      id: `custom-font-${i + 1}`,
+      label: `Font ${i + 1}`,
+      fontFamily: `"Font ${i + 1}", sans-serif`,
+    }))
+    await flushPromises()
+    await settingsSelector.get('.font-creator-btn--secondary').trigger('click')
+    expect((settingsSelector.get('.font-chip--add').element as HTMLButtonElement).disabled).toBe(
+      true,
+    )
   })
 
   it('renders horizontal topnav links in AppShell when navLayout is topnav', async () => {

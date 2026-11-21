@@ -28,6 +28,14 @@ import {
   normalizeKernelSettings,
   normalizeLogSettings,
 } from '@/stores/appSettings'
+import {
+  createCustomFontPresetId,
+  matchedFontPresetKey,
+  normalizeCustomFontPresets,
+  normalizeFontStylesheetUrl,
+  suggestFontPresetLabel,
+  syncCustomFontStylesheets,
+} from '@/utils/fontPresets'
 
 describe('app settings store helpers', () => {
   it('defaults missing or invalid log retention days to 14', () => {
@@ -95,6 +103,7 @@ describe('app settings store helpers', () => {
       navLayout: 'sidebar',
       uiDensity: 'comfortable',
       fontSize: 18,
+      customFontPresets: [],
     })
 
     expect(
@@ -103,15 +112,102 @@ describe('app settings store helpers', () => {
         navLayout: 'topnav',
         uiDensity: 'compact',
         fontSize: 16,
+        customFontPresets: [
+          {
+            id: 'custom-font-1',
+            label: '霞鹜文楷',
+            fontFamily: '"LXGW WenKai", serif',
+            stylesheetUrl: 'https://example.com/font.css',
+          },
+        ],
       }),
     ).toEqual({
       uiStyle: 'glass',
       navLayout: 'topnav',
       uiDensity: 'compact',
       fontSize: 16,
+      customFontPresets: [
+        {
+          id: 'custom-font-1',
+          label: '霞鹜文楷',
+          fontFamily: '"LXGW WenKai", serif',
+          stylesheetUrl: 'https://example.com/font.css',
+        },
+      ],
     })
 
     expect(normalizeAppearanceSettings({ fontSize: 6 })).toMatchObject({ fontSize: 12 })
-    expect(normalizeAppearanceSettings({})).toMatchObject({ fontSize: 14 })
+    expect(normalizeAppearanceSettings({})).toMatchObject({ fontSize: 14, customFontPresets: [] })
+  })
+
+  it('sanitizes custom font presets, stylesheet URLs, IDs, and document stylesheet links', () => {
+    expect(normalizeFontStylesheetUrl('https://fonts.example.com/css2?family=Inter')).toBe(
+      'https://fonts.example.com/css2?family=Inter',
+    )
+    expect(normalizeFontStylesheetUrl('/fonts/custom.css')).toBe('/fonts/custom.css')
+    expect(normalizeFontStylesheetUrl('//evil.example/font.css')).toBeUndefined()
+    expect(normalizeFontStylesheetUrl('javascript:alert(1)')).toBeUndefined()
+    expect(normalizeFontStylesheetUrl('data:text/css,body{}')).toBeUndefined()
+
+    const normalized = normalizeCustomFontPresets([
+      null,
+      { label: '', fontFamily: 'Inter' },
+      { label: 'Missing Family', fontFamily: '   ' },
+      {
+        id: 'dup',
+        label: '  霞鹜文楷  ',
+        fontFamily: '  "LXGW WenKai", serif  ',
+        stylesheetUrl: '/fonts/lxgw.css',
+      },
+      {
+        id: 'dup',
+        label: 'Duplicate Family Ignored',
+        fontFamily: '"LXGW WenKai", serif',
+      },
+      {
+        id: 'dup',
+        label: 'Maple Mono',
+        fontFamily: '"Maple Mono", monospace',
+        stylesheetUrl: 'javascript:alert(1)',
+      },
+    ])
+
+    expect(normalized).toEqual([
+      {
+        id: 'dup',
+        label: '霞鹜文楷',
+        fontFamily: '"LXGW WenKai", serif',
+        stylesheetUrl: '/fonts/lxgw.css',
+      },
+      {
+        id: 'dup-2',
+        label: 'Maple Mono',
+        fontFamily: '"Maple Mono", monospace',
+      },
+    ])
+
+    expect(createCustomFontPresetId(normalized)).toBe('custom-font-3')
+    expect(suggestFontPresetLabel('"Maple Mono", monospace')).toBe('Maple Mono')
+    expect(matchedFontPresetKey('"LXGW WenKai", serif', normalized)).toBe('preset:dup')
+    expect(matchedFontPresetKey('"Unknown Font", sans-serif', normalized)).toBe('custom')
+
+    syncCustomFontStylesheets(normalized)
+    expect(
+      document.head.querySelectorAll('link[data-gfs-font-css="1"][data-gfs-font-href="/fonts/lxgw.css"]'),
+    ).toHaveLength(1)
+
+    // Re-syncing is idempotent and removing the preset cleans up the head link
+    syncCustomFontStylesheets(normalized)
+    expect(document.head.querySelectorAll('link[data-gfs-font-css="1"]')).toHaveLength(1)
+
+    syncCustomFontStylesheets([])
+    expect(document.head.querySelectorAll('link[data-gfs-font-css="1"]')).toHaveLength(0)
+
+    const overflow = Array.from({ length: 25 }, (_, i) => ({
+      id: `f-${i + 1}`,
+      label: `Font ${i + 1}`,
+      fontFamily: `"Font ${i + 1}", sans-serif`,
+    }))
+    expect(normalizeCustomFontPresets(overflow)).toHaveLength(20)
   })
 })

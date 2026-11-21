@@ -34,6 +34,7 @@ import {
 import i18n, { loadLocale } from '@/lang'
 import { useAppStore } from '@/stores'
 import { debounce, ignoredError, deepClone } from '@/utils'
+import { normalizeCustomFontPresets, syncCustomFontStylesheets } from '@/utils/fontPresets'
 
 const VALID_UI_STYLES = new Set<string>(Object.values(UiStyle))
 const VALID_NAV_LAYOUTS = new Set<string>(Object.values(NavLayout))
@@ -46,7 +47,9 @@ const normalizeFontSize = (value: unknown) => {
 }
 
 export const normalizeAppearanceSettings = (
-  settings: Partial<Pick<App.AppSettings, 'uiStyle' | 'navLayout' | 'uiDensity' | 'fontSize'>>,
+  settings: Partial<
+    Pick<App.AppSettings, 'uiStyle' | 'navLayout' | 'uiDensity' | 'fontSize' | 'customFontPresets'>
+  >,
 ) => ({
   uiStyle: VALID_UI_STYLES.has(String(settings.uiStyle))
     ? (settings.uiStyle as UiStyle)
@@ -58,6 +61,7 @@ export const normalizeAppearanceSettings = (
     ? (settings.uiDensity as UiDensity)
     : UiDensity.Comfortable,
   fontSize: normalizeFontSize(settings.fontSize),
+  customFontPresets: normalizeCustomFontPresets(settings.customFontPresets),
 })
 
 export const normalizeLogSettings = (settings: App.AppSettings['log'] | undefined) => {
@@ -149,6 +153,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     secondaryColor: '#1d4ed8',
     fontFamily: DefaultFontFamily,
     fontSize: DefaultFontSize,
+    customFontPresets: [],
     profilesView: View.Grid,
     subscribesView: View.Grid,
     rulesetsView: View.Grid,
@@ -285,12 +290,17 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
       document.documentElement.style.setProperty('--secondary-color', secondary)
     },
     fontFamily(fontFamily: string) {
-      document.body.style.fontFamily = fontFamily.trim() || DefaultFontFamily
+      const resolved = fontFamily.trim() || DefaultFontFamily
+      document.documentElement.style.setProperty('--app-font-family', resolved)
+      document.body.style.fontFamily = resolved
     },
     fontSize(fontSize: number) {
       const size = normalizeFontSize(fontSize)
       document.documentElement.style.setProperty('--font-size-base', `${size}px`)
       document.documentElement.style.setProperty('--font-scale', (size / DefaultFontSize).toFixed(4))
+    },
+    customFontPresets(presets: App.CustomFontPreset[]) {
+      syncCustomFontStylesheets(presets ?? [])
     },
     uiStyle(style: App.UiStyle) {
       document.body.setAttribute('ui-style', VALID_UI_STYLES.has(style) ? style : UiStyle.Modern)
@@ -310,6 +320,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     applyAppSettings.lang(settings.lang)
     applyAppSettings.fontFamily(settings.fontFamily)
     applyAppSettings.fontSize(settings.fontSize)
+    applyAppSettings.customFontPresets(settings.customFontPresets)
     applyAppSettings.uiStyle(settings.uiStyle)
     applyAppSettings.uiDensity(settings.uiDensity)
     const lastModifiedSettings = stringify(settings)
@@ -345,7 +356,9 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
   watch(themeMode, setAppTheme, { immediate: true })
   applyAppSettings.uiStyle(app.value.uiStyle)
   applyAppSettings.uiDensity(app.value.uiDensity)
+  applyAppSettings.fontFamily(app.value.fontFamily)
   applyAppSettings.fontSize(app.value.fontSize)
+  applyAppSettings.customFontPresets(app.value.customFontPresets)
 
   return { setupAppSettings, app, themeMode }
 })

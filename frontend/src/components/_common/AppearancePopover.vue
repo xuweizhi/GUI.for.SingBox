@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
   ColorOptions,
   Colors,
-  DefaultFontFamily,
-  FontPresetOptions,
   FontSizeOptions,
   MaxFontSize,
   MinFontSize,
@@ -18,6 +16,8 @@ import {
 import { Color, NavLayout } from '@/enums/app'
 import { useAppSettingsStore } from '@/stores'
 
+import FontPresetSelector from './FontPresetSelector.vue'
+
 const { t } = useI18n()
 const appSettings = useAppSettingsStore()
 
@@ -26,34 +26,6 @@ const currentStyleLabel = computed(
     UiStyleOptions.find((o) => o.value === appSettings.app.uiStyle)?.label ||
     'settings.appearance.styles.modern.name',
 )
-
-const matchedFontPreset = computed(
-  () => FontPresetOptions.find((opt) => opt.value === appSettings.app.fontFamily)?.key ?? 'custom',
-)
-const isCustomFont = ref(matchedFontPreset.value === 'custom')
-
-watch(
-  () => appSettings.app.fontFamily,
-  () => {
-    isCustomFont.value = matchedFontPreset.value === 'custom'
-  },
-)
-
-const activeFontKey = computed(() => (isCustomFont.value ? 'custom' : matchedFontPreset.value))
-
-const selectFontPreset = (value: string) => {
-  isCustomFont.value = false
-  appSettings.app.fontFamily = value
-}
-
-const selectCustomFont = () => {
-  isCustomFont.value = true
-}
-
-const resetFontFamily = () => {
-  isCustomFont.value = false
-  appSettings.app.fontFamily = DefaultFontFamily
-}
 
 const adjustFontSize = (delta: number) => {
   appSettings.app.fontSize = Math.min(
@@ -200,48 +172,7 @@ const onThemeClick = (e: MouseEvent) => {
 
         <div class="appearance-section">
           <div class="appearance-section__label">{{ t('settings.fontFamily') }}</div>
-          <div class="font-chip-grid">
-            <button
-              v-for="opt in FontPresetOptions"
-              :key="opt.key"
-              type="button"
-              class="font-chip"
-              :class="{ 'is-active': activeFontKey === opt.key }"
-              :style="{ fontFamily: opt.value }"
-              :aria-pressed="activeFontKey === opt.key"
-              @click="selectFontPreset(opt.value)"
-            >
-              {{ t(opt.label) }}
-            </button>
-            <button
-              type="button"
-              class="font-chip"
-              :class="{ 'is-active': activeFontKey === 'custom' }"
-              :aria-pressed="activeFontKey === 'custom'"
-              @click="selectCustomFont"
-            >
-              {{ t('settings.font.custom') }}
-            </button>
-          </div>
-          <Input
-            v-if="activeFontKey === 'custom'"
-            v-model="appSettings.app.fontFamily"
-            :placeholder="t('settings.font.customPlaceholder')"
-            size="small"
-            auto-size
-            clearable
-            class="w-full"
-          >
-            <template #suffix>
-              <Button
-                :title="t('settings.resetFont')"
-                type="text"
-                size="small"
-                icon="reset"
-                @click="resetFontFamily"
-              />
-            </template>
-          </Input>
+          <FontPresetSelector variant="popover" />
         </div>
 
         <div class="appearance-section">
@@ -668,39 +599,6 @@ const onThemeClick = (e: MouseEvent) => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.font-chip-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.font-chip {
-  padding: 4px 9px;
-  border-radius: var(--control-radius, 8px);
-  border: 1px solid var(--border-color);
-  background: color-mix(in srgb, var(--bg-color) 65%, var(--surface-bg));
-  color: var(--color);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition:
-    border-color 0.14s ease,
-    background-color 0.14s ease,
-    color 0.14s ease;
-
-  &:hover {
-    border-color: color-mix(in srgb, var(--accent-text) 55%, var(--border-color));
-  }
-
-  &.is-active {
-    border-color: var(--accent-text);
-    background: var(--accent-soft);
-    color: var(--accent-text);
-    font-weight: 600;
-  }
 }
 
 .appearance-section__head {

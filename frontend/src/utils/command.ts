@@ -190,11 +190,18 @@ export const getCommands = () => {
         {
           label: 'settings.fontFamily',
           cmd: 'Font',
-          children: FontPresetOptions.map((font) => ({
-            label: font.label,
-            cmd: font.key,
-            handler: () => (appSettings.app.fontFamily = font.value),
-          })),
+          children: [
+            ...FontPresetOptions.map((font) => ({
+              label: font.label,
+              cmd: font.key,
+              handler: () => (appSettings.app.fontFamily = font.value),
+            })),
+            ...(appSettings.app.customFontPresets ?? []).map((preset) => ({
+              label: preset.label,
+              cmd: preset.label,
+              handler: () => (appSettings.app.fontFamily = preset.fontFamily),
+            })),
+          ],
         },
         {
           label: 'settings.fontSize.name',
