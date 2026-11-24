@@ -265,6 +265,19 @@ func (a *App) dispatchRPCCall(req rpcRequest) (any, error) {
 			return nil, err
 		}
 		return a.FileSHA256(value), nil
+	case "FindOwnedCore":
+		var branch string
+		var args []string
+		if err := decodeRPCArgs(req.Args, &branch, &args); err != nil {
+			return nil, err
+		}
+		return a.findOwnedCore(branch, args), nil
+	case "StopOwnedCore":
+		var pid, timeout int
+		if err := decodeRPCArgs(req.Args, &pid, &timeout); err != nil {
+			return nil, err
+		}
+		return nil, a.stopOwnedCore(pid, timeout)
 	case "FindListeningProcess":
 		var port uint32
 		if err := decodeRPCArgs(req.Args, &port); err != nil {
@@ -286,6 +299,13 @@ func (a *App) dispatchRPCCall(req rpcRequest) (any, error) {
 			return nil, err
 		}
 		return a.GetScheduledTaskWorkerLogs(), nil
+	case "ClaimLocalTask":
+		var id, spec string
+		var occurrence int64
+		if err := decodeRPCArgs(req.Args, &id, &spec, &occurrence); err != nil {
+			return nil, err
+		}
+		return a.taskWorker().claimLocalTask(id, spec, occurrence)
 	case "RecordScheduledTaskLog":
 		var value string
 		if err := decodeRPCArgs(req.Args, &value); err != nil {
@@ -359,6 +379,11 @@ func (a *App) dispatchRPCCall(req rpcRequest) (any, error) {
 			return nil, err
 		}
 		return a.QueryMMDB(filePath, ip, queryType), nil
+	case "ReadCoreLog":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		return a.readCoreLog()
 	case "ReadDir":
 		var value string
 		if err := decodeRPCArgs(req.Args, &value); err != nil {
@@ -573,17 +598,10 @@ func (a *App) handleEventStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleCoreProxy(w http.ResponseWriter, r *http.Request) {
-	controller, targetPath, err := parseCoreProxyTarget(r.URL.Path, webUICoreEndpoint)
+	targetURL, err := coreProxyURL(r.URL, webUICoreEndpoint, "http")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
-	}
-
-	targetURL := &neturl.URL{
-		Scheme:   "http",
-		Host:     controller,
-		Path:     targetPath,
-		RawQuery: r.URL.RawQuery,
 	}
 
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL.String(), r.Body)
@@ -592,7 +610,7 @@ func (a *App) handleCoreProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header = r.Header.Clone()
-	req.Host = controller
+	req.Host = targetURL.Host
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -611,17 +629,10 @@ func (a *App) handleCoreProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleCoreWebSocketProxy(w http.ResponseWriter, r *http.Request) {
-	controller, targetPath, err := parseCoreProxyTarget(r.URL.Path, webUICoreWSEndpoint)
+	backendURL, err := coreProxyURL(r.URL, webUICoreWSEndpoint, "ws")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
-	}
-
-	backendURL := neturl.URL{
-		Scheme:   "ws",
-		Host:     controller,
-		Path:     targetPath,
-		RawQuery: r.URL.RawQuery,
 	}
 
 	upgrader := websocket.Upgrader{
@@ -888,24 +899,19 @@ func buildLocalAccessURL(listenAddr string) string {
 	return fmt.Sprintf("http://%s:%s/", host, port)
 }
 
-func parseCoreProxyTarget(requestPath string, prefix string) (controller string, targetPath string, err error) {
-	trimmed := strings.TrimPrefix(requestPath, prefix)
-	if trimmed == requestPath || trimmed == "" {
-		return "", "", fmt.Errorf("invalid core proxy path")
+func coreProxyURL(in *neturl.URL, prefix, scheme string) (*neturl.URL, error) {
+	trimmed, ok := strings.CutPrefix(in.EscapedPath(), prefix)
+	host, rawPath, _ := strings.Cut(trimmed, "/")
+	controller, err := neturl.PathUnescape(host)
+	if !ok || err != nil || controller == "" {
+		return nil, fmt.Errorf("invalid core controller")
 	}
-
-	parts := strings.SplitN(trimmed, "/", 2)
-	controller, err = neturl.PathUnescape(parts[0])
-	if err != nil || controller == "" {
-		return "", "", fmt.Errorf("invalid core controller")
+	rawPath = "/" + rawPath
+	path, err := neturl.PathUnescape(rawPath)
+	if err != nil {
+		return nil, err
 	}
-
-	targetPath = "/"
-	if len(parts) == 2 && parts[1] != "" {
-		targetPath += parts[1]
-	}
-
-	return controller, targetPath, nil
+	return &neturl.URL{Scheme: scheme, Host: controller, Path: path, RawPath: rawPath, RawQuery: in.RawQuery}, nil
 }
 
 func proxyWebSocketMessages(src *websocket.Conn, dst *websocket.Conn, errCh chan<- error) {

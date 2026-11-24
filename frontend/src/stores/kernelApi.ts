@@ -14,8 +14,9 @@ import {
   probeApiAvailability,
 } from '@/api/kernel'
 import {
-  ProcessInfo,
-  KillProcess,
+  FindOwnedCore,
+  StopOwnedCore,
+  ReadCoreLog,
   Exec,
   ExecBackground,
   AbsolutePath,
@@ -24,7 +25,6 @@ import {
   ReadFile,
   RemoveFile,
   WriteFile,
-  FindListeningProcess,
 } from '@/bridge'
 import {
   CoreConfigFilePath,
@@ -50,7 +50,6 @@ import {
   getProxyProfileOptionsFromRuntime,
   resolveRuntimeInboundState,
 } from '@/stores/kernelApiRuntime'
-import { resolveCoreStopPid } from '@/stores/kernelProcess'
 import {
   generateConfigFile,
   getKernelFileName,
@@ -282,76 +281,36 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   const restarting = ref(false)
   const needRestart = ref(false)
   const coreStateLoading = ref(true)
-  let isCoreStartedByThisInstance = false
   let processGeneration = 0
   type StartedCore = { pid: number; generation: number; exited: () => boolean }
   let stopTransition: { generation: number; promise: Promise<void> } | undefined
-  let { promise: coreStoppedPromise, resolve: coreStoppedResolver } = Promise.withResolvers()
 
   onLogs((data) => logsStore.recordKernelApiLog(data))
 
   const refreshKernelLogs = async () => {
-    const logs = await ReadFile(getCoreLogFilePath(), { Range: '-4096' }).catch(() => '')
+    const logs = await ReadCoreLog().catch(() => '')
     logsStore.hydrateKernelLogs(logs)
   }
 
-  const getCoreControllerPort = () => {
-    const controller =
-      profilesStore.currentProfile?.experimental.clash_api.external_controller || '127.0.0.1:20123'
-
-    if (controller.startsWith('[')) {
-      const match = controller.match(/^\[[^\]]+\](?::(\d+))?$/)
-      return Number(match?.[1] || 20123)
-    }
-
-    const separatorIndex = controller.lastIndexOf(':')
-    if (separatorIndex === -1) {
-      return 20123
-    }
-
-    return Number(controller.slice(separatorIndex + 1)) || 20123
+  const findOwnedCore = () => {
+    const branch = appSettingsStore.app.kernel.branch
+    return FindOwnedCore(branch, getKernelRuntimeArgs(branch === Branch.Alpha))
   }
 
-  const syncExistingCoreState = async () => {
-    const apiOk = await probeApiAvailability().catch(() => false)
-    if (!apiOk) {
-      return false
-    }
-
-    await refreshKernelLogs()
-
-    corePid.value = await FindListeningProcess(getCoreControllerPort()).catch(() => -1)
-    if (corePid.value > 0) {
-      await WriteFile(CorePidFilePath, String(corePid.value)).catch(() => 0)
-    }
-
+  const attachCore = async (pid: number) => {
+    corePid.value = pid
     running.value = true
     needRestart.value = false
-    isCoreStartedByThisInstance = false
-
     initWebsocket()
     await Promise.all([refreshConfig(), refreshProviderProxies()])
-
-    return true
   }
 
   const initCoreState = async () => {
     await refreshKernelLogs()
-
-    corePid.value = Number(await ReadFile(CorePidFilePath).catch(() => -1))
-    const processName = corePid.value === -1 ? '' : await ProcessInfo(corePid.value).catch(() => '')
-    running.value = processName.startsWith('sing-box')
-
+    const pid = await findOwnedCore()
     coreStateLoading.value = false
-
-    if (running.value) {
-      initWebsocket()
-      await Promise.all([refreshConfig(), refreshProviderProxies()])
-    } else if (await syncExistingCoreState()) {
-      return
-    } else if (appSettingsStore.app.autoStartKernel) {
-      await startCore()
-    }
+    if (pid > 0) await attachCore(pid)
+    else if (appSettingsStore.app.autoStartKernel) await startCore()
   }
 
   const runCoreProcess = async (isAlpha: boolean, onSpawn: (process: StartedCore) => void) => {
@@ -363,9 +322,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       undefined,
       async (end) => {
         stopped = true
-        const logs = await ReadFile(getCoreLogFilePath(), { Range: '-4096' }).catch((err) =>
-          String(err),
-        )
+        const logs = await ReadCoreLog().catch((err) => String(err))
         if (generation !== processGeneration) return
         logsStore.hydrateKernelLogs(logs)
         end && logsStore.recordKernelLog(end)
@@ -401,8 +358,6 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     corePid.value = pid
     running.value = true
     needRestart.value = false
-    isCoreStartedByThisInstance = true
-    coreStoppedPromise = new Promise((r) => (coreStoppedResolver = r))
 
     initWebsocket()
     await Promise.all([refreshConfig(), refreshProviderProxies()])
@@ -417,23 +372,14 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   const onCoreStopped = (generation = processGeneration): Promise<void> => {
     if (generation !== processGeneration) return Promise.resolve()
     if (stopTransition?.generation === generation) return stopTransition.promise
-    const resolveStopped = coreStoppedResolver
     const promise = Promise.resolve().then(async () => {
-      if (generation !== processGeneration) return
-      if (!isCoreStartedByThisInstance) {
-        await RemoveFile(CorePidFilePath).catch((error) => logsStore.recordKernelLog(String(error)))
-      }
       if (generation !== processGeneration) return
       corePid.value = -1
       running.value = false
       needRestart.value = false
       destroyWebsocket()
       resetConfig()
-      try {
-        await pluginsStore.onCoreStoppedTrigger()
-      } finally {
-        resolveStopped(null)
-      }
+      await pluginsStore.onCoreStoppedTrigger()
     })
     stopTransition = { generation, promise }
     return promise
@@ -446,7 +392,12 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     ++processGeneration
     let startedProcess: StartedCore | undefined
     try {
-      if (await syncExistingCoreState()) return
+      if (await probeApiAvailability().catch(() => false)) {
+        const pid = await findOwnedCore()
+        if (pid <= 0) throw new Error('The controller belongs to another process')
+        await attachCore(pid)
+        return
+      }
 
       logsStore.clearKernelLog()
 
@@ -514,7 +465,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       if (startedProcess && startedProcess.generation === processGeneration) {
         let cleanupError: unknown
         if (!startedProcess.exited()) {
-          await KillProcess(startedProcess.pid, 3).catch((failure) => {
+          await StopOwnedCore(startedProcess.pid, 3).catch((failure) => {
             cleanupError = failure
           })
         }
@@ -537,15 +488,10 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     stopping.value = true
     try {
       await pluginsStore.onBeforeCoreStopTrigger()
-      const pid = await resolveCoreStopPid(
-        corePid.value,
-        getCoreControllerPort(),
-        FindListeningProcess,
-        () => ReadFile(CorePidFilePath),
-      )
-      corePid.value = pid
-      await KillProcess(pid)
-      await (isCoreStartedByThisInstance ? coreStoppedPromise : onCoreStopped())
+      const generation = processGeneration
+      const pid = corePid.value > 0 ? corePid.value : await findOwnedCore()
+      await StopOwnedCore(pid)
+      await onCoreStopped(generation)
     } finally {
       stopping.value = false
     }

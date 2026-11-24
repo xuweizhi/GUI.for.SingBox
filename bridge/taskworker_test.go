@@ -878,3 +878,73 @@ func TestDoUpdatePluginHTTPWritesPluginFile(t *testing.T) {
 		t.Fatal("expected plugin file content to be non-empty")
 	}
 }
+
+func TestRulesetTasksFollowRedirects(t *testing.T) {
+	backendFixtureBase(t)
+	const content = `{"version":3,"rules":[]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/latest" {
+			http.Redirect(w, r, "/file", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte(content))
+	}))
+	defer server.Close()
+	for _, format := range []string{"binary", "source"} {
+		rule := rulesetConfig{Type: "Http", Format: format, URL: server.URL + "/latest", Path: "data/" + format}
+		if err := NewApp().taskWorker().doUpdateRuleset(&rule); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(backendFixtureRead(t, rule.Path), "rules") {
+			t.Fatal("did not install redirected response")
+		}
+	}
+}
+
+func TestLocalScheduleClaimIsExclusiveAcrossClients(t *testing.T) {
+	backendFixtureBase(t)
+	const spec = "* * * * * *"
+	backendFixtureWrite(t, scheduledTasksFilePath, "- id: local\n  cron: '* * * * * *'\n")
+	w := NewApp().taskWorker()
+	results := make(chan bool, 8)
+	for range cap(results) {
+		go func() {
+			ok, err := w.claimLocalTask("local", spec, 1000)
+			if err != nil {
+				t.Error(err)
+			}
+			results <- ok
+		}()
+	}
+	granted := 0
+	for range cap(results) {
+		if <-results {
+			granted++
+		}
+	}
+	if granted != 1 {
+		t.Fatalf("granted %d copies", granted)
+	}
+	if ok, err := w.claimLocalTask("local", spec, 2000); !ok || err != nil {
+		t.Fatalf("next occurrence: %v %v", ok, err)
+	}
+	w.managedTaskIDs = []string{"local"}
+	if ok, err := w.claimLocalTask("local", spec, 3000); ok || err != nil {
+		t.Fatalf("backend-owned task: %v %v", ok, err)
+	}
+}
+
+func TestManualNativeTaskDoesNotRequireNode(t *testing.T) {
+	backendFixtureBase(t)
+	t.Setenv("PATH", "")
+	t.Setenv("GUI_FOR_CORES_NODE_PATH", "")
+	backendFixtureWrite(t, scheduledTasksFilePath, "- id: r\n  type: update::all::ruleset\n  cron: '0 0 0 29 2 *'\n")
+	app := NewApp()
+	if err := app.StartScheduledTaskWorker(); err != nil {
+		t.Fatal(err)
+	}
+	defer app.StopScheduledTaskWorker()
+	if result := app.RunScheduledTaskWorker("r"); !result.Flag {
+		t.Fatal(result.Data)
+	}
+}

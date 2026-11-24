@@ -3,22 +3,25 @@ package bridge
 import (
 	"context"
 	"net/http"
+	"os"
 	"sync"
 )
 
 // App struct
 type App struct {
-	Ctx        context.Context
-	Headless   *HeadlessRuntime
-	TaskWorker *scheduledTaskWorkerSupervisor
-	eventsOnce sync.Once
-	events     *eventHub
+	Ctx         context.Context
+	Headless    *HeadlessRuntime
+	TaskWorker  *scheduledTaskWorkerSupervisor
+	coreProcess *os.Process // Protected by coreStartMu; independent of exec.Cmd.Wait.
+	workerOnce  sync.Once
+	startupOnce sync.Once
+	eventsOnce  sync.Once
+	events      *eventHub
 }
 
 const RuntimeModeWebUI = "webui"
 
 type EnvResult struct {
-	IsStartup    bool     `json:"-"`
 	Args         []string `json:"-"`
 	AppName      string   `json:"appName"`
 	AppVersion   string   `json:"appVersion"`
@@ -53,9 +56,16 @@ type Range struct {
 	End   *int64
 }
 
+type RelatedConfigFile struct {
+	Path    string
+	Content string
+}
+
 type IOOptions struct {
-	Mode  string // Binary / Text
-	Range string // "start-end" / "start-" / "-end"
+	Related        []RelatedConfigFile
+	ExpectedSHA256 string // Empty disables the check; "missing" requires an absent file.
+	Mode           string // Binary / Text
+	Range          string // "start-end" / "start-" / "-end"
 }
 
 type FlagResult struct {

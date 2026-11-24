@@ -255,3 +255,37 @@ func TestHandleRPCCallSupportsSystemProxyMethods(t *testing.T) {
 		})
 	}
 }
+
+func TestCoreProxyPreservesEscapedTag(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/proxies/HK%2F01/delay" || r.URL.Query().Get("timeout") != "1000" {
+			t.Errorf("unexpected upstream URI %s", r.RequestURI)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	request := httptest.NewRequest("GET", webUICoreEndpoint+host+"/proxies/HK%2F01/delay?timeout=1000", nil)
+	response := httptest.NewRecorder()
+	NewApp().handleCoreProxy(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("proxy status %d", response.Code)
+	}
+}
+
+func TestStartupIsConsumedOnceAcrossClients(t *testing.T) {
+	app := NewApp()
+	results := make(chan bool, 16)
+	for range cap(results) {
+		go func() { results <- app.IsStartup() }()
+	}
+	first := 0
+	for range cap(results) {
+		if <-results {
+			first++
+		}
+	}
+	if first != 1 {
+		t.Fatalf("%d clients reported startup", first)
+	}
+}

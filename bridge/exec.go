@@ -70,17 +70,16 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 		pidPath = resolvePath(options.PidFile)
 	}
 
-	lockedCoreStart := false
-	if isCoreExecRequest(path, options) {
-		coreStartMu.Lock()
-		lockedCoreStart = true
-		if result, ok := a.reuseExistingCoreProcess(path, args, endEvent, pidPath); ok {
-			coreStartMu.Unlock()
-			return result
-		}
-	}
+	lockedCoreStart := isCoreExecRequest(path, options)
 	if lockedCoreStart {
+		coreStartMu.Lock()
 		defer coreStartMu.Unlock()
+		if pid := a.locateCore(path, args, pidPath); pid > 0 {
+			if endEvent != "" {
+				watchExistingCoreExit(a, pid, endEvent, pidPath)
+			}
+			return FlagResult{true, strconv.Itoa(pid)}
+		}
 	}
 
 	done := make(chan struct{})
@@ -104,6 +103,9 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 	switch {
 	case options.LogFile != "":
 		logPath = resolvePath(options.LogFile)
+		if lockedCoreStart && regexpCoreLogName.MatchString(filepath.Base(logPath)) {
+			logPath = logFilePath("core", time.Now())
+		}
 		if err := os.MkdirAll(filepath.Dir(logPath), os.ModePerm); err != nil {
 			return FlagResult{false, err.Error()}
 		}
@@ -137,6 +139,15 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 	}
 
 	pid := strconv.Itoa(cmd.Process.Pid)
+	if lockedCoreStart {
+		handle, err := os.FindProcess(cmd.Process.Pid)
+		if err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return FlagResult{false, err.Error()}
+		}
+		a.rememberCore(handle)
+	}
 
 	if pidPath != "" {
 		if err := atomicWriteFile(pidPath, []byte(pid), 0o600); err != nil {
@@ -163,7 +174,9 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 		<-outputDone
 
 		if pidPath != "" {
-			_ = os.Remove(pidPath)
+			coreStartMu.Lock()
+			removePIDIfCurrent(pidPath, cmd.Process.Pid)
+			coreStartMu.Unlock()
 		}
 		if endEvent != "" {
 			if err != nil {

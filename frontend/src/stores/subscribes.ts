@@ -4,7 +4,7 @@ import { parse } from 'yaml'
 
 import { ReadFile, WriteFile, Requests, GetSystemProxy } from '@/bridge'
 import { RefreshSubscriptionUsage } from '@/bridge/browser/go/bridge/App'
-import { DefaultSubscribeScript, SubscribesFilePath, ProfilesFilePath } from '@/constant/app'
+import { DefaultSubscribeScript, SubscribesFilePath } from '@/constant/app'
 import { DefaultExcludeProtocols } from '@/constant/kernel'
 import { PluginTriggerEvent, RequestMethod, RequestProxyMode } from '@/enums/app'
 import { useAppSettingsStore, usePluginsStore, useProfilesStore } from '@/stores'
@@ -32,7 +32,12 @@ import {
   deepClone,
 } from '@/utils'
 import { persistConfigFiles, withConfigMutation } from '@/utils/configPersistence'
-import { extractSubscriptionConfig, validateSubscriptionEntries } from '@/utils/subscriptionConfig'
+import {
+  extractSubscriptionConfig,
+  validateSubscriptionEntries,
+  prefixSubscriptionReferences,
+  processedSubscriptionPath,
+} from '@/utils/subscriptionConfig'
 
 import type { ConfigFileWrite } from '@/utils/fileTransaction'
 
@@ -154,7 +159,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
         if (added) changed.add(currentProfile.id)
       }
       if (added || removed) {
-        await WriteFile(ProfilesFilePath, stringifyNoFolding(profiles))
+        await profilesStore.writeProfiles(profiles)
         publishProfiles(profiles)
         changed.forEach((id) => eventBus.emit('profileChange', { id }))
       }
@@ -167,10 +172,10 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       const profiles = deepClone(profilesStore.profiles)
       const current = profiles.find((profile) => profile.id === profilesStore.currentProfile?.id)
       const changed = addSubscribeToDefaultOutbounds(s, current)
-      await persistConfigFiles([
-        { path: SubscribesFilePath, content: serialize([...subscribes.value, s]) },
-        ...(changed ? [{ path: ProfilesFilePath, content: stringifyNoFolding(profiles) }] : []),
-      ])
+      const content = serialize([...subscribes.value, s])
+      if (changed)
+        await profilesStore.writeProfiles(profiles, [{ path: SubscribesFilePath, content }])
+      else await WriteFile(SubscribesFilePath, content)
       subscribes.value.push(s)
       if (changed) publishProfiles(profiles)
       // A new HTTP subscription has no runtime nodes until its first successful refresh.
@@ -197,15 +202,10 @@ export const useSubscribesStore = defineStore('subscribes', () => {
           })
         }),
       )
-      await persistConfigFiles([
-        {
-          path: SubscribesFilePath,
-          content: serialize(subscribes.value.filter((s) => s.id !== id)),
-        },
-        ...(changed.size
-          ? [{ path: ProfilesFilePath, content: stringifyNoFolding(profiles) }]
-          : []),
-      ])
+      const content = serialize(subscribes.value.filter((s) => s.id !== id))
+      if (changed.size)
+        await profilesStore.writeProfiles(profiles, [{ path: SubscribesFilePath, content }])
+      else await WriteFile(SubscribesFilePath, content)
       subscribes.value.splice(idx, 1)
       if (changed.size) publishProfiles(profiles)
       changed.forEach((id) => eventBus.emit('profileChange', { id }))
@@ -313,7 +313,11 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       const extracted = extractSubscriptionConfig(parsed)
       proxies = extracted.outbounds
       importedDns = extracted.importedDns
-      preserveCachedDns = Array.isArray(parsed) && (s.type === 'Manual' || s.url === s.path)
+      preserveCachedDns =
+        Array.isArray(parsed) &&
+        (s.type === 'Manual' ||
+          s.url === s.path ||
+          s.path === processedSubscriptionPath(s.id, s.url))
     } else {
       throw 'Not a valid subscription data'
     }
@@ -347,24 +351,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
         return flag1 && !flag2 && flag3 && !flag4
       })
 
-      if (s.proxyPrefix) {
-        const renamed = new Map(
-          proxies.map((proxy) => [
-            proxy.tag,
-            proxy.tag.startsWith(s.proxyPrefix) ? proxy.tag : s.proxyPrefix + proxy.tag,
-          ]),
-        )
-        const reference = (tag: string) => renamed.get(tag) || tag
-        proxies.forEach((proxy) => {
-          proxy.tag = reference(proxy.tag)
-          if (proxy.detour) proxy.detour = reference(proxy.detour)
-          if (proxy.default) proxy.default = reference(proxy.default)
-          if (Array.isArray(proxy.outbounds)) proxy.outbounds = proxy.outbounds.map(reference)
-        })
-        importedDns?.servers.forEach((server) => {
-          if (server.detour) server.detour = reference(server.detour)
-        })
-      }
+      prefixSubscriptionReferences(proxies, importedDns, s.proxyPrefix)
     }
 
     if (!preserveCachedDns) s.importedDns = importedDns
@@ -398,15 +385,22 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       sampleID,
     )
 
+    const nodes = omitArray(_proxies, ['__id__', '__tmp__id__'])
+    if (s.type === 'File' && s.url === s.path) {
+      // Keep the editable source in place. Materialize transformed nodes separately.
+      let original: unknown
+      try {
+        original = JSON.parse(body)
+      } catch {
+        /* Non-JSON sources need a cache. */
+      }
+      if (JSON.stringify(original) !== JSON.stringify(nodes))
+        s.path = processedSubscriptionPath(s.id, s.url)
+    }
     const cache: ConfigFileWrite[] =
-      s.type !== 'File' || s.url !== s.path
-        ? [
-            {
-              path: s.path,
-              content: JSON.stringify(omitArray(_proxies, ['__id__', '__tmp__id__']), null, 2),
-            },
-          ]
-        : []
+      s.type === 'File' && s.url === s.path
+        ? []
+        : [{ path: s.path, content: JSON.stringify(nodes, null, 2) }]
     return { subscription: s, cache, expected, originalPath, previousBody }
   }
 

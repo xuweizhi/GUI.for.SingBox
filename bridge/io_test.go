@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,5 +182,55 @@ func createTarGZArchive(t *testing.T, path string, files map[string]string) {
 	}
 	if err := gzipWriter.Close(); err != nil {
 		t.Fatalf("close gzip writer: %v", err)
+	}
+}
+
+func TestProfileRevisionGuardsRelatedUpdates(t *testing.T) {
+	backendFixtureBase(t)
+	app := NewApp()
+	options := IOOptions{Mode: Text, ExpectedSHA256: "missing", Related: []RelatedConfigFile{{Path: subscribesFilePath, Content: "first"}}}
+	if result := app.WriteFile(profilesFilePath, "base", options); !result.Flag {
+		t.Fatal(result.Data)
+	}
+	options.Related[0].Content = "obsolete"
+	if result := app.WriteFile(profilesFilePath, "overwritten", options); result.Flag {
+		t.Fatal("accepted stale revision")
+	}
+	if got := backendFixtureRead(t, subscribesFilePath); got != "first" {
+		t.Fatalf("changed subscription metadata: %q", got)
+	}
+	options.ExpectedSHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte("base")))
+	options.Related = append(options.Related, RelatedConfigFile{Path: "data/node-groups.yaml", Content: "next"})
+	if err := os.Mkdir(resolvePath("data/node-groups.yaml"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if result := app.WriteFile(profilesFilePath, "next", options); result.Flag {
+		t.Fatal("expected rejected related update")
+	}
+	if got := backendFixtureRead(t, subscribesFilePath); got != "first" {
+		t.Fatalf("failed to roll back: %q", got)
+	}
+	if got := backendFixtureRead(t, profilesFilePath); got != "base" {
+		t.Fatalf("failed update changed profiles: %q", got)
+	}
+}
+
+func TestConcurrentProfileRevisionsAllowOneWriter(t *testing.T) {
+	backendFixtureBase(t)
+	app := NewApp()
+	results := make(chan FlagResult, 8)
+	for i := range cap(results) {
+		go func() {
+			results <- app.WriteFile(profilesFilePath, fmt.Sprint(i), IOOptions{Mode: Text, ExpectedSHA256: "missing"})
+		}()
+	}
+	success := 0
+	for range cap(results) {
+		if (<-results).Flag {
+			success++
+		}
+	}
+	if success != 1 {
+		t.Fatalf("accepted %d writers", success)
 	}
 }

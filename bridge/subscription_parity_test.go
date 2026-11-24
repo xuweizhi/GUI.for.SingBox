@@ -273,7 +273,28 @@ func TestBackendSubscriptionRollbackBeforeMetadataAndReportsRestoreFailure(t *te
 		}
 		return cause
 	})
-	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "restore subscription cache") {
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "restore file") {
 		t.Fatalf("must expose both save and rollback failure: %v", err)
+	}
+}
+
+func TestSameFileSubscriptionSeparatesPrefixedCache(t *testing.T) {
+	backendFixtureBase(t)
+	const path = "data/local/source.json"
+	const original = `[{"type":"socks","tag":"HK","server":"127.0.0.1","server_port":1080}]`
+	backendFixtureWrite(t, path, original)
+	sub := subscriptionConfig{ID: "file", Type: "File", URL: path, Path: path, ProxyPrefix: "Site / "}
+	worker := NewApp().taskWorker()
+	for range 2 {
+		if err := worker.doUpdateSubscription(&sub, backendNetworkSettings{}); err != nil {
+			t.Fatal(err)
+		}
+		nodes := cachedSubscriptionNodes(sub.Path)
+		if len(nodes) != 1 || nodes[0]["tag"] != "Site / HK" || len(sub.Proxies) != 1 || sub.Proxies[0].Tag != nodes[0]["tag"] {
+			t.Fatalf("cache and metadata disagree: %v %v", nodes, sub.Proxies)
+		}
+		if got := backendFixtureRead(t, path); got != original {
+			t.Fatal("modified subscription source")
+		}
 	}
 }

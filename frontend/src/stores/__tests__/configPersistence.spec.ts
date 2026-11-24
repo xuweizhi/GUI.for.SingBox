@@ -194,8 +194,11 @@ describe('configuration store transaction regressions', () => {
       return ''
     })
     let failed = false
-    writeFile.mockImplementation(async (path: string, value: string) => {
-      if (path === NodeGroupsFilePath && !failed) {
+    writeFile.mockImplementation(async (path: string, value: string, options) => {
+      if (
+        options.Related.some((file: { path: string }) => file.path === NodeGroupsFilePath) &&
+        !failed
+      ) {
         failed = true
         throw Error('disk full')
       }
@@ -379,5 +382,84 @@ describe('configuration store transaction regressions', () => {
     await rejected
     expect(store.subscribes[0]!.name).toBe('Edited during download')
     expect(disk.get(s.path)).toBe('[]')
+  })
+  it('stale profiles in a second client cannot overwrite a successful addition', async () => {
+    const { default: sha256 } = await import('crypto-js/sha256')
+    vi.mocked(FileExists).mockResolvedValue(true)
+    const clientA = useProfilesStore(createPinia())
+    const clientB = useProfilesStore(createPinia())
+    const p = (id: string) => ({ ...clientA.getProfileTemplate(id), id })
+    let disk = JSON.stringify([p('base')])
+    vi.mocked(ReadFile).mockImplementation(async () => disk)
+    writeFile.mockImplementation(async (_path, content, opts) => {
+      if (opts.ExpectedSHA256 !== sha256(disk).toString()) throw new Error('conflict')
+      disk = content
+    })
+    await clientA.setupProfiles()
+    await clientB.setupProfiles()
+    await clientA.addProfile(p('alpha'))
+    expect(parse(disk).map((p: App.Profile) => p.id)).toEqual(['base', 'alpha'])
+    await expect(clientB.editProfile('base', { ...p('base'), name: 'edited' })).rejects.toThrow(
+      'conflict',
+    )
+    expect(parse(disk).map((p: App.Profile) => p.id)).toEqual(['base', 'alpha'])
+  })
+  it('initializes both pages when they concurrently create the same default settings', async () => {
+    const first = useAppSettingsStore(createPinia())
+    const second = useAppSettingsStore(createPinia())
+    let disk: string | undefined
+    writeFile.mockImplementation(async (_path, content, options) => {
+      expect(options.ExpectedSHA256).toBe('missing')
+      if (disk !== undefined) throw new Error('already created')
+      disk = content
+    })
+    vi.mocked(ReadFile).mockImplementation(async () => disk!)
+    await Promise.all([first.setupAppSettings(), second.setupAppSettings()])
+    expect(writeFile).toHaveBeenCalledTimes(2)
+    expect(first.app).toEqual(second.app)
+  })
+  it('persists the final switch value after a quick undo', async () => {
+    const { nextTick } = await import('vue')
+    vi.useFakeTimers()
+    try {
+      vi.mocked(FileExists).mockResolvedValue(true)
+      vi.mocked(ReadFile).mockResolvedValue('autoStartKernel: false')
+      const store = useAppSettingsStore()
+      await store.setupAppSettings()
+      await nextTick()
+      writeFile.mockClear()
+      store.app.autoStartKernel = true
+      await nextTick()
+      store.app.autoStartKernel = false
+      await nextTick()
+      await Promise.resolve()
+      store.app.autoStartKernel = true
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(600)
+      expect(store.app.autoStartKernel).toBe(true)
+      expect(parse(writeFile.mock.calls.at(-1)![1]).autoStartKernel).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('one transient settings read error preserves existing user.yaml', async () => {
+    vi.mocked(FileExists).mockResolvedValue(true)
+    let disk = JSON.stringify({
+      kernel: { profile: 'existing-profile' },
+      githubApiToken: 'test-only',
+    })
+    vi.mocked(ReadFile).mockImplementation(async (path) => {
+      if (path === 'data/user.yaml') throw new Error('Transient RPC read error')
+      return ''
+    })
+    writeFile.mockImplementation(async (path, content) => {
+      if (path === 'data/user.yaml') disk = content
+    })
+    await expect(useAppSettingsStore().setupAppSettings()).rejects.toThrow(
+      'Transient RPC read error',
+    )
+    expect(parse(disk).kernel.profile).toBe('existing-profile')
+    expect(writeFile).not.toHaveBeenCalled()
   })
 })

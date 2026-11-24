@@ -666,4 +666,42 @@ describe('subscribes store', () => {
     )
     expect(getProxyEndpoint).not.toHaveBeenCalled()
   })
+  it('generates prefixed file-backed nodes without overwriting the source', async () => {
+    const store = useSubscribesStore()
+    const item = {
+      ...subscription('one'),
+      type: 'File' as const,
+      url: 'data/subscribes/one.json',
+      proxyPrefix: 'Site / ',
+      script: 'const onSubscribe = async (proxies, subscription) => ({ proxies, subscription })',
+    }
+    const original = JSON.stringify([
+      { tag: 'HK', type: 'socks', server: '127.0.0.1', server_port: 1234 },
+    ])
+    vi.mocked(ReadFile).mockResolvedValue(original)
+    store.subscribes = [item]
+    await store.updateSubscribe(item.id)
+    const node = store.subscribes[0]!.proxies[0]!
+    expect(node.tag).toBe('Site / HK')
+    expect(writeFile.mock.calls.some(([path]) => path === item.url)).toBe(false)
+    const saved = store.subscribes[0]!
+    const processed = writeFile.mock.calls.find(([path]) => path === saved.path)![1]
+    const cachePath = saved.path
+    vi.mocked(ReadFile).mockImplementation(async (path) =>
+      path === cachePath ? processed : original,
+    )
+    const { generateConfig } = await import('@/utils/generator')
+    const profile = useProfilesStore().getProfileTemplate('sample')
+    profile.outbounds[0]!.outbounds = [{ type: 'one', id: node.id, tag: node.tag }]
+    const generate = () =>
+      generateConfig(profile, {
+        enableStableConfigCompat: false,
+        enablePluginProcessing: false,
+        enableMixinProcessing: false,
+        enableScriptProcessing: false,
+      })
+    expect((await generate()).outbounds).toContainEqual(expect.objectContaining({ tag: node.tag }))
+    saved.path = item.url
+    expect((await generate()).outbounds).toContainEqual(expect.objectContaining({ tag: node.tag }))
+  })
 })

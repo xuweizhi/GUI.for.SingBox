@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -164,5 +165,39 @@ func TestExecBackgroundCleansExpiredManagedLogs(t *testing.T) {
 
 	if _, err := os.Stat(oldLog); !os.IsNotExist(err) {
 		t.Fatalf("expected old managed core log to be removed, got err=%v", err)
+	}
+}
+
+func TestCoreLogRemainsReadableAcrossMidnight(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("inspects the Linux child stdout descriptor")
+	}
+	backendFixtureBase(t)
+	const old = "logs/core-2001-01-01.log"
+	backendFixtureWrite(t, old, "previous day\n")
+	file, err := os.OpenFile(resolvePath(old), os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	cmd := exec.Command("cat")
+	cmd.Stdin, cmd.Stdout = reader, file
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	backendFixtureWrite(t, headlessCorePidFilePath, strconv.Itoa(cmd.Process.Pid))
+	backendFixtureWrite(t, logFilePath("core", time.Now()), "different launch\n")
+	if err := cleanupExpiredLogs(1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := NewApp().readCoreLog(); got != "previous day\n" || err != nil {
+		t.Fatalf("read active core log: %q %v", got, err)
 	}
 }

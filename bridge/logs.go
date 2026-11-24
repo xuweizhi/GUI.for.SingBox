@@ -1,12 +1,14 @@
 package bridge
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -39,6 +41,61 @@ func logFilePath(category string, now time.Time) string {
 	return resolvePath(filepath.Join(logsDirectory, name))
 }
 
+// The child inherits a real file descriptor and can outlive a WebUI restart.
+// Read the file it actually writes, including when it was opened on a previous day.
+func activeCoreLogPath() string {
+	b, err := os.ReadFile(resolvePath(headlessCorePidFilePath))
+	if err != nil {
+		return ""
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 1 {
+		return ""
+	}
+	path, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/1", pid))
+	if err == nil && (path == resolvePath(headlessCoreLogFilePath) ||
+		(filepath.Dir(path) == resolvePath(logsDirectory) && regexpCoreLogName.MatchString(filepath.Base(path)))) {
+		return path
+	}
+	return ""
+}
+
+func (a *App) readCoreLog() (string, error) {
+	path := activeCoreLogPath()
+	if path == "" {
+		// After exit, or on systems without procfs, select the last written file.
+		candidates, err := filepath.Glob(filepath.Join(resolvePath(logsDirectory), "core-*.log"))
+		if err != nil {
+			return "", err
+		}
+		legacy := resolvePath(headlessCoreLogFilePath)
+		var newest time.Time
+		for _, candidate := range append(candidates, legacy) {
+			if candidate != legacy && !regexpCoreLogName.MatchString(filepath.Base(candidate)) {
+				continue
+			}
+			info, err := os.Stat(candidate)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return "", err
+			}
+			if info.Mode().IsRegular() && info.ModTime().After(newest) {
+				newest, path = info.ModTime(), candidate
+			}
+		}
+	}
+	if path == "" {
+		return "", nil
+	}
+	result := a.ReadFile(path, IOOptions{Mode: Text, Range: "-4096"})
+	if !result.Flag {
+		return "", fmt.Errorf("read core log: %s", result.Data)
+	}
+	return result.Data, nil
+}
+
 func cleanupExpiredLogs(retentionDays int, now time.Time) error {
 	retentionDays = normalizeLogRetentionDays(retentionDays)
 	if retentionDays < 0 {
@@ -54,6 +111,7 @@ func cleanupExpiredLogs(retentionDays int, now time.Time) error {
 		return err
 	}
 
+	active := activeCoreLogPath()
 	cutoff := beginningOfDay(now).AddDate(0, 0, -retentionDays)
 	for _, entry := range entries {
 		if entry.IsDir() || !managedLogPattern.MatchString(entry.Name()) {
@@ -64,7 +122,11 @@ func cleanupExpiredLogs(retentionDays int, now time.Time) error {
 		if err != nil || !day.Before(cutoff) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+		path := filepath.Join(dir, entry.Name())
+		if path == active {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}

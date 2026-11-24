@@ -123,7 +123,8 @@ describe('node-groups store', () => {
       'group-hk',
       createGroup({ mode: 'filter', match_field: 'name', include: '^HK' }),
     )
-    const saved = writeFile.mock.calls.findLast(([path]) => path === NodeGroupsFilePath)![1]
+    const saved = writeFile.mock.calls.findLast(([path]) => path === ProfilesFilePath)![2]
+      .Related[0].content
     readFile.mockResolvedValue(saved)
     setActivePinia(createPinia())
     useSubscribesStore().subscribes = subscriptions
@@ -143,8 +144,13 @@ describe('node-groups store', () => {
     await store.editNodeGroup('group-hk', createGroup({ name: 'Hong Kong Premium' }))
 
     expect(profilesStore.profiles[0]!.outbounds[0]!.outbounds[0]!.tag).toBe('Hong Kong Premium')
-    expect(writeFile).toHaveBeenCalledWith(ProfilesFilePath, expect.any(String))
-    expect(writeFile).toHaveBeenCalledWith(NodeGroupsFilePath, expect.any(String))
+    expect(writeFile).toHaveBeenCalledWith(
+      ProfilesFilePath,
+      expect.any(String),
+      expect.objectContaining({
+        Related: [{ path: NodeGroupsFilePath, content: expect.any(String) }],
+      }),
+    )
   })
 
   it('blocks referenced deletion and cascades only when explicitly requested', async () => {

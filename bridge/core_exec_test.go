@@ -83,6 +83,59 @@ func nativeCoreHelperArgs(directory string) []string {
 	return []string{"-test.run=^TestCoreOwnershipHelper$", "run", "-c", filepath.Join(directory, "config.json"), "-D", directory}
 }
 
+func TestFindAndStopOnlyOwnedCore(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("uses Linux process introspection")
+	}
+	backendFixtureBase(t)
+	backendFixtureWrite(t, headlessCoreConfigFilePath, `{"experimental":{"clash_api":{"external_controller":"127.0.0.1:0"}}}`)
+	binary := resolvePath(filepath.Join(headlessCoreWorkingDirectory, headlessCoreFileName("main")))
+	writeNativeCoreHelper(t, binary)
+	foreign := exec.Command(binary, nativeCoreHelperArgs(t.TempDir())...)
+	foreign.Env = append(os.Environ(), "GUI_CORE_OWNERSHIP_HELPER=1")
+	if err := foreign.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = foreign.Process.Kill(); _ = foreign.Wait() }()
+	foreignPID := foreign.Process.Pid
+	backendFixtureWrite(t, headlessCorePidFilePath, strconv.Itoa(foreignPID))
+	app := NewApp()
+	args := nativeCoreHelperArgs(resolvePath(headlessCoreWorkingDirectory))
+	if pid := app.findOwnedCore("main", args); pid != 0 {
+		t.Fatalf("adopted foreign process %d", pid)
+	}
+	if err := app.stopOwnedCore(foreignPID, 1); err == nil {
+		t.Fatal("accepted foreign PID")
+	}
+	result := app.ExecBackground(binary, args, "", "", ExecOptions{
+		PidFile: headlessCorePidFilePath, LogFile: headlessCoreLogFilePath,
+		Env: map[string]string{"GUI_CORE_OWNERSHIP_HELPER": "1"},
+	})
+	if !result.Flag {
+		t.Fatal(result.Data)
+	}
+	pid, err := strconv.Atoi(result.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.stopOwnedCore(pid, 2)
+	if got := app.findOwnedCore("main", args); got != pid || got == foreignPID {
+		t.Fatalf("found %d, want owned PID %d", got, pid)
+	}
+	if err := app.stopOwnedCore(foreignPID, 1); err == nil {
+		t.Fatal("accepted foreign PID while managing another process")
+	}
+	if err := app.stopOwnedCore(pid, 2); err != nil {
+		t.Fatal(err)
+	}
+	if alive, err := IsProcessAlive(foreign.Process); err != nil || !alive {
+		t.Fatalf("foreign process did not survive stop: %v", err)
+	}
+	if _, err := os.Stat(resolvePath(headlessCorePidFilePath)); !os.IsNotExist(err) {
+		t.Fatalf("stopped core PID file still present: %v", err)
+	}
+}
+
 func TestCoreProcessOwnershipRejectsForeignInstallAndConfiguration(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("native process introspection regression uses Linux /proc")

@@ -19,7 +19,6 @@ var Config = &AppConfig{}
 var AppVersion = "v1.26.1"
 
 var Env = &EnvResult{
-	IsStartup:   true,
 	AppVersion:  AppVersion,
 	OS:          runtime.GOOS,
 	ARCH:        runtime.GOARCH,
@@ -50,11 +49,9 @@ func CreateApp(fs embed.FS) *App {
 }
 
 func (a *App) IsStartup() bool {
-	if Env.IsStartup {
-		Env.IsStartup = false
-		return true
-	}
-	return false
+	first := false
+	a.startupOnce.Do(func() { first = true })
+	return first
 }
 
 func (a *App) RestartApp() FlagResult {

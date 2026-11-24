@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   rulesets: {} as any,
   logs: [] as any[],
   event: undefined as undefined | ((record: any) => Promise<void>),
+  claim: vi.fn(),
   status: vi.fn(),
   reload: vi.fn(),
   history: vi.fn(),
@@ -17,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   notify: vi.fn(),
   emit: vi.fn(),
   cron: vi.fn(function (_expression: string, callback: () => void) {
-    return { stop: vi.fn(), callback }
+    return { nextRun: () => new Date(10000), stop: vi.fn(), callback }
   }),
 }))
 vi.mock('croner', () => ({ Cron: mocks.cron }))
@@ -31,6 +32,7 @@ vi.mock('@/bridge', () => ({
   Notify: mocks.notify,
   GetScheduledTaskWorkerLogs: mocks.history,
   GetScheduledTaskWorkerStatus: mocks.status,
+  ClaimLocalTask: mocks.claim,
   ReloadScheduledTaskWorker: mocks.reload,
   RecordScheduledTaskLog: mocks.record,
   RunScheduledTaskWorker: vi.fn(),
@@ -288,4 +290,28 @@ it('waits for an in-flight local task before giving its timer to the backend', a
   await running
   await flushPromises()
   expect(mocks.reload).toHaveBeenCalledTimes(2)
+})
+
+it('only the client granted the occurrence executes a scheduled tick', async () => {
+  const other = useScheduledTasksStore(createPinia())
+  try {
+    const task = makeTask()
+    mocks.subscriptions.subscribes.push({ id: 'sub', requestProxyMode: RequestProxyMode.Kernel })
+    store.scheduledtasks.push(task)
+    other.scheduledtasks.push({ ...task })
+    await store.setupScheduledTasks()
+    await other.setupScheduledTasks()
+    expect(mocks.cron.mock.results).toHaveLength(2)
+    mocks.claim.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    for (const cron of mocks.cron.mock.results) cron.value.callback()
+    await flushPromises()
+    expect(mocks.claim.mock.calls).toEqual([
+      [task.id, task.cron, 10000],
+      [task.id, task.cron, 10000],
+    ])
+    expect(mocks.subscriptions.updateSubscribe).toHaveBeenCalledOnce()
+    expect(mocks.record).toHaveBeenCalledOnce()
+  } finally {
+    other.$dispose()
+  }
 })

@@ -1,8 +1,9 @@
+import sha256 from 'crypto-js/sha256'
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { parse, stringify } from 'yaml'
 
-import { ReadFile, WriteFile } from '@/bridge'
+import { FileExists, ReadFile, WriteFile } from '@/bridge'
 import {
   Colors,
   DefaultCardColumns,
@@ -33,7 +34,7 @@ import {
 } from '@/enums/app'
 import i18n, { loadLocale } from '@/lang'
 import { useAppStore } from '@/stores'
-import { debounce, ignoredError, deepClone } from '@/utils'
+import { debounce, deepClone } from '@/utils'
 import { normalizeCustomFontPresets, syncCustomFontStylesheets } from '@/utils/fontPresets'
 
 const VALID_UI_STYLES = new Set<string>(Object.values(UiStyle))
@@ -140,7 +141,8 @@ export const mergeSettingsDefaults = <T>(defaults: T, input: unknown): T => {
 export const useAppSettingsStore = defineStore('app-settings', () => {
   const appStore = useAppStore()
 
-  let latestUserSettings: string
+  let latestUserSettings: string | undefined
+  let pendingSave = Promise.resolve()
 
   const app = ref<App.AppSettings>({
     lang: Lang.EN,
@@ -204,10 +206,19 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     ],
   })
 
-  const saveAppSettings = debounce(async (config: string) => WriteFile(UserFilePath, config), 500)
+  const saveAppSettings = debounce((config: string) => {
+    const save = pendingSave.then(async () => {
+      if (latestUserSettings === config) return
+      await WriteFile(UserFilePath, config)
+      latestUserSettings = config
+    })
+    pendingSave = save.catch(() => undefined)
+    return save
+  }, 500)
 
   const setupAppSettings = async () => {
-    const data = await ignoredError(ReadFile, UserFilePath)
+    const exists = await FileExists(UserFilePath)
+    const data = exists ? await ReadFile(UserFilePath) : undefined
     let parsedSettings: unknown = {}
     let originalSettings = ''
     let shouldPersist = !data
@@ -217,7 +228,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
         originalSettings = stringify(parsedSettings)
       } catch (error) {
         console.error('Invalid user settings, restoring defaults:', error)
-        await WriteFile(`${UserFilePath}.invalid-${Date.now()}`, data).catch(() => undefined)
+        await WriteFile(`${UserFilePath}.invalid-${Date.now()}`, data)
         shouldPersist = true
       }
     }
@@ -260,11 +271,18 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
 
     const normalizedSettings = stringify(settings)
     shouldPersist ||= normalizedSettings !== originalSettings
-    app.value = settings
-    latestUserSettings = normalizedSettings
     if (shouldPersist) {
-      await WriteFile(UserFilePath, normalizedSettings)
+      try {
+        await WriteFile(UserFilePath, normalizedSettings, {
+          ExpectedSHA256: data === undefined ? 'missing' : sha256(data).toString(),
+        })
+      } catch (error) {
+        // Another page can finish the same first-run initialization while this one loads.
+        if ((await ReadFile(UserFilePath).catch(() => undefined)) !== normalizedSettings) throw error
+      }
     }
+    latestUserSettings = normalizedSettings
+    app.value = settings
   }
 
   const applyAppSettings = {
@@ -323,15 +341,10 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     applyAppSettings.customFontPresets(settings.customFontPresets)
     applyAppSettings.uiStyle(settings.uiStyle)
     applyAppSettings.uiDensity(settings.uiDensity)
-    const lastModifiedSettings = stringify(settings)
-    if (latestUserSettings !== lastModifiedSettings) {
-      saveAppSettings(lastModifiedSettings)
-        .then(() => {
-          latestUserSettings = lastModifiedSettings
-        })
-        .catch((error) => console.error('Failed to save user settings:', error))
-    } else {
-      saveAppSettings.cancel()
+    if (latestUserSettings !== undefined) {
+      saveAppSettings(stringify(settings)).catch((error) =>
+        console.error('Failed to save user settings:', error),
+      )
     }
   }
   watch(app, onAppSettingsChange, { deep: true })

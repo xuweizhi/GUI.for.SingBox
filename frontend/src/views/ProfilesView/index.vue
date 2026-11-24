@@ -250,7 +250,10 @@ const isCreatedBySubscription = (id: string) => {
 
 const showAuto = () => alert(t('common.warning'), 'profile.auto')
 
-const onSortUpdate = debounce(profilesStore.saveProfiles, 1000)
+const onSortUpdate = debounce(
+  () => profilesStore.saveProfiles().catch((error) => message.error(error)),
+  1000,
+)
 </script>
 
 <template>

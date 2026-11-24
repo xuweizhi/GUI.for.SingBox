@@ -11,6 +11,8 @@ export const RestartApp = Bridge.RestartApp
 
 export const GetEnv = (): Promise<App.AppEnv> => Bridge.GetEnv()
 
+export const ClaimLocalTask = Bridge.ClaimLocalTask
+
 export const IsStartup = Bridge.IsStartup
 
 export const GetSystemProxy = async () => {

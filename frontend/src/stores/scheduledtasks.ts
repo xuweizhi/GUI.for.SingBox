@@ -13,6 +13,7 @@ import {
   ReloadScheduledTaskWorker,
   RunScheduledTaskWorker,
   ClearScheduledTaskWorkerLogs,
+  ClaimLocalTask,
   RecordScheduledTaskLog,
 } from '@/bridge'
 import { ScheduledTasksFilePath } from '@/constant/app'
@@ -132,11 +133,21 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
     if (disposed) return
     scheduledtasks.value.forEach((task) => {
       if (!task.disabled && !isHandledByWorker(task)) {
-        cronJobsMap[task.id] = new Cron(task.cron, () => {
-          void runScheduledTask(task.id).catch((error) =>
-            console.warn('Scheduled task failed:', error),
-          )
+        const job: Cron = new Cron(task.cron, async () => {
+          const occurrence = nextRun
+          nextRun = job.nextRun()?.getTime()
+          if (!occurrence || localRuns.has(task.id)) return
+          try {
+            if (await ClaimLocalTask(task.id, task.cron, occurrence)) {
+              if (!disposed && cronJobsMap[task.id] === job)
+                await runScheduledTaskLocallyOnce(task.id)
+            }
+          } catch (error) {
+            console.warn('Scheduled task failed:', error)
+          }
         })
+        let nextRun = job.nextRun()?.getTime()
+        cronJobsMap[task.id] = job
       }
     })
   }
@@ -339,6 +350,10 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
       return logs.find((log) => log.id === id)
     }
 
+    return runScheduledTaskLocallyOnce(id)
+  }
+
+  const runScheduledTaskLocallyOnce = (id: string) => {
     const running = localRuns.get(id)
     if (running) return running
     const result = runScheduledTaskLocally(id).finally(() => localRuns.delete(id))

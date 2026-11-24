@@ -1,3 +1,31 @@
+import sha256 from 'crypto-js/sha256'
+
+export const processedSubscriptionPath = (id: string, source: string) => {
+  const path = `data/subscribes/.processed/${sha256(id).toString()}.json`
+  return path === source ? path + '.nodes.json' : path
+}
+
+export const prefixSubscriptionReferences = (
+  proxies: Recordable[],
+  dns: App.Subscription['importedDns'],
+  prefix: string,
+) => {
+  if (!prefix) return
+  const renamed = new Map(
+    proxies.map(({ tag }) => [tag, tag.startsWith(prefix) ? tag : prefix + tag]),
+  )
+  const reference = (tag: string) => renamed.get(tag) || tag
+  proxies.forEach((proxy) => {
+    proxy.tag = reference(proxy.tag)
+    if (proxy.detour) proxy.detour = reference(proxy.detour)
+    if (proxy.default) proxy.default = reference(proxy.default)
+    if (Array.isArray(proxy.outbounds)) proxy.outbounds = proxy.outbounds.map(reference)
+  })
+  dns?.servers.forEach((server) => {
+    if (server.detour) server.detour = reference(server.detour)
+  })
+}
+
 /** Subscription cache metadata must never reach the sing-box configuration. */
 export const isSubscriptionEndpoint = (value: Recordable) => value?._gui_kind === 'endpoint'
 

@@ -1,10 +1,12 @@
 package bridge
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"time"
 )
 
@@ -13,6 +15,14 @@ type preparedSubscriptionUpdate struct {
 	CachePath    string
 	Cache        []byte
 	WriteCache   bool
+}
+
+func processedSubscriptionPath(id, source string) string {
+	path := fmt.Sprintf("data/subscribes/.processed/%x.json", sha256.Sum256([]byte(id)))
+	if path == source {
+		return path + ".nodes.json"
+	}
+	return path
 }
 
 func (w *scheduledTaskWorkerSupervisor) prepareSubscriptionUpdate(current subscriptionConfig, settings backendNetworkSettings) (preparedSubscriptionUpdate, error) {
@@ -41,7 +51,7 @@ func (w *scheduledTaskWorkerSupervisor) prepareSubscriptionUpdate(current subscr
 			return update, err
 		}
 	}
-	preserveDNS := extracted.FlatCache && (subscribe.Type == "Manual" || (subscribe.Type == "File" && subscribe.URL == subscribe.Path))
+	preserveDNS := extracted.FlatCache && (subscribe.Type == "Manual" || (subscribe.Type == "File" && (subscribe.URL == subscribe.Path || subscribe.Path == processedSubscriptionPath(subscribe.ID, subscribe.URL))))
 	if !preserveDNS {
 		subscribe.ImportedDns = extracted.DNS
 	}
@@ -86,13 +96,19 @@ func (w *scheduledTaskWorkerSupervisor) prepareSubscriptionUpdate(current subscr
 		*subscribe = nextSubscription
 		proxies = nextProxies
 	}
+	for _, proxy := range proxies {
+		delete(proxy, "__id__")
+		delete(proxy, "__tmp__id__")
+	}
+	if subscribe.Type == "File" && subscribe.URL == subscribe.Path {
+		var original []map[string]any
+		if json.Unmarshal([]byte(body), &original) != nil || !reflect.DeepEqual(original, proxies) {
+			subscribe.Path = processedSubscriptionPath(subscribe.ID, subscribe.URL)
+		}
+	}
 	update.CachePath = resolvePath(subscribe.Path)
 	update.WriteCache = subscribe.Type != "File" || subscribe.URL != subscribe.Path
 	if update.WriteCache {
-		for _, proxy := range proxies {
-			delete(proxy, "__id__")
-			delete(proxy, "__tmp__id__")
-		}
 		update.Cache, err = json.MarshalIndent(proxies, "", "  ")
 		if err != nil {
 			return update, err
@@ -111,6 +127,21 @@ func cachedNodeClone(nodes []map[string]any) []map[string]any {
 // Cache files and their metadata form one logical update. Atomic file writes
 // protect readers; rollback restores all previous caches if any write/save fails.
 func commitSubscriptionUpdates(updates []preparedSubscriptionUpdate, saveMetadata func() error) error {
+	files := make([]fileUpdate, 0, len(updates))
+	for _, update := range updates {
+		if update.WriteCache {
+			files = append(files, fileUpdate{update.CachePath, update.Cache})
+		}
+	}
+	return commitFileUpdates(files, saveMetadata)
+}
+
+type fileUpdate struct {
+	path    string
+	content []byte
+}
+
+func commitFileUpdates(files []fileUpdate, saveMetadata func() error) error {
 	type backup struct {
 		path    string
 		content []byte
@@ -133,21 +164,18 @@ func commitSubscriptionUpdates(updates []preparedSubscriptionUpdate, saveMetadat
 				}
 			}
 			if err != nil {
-				failures = append(failures, fmt.Errorf("restore subscription cache %s: %w", old.path, err))
+				failures = append(failures, fmt.Errorf("restore file %s: %w", old.path, err))
 			}
 		}
 		return errors.Join(failures...)
 	}
-	for _, update := range updates {
-		if !update.WriteCache {
-			continue
-		}
-		if !seen[update.CachePath] {
-			old := backup{path: update.CachePath, mode: 0600}
+	for _, file := range files {
+		if !seen[file.path] {
+			old := backup{path: file.path, mode: 0600}
 			info, err := os.Stat(old.path)
 			if err == nil {
 				if !info.Mode().IsRegular() {
-					return rollback(fmt.Errorf("subscription cache is not a regular file: %s", old.path))
+					return rollback(fmt.Errorf("not a regular file: %s", old.path))
 				}
 				old.existed = true
 				old.mode = info.Mode().Perm()
@@ -159,7 +187,7 @@ func commitSubscriptionUpdates(updates []preparedSubscriptionUpdate, saveMetadat
 			backups = append(backups, old)
 			seen[old.path] = true
 		}
-		if err := atomicWriteFile(update.CachePath, update.Cache, 0600); err != nil {
+		if err := atomicWriteFile(file.path, file.content, 0600); err != nil {
 			return rollback(err)
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -232,32 +233,36 @@ type scheduledTaskWorkerPluginUpdate struct {
 type scheduledTaskWorkerSupervisor struct {
 	app *App
 
-	startMu        sync.Mutex
-	reloadMu       sync.Mutex
-	writeMu        sync.Mutex
-	processDone    chan struct{}
-	managedTaskIDs []string
-	mu             sync.Mutex
-	cmd            *exec.Cmd
-	stdin          io.WriteCloser
-	pending        map[string]chan scheduledTaskWorkerResponse
-	supportedTypes map[string]struct{}
-	nodePath       string
-	available      bool
-	requestCounter uint64
+	startMu         sync.Mutex
+	reloadMu        sync.Mutex
+	writeMu         sync.Mutex
+	processDone     chan struct{}
+	managedTaskIDs  []string
+	localTaskClaims map[string]int64
+	mu              sync.Mutex
+	cmd             *exec.Cmd
+	stdin           io.WriteCloser
+	pending         map[string]chan scheduledTaskWorkerResponse
+	supportedTypes  map[string]struct{}
+	nodePath        string
+	available       bool
+	requestCounter  uint64
 
 	scheduler *cron.Cron
 	logs      []scheduledTaskWorkerLogRecord
 }
 
 func (a *App) taskWorker() *scheduledTaskWorkerSupervisor {
-	if a.TaskWorker == nil {
+	a.workerOnce.Do(func() {
+		if a.TaskWorker != nil {
+			return
+		}
 		a.TaskWorker = &scheduledTaskWorkerSupervisor{
 			app:            a,
 			pending:        map[string]chan scheduledTaskWorkerResponse{},
 			supportedTypes: map[string]struct{}{},
 		}
-	}
+	})
 	return a.TaskWorker
 }
 
@@ -339,9 +344,6 @@ func (a *App) ReloadScheduledTaskWorker() FlagResult {
 
 func (a *App) RunScheduledTaskWorker(id string) FlagResult {
 	worker := a.taskWorker()
-	if err := worker.ensureStarted(); err != nil {
-		return FlagResult{false, err.Error()}
-	}
 	tasks, err := loadScheduledTasks()
 	if err != nil {
 		return FlagResult{false, err.Error()}
@@ -361,6 +363,11 @@ func (a *App) RunScheduledTaskWorker(id string) FlagResult {
 	if task.Disabled {
 		return FlagResult{false, "scheduled task is disabled"}
 	}
+	if _, native := goScheduledTaskTypes[task.Type]; !native {
+		if err := worker.ensureStarted(); err != nil {
+			return FlagResult{false, err.Error()}
+		}
+	}
 	if !worker.supportsType(task.Type) {
 		return FlagResult{false, "scheduled task type is not handled by the backend runtime"}
 	}
@@ -373,6 +380,30 @@ func (a *App) RunScheduledTaskWorker(id string) FlagResult {
 	}
 
 	return FlagResult{true, "Success"}
+}
+
+// Only one connected browser may execute a given scheduled occurrence. Manual
+// runs bypass this claim. A late callback cannot replay an older occurrence.
+func (w *scheduledTaskWorkerSupervisor) claimLocalTask(id, spec string, occurrence int64) (bool, error) {
+	w.reloadMu.Lock()
+	defer w.reloadMu.Unlock()
+	tasks, err := loadScheduledTasks()
+	if err != nil {
+		return false, err
+	}
+	active := slices.ContainsFunc(tasks, func(task scheduledTaskConfig) bool {
+		return task.ID == id && task.Cron == spec && !task.Disabled
+	})
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !active || slices.Contains(w.managedTaskIDs, id) || occurrence <= w.localTaskClaims[id] {
+		return false, nil
+	}
+	if w.localTaskClaims == nil {
+		w.localTaskClaims = make(map[string]int64)
+	}
+	w.localTaskClaims[id] = occurrence
+	return true, nil
 }
 
 func (w *scheduledTaskWorkerSupervisor) info() scheduledTaskWorkerInfo {
@@ -2445,7 +2476,7 @@ func (w *scheduledTaskWorkerSupervisor) doUpdateRuleset(ruleset *rulesetConfig) 
 				return errors.New(result.Data)
 			}
 		} else if ruleset.Type == "Http" {
-			result := w.app.Download("GET", ruleset.URL, ruleset.Path, map[string]string{}, "", RequestOptions{})
+			result := w.app.Download("GET", ruleset.URL, ruleset.Path, map[string]string{}, "", RequestOptions{Redirect: true})
 			if !result.Flag {
 				return errors.New(result.Body)
 			}
@@ -2464,7 +2495,7 @@ func (w *scheduledTaskWorkerSupervisor) loadSourceRulesetBody(
 		content, readErr := os.ReadFile(resolvePath(ruleset.URL))
 		return string(content), ruleset.URL != ruleset.Path, readErr
 	case "Http":
-		result := w.app.Requests("GET", ruleset.URL, map[string]string{}, "", RequestOptions{})
+		result := w.app.Requests("GET", ruleset.URL, map[string]string{}, "", RequestOptions{Redirect: true})
 		if !result.Flag {
 			return "", false, errors.New(result.Body)
 		}

@@ -29,8 +29,8 @@ vi.mock('@/api/kernel', () => ({
   probeApiAvailability: mocks.probe,
 }))
 vi.mock('@/bridge', () => ({
-  ProcessInfo: vi.fn(),
-  KillProcess: vi.fn().mockResolvedValue(undefined),
+  ReadCoreLog: vi.fn().mockResolvedValue(''),
+  StopOwnedCore: vi.fn().mockResolvedValue(undefined),
   Exec: mocks.check,
   ExecBackground: mocks.start,
   AbsolutePath: vi.fn(async (path: string) => `/workspace/${path}`),
@@ -39,7 +39,7 @@ vi.mock('@/bridge', () => ({
   ReadFile: vi.fn().mockResolvedValue('{}'),
   RemoveFile: mocks.remove,
   WriteFile: vi.fn().mockResolvedValue(undefined),
-  FindListeningProcess: vi.fn().mockResolvedValue(123),
+  FindOwnedCore: vi.fn().mockResolvedValue(123),
 }))
 vi.mock('@/constant/profile', () => ({ DefaultInboundMixed: vi.fn() }))
 vi.mock('@/stores', () => ({
@@ -76,7 +76,7 @@ vi.mock('@/utils', () => ({
 }))
 
 import { getConfigs } from '@/api/kernel'
-import { KillProcess, ReadFile } from '@/bridge'
+import { FindOwnedCore, StopOwnedCore, ReadFile } from '@/bridge'
 import { CoreConfigStagedFilePath } from '@/constant/kernel'
 import { useKernelApiStore } from '@/stores/kernelApi'
 import { sleep } from '@/utils'
@@ -292,7 +292,7 @@ describe('kernel staged configuration integration', () => {
     try {
       const store = useKernelApiStore()
       await expect(store.startCore()).rejects.toContain('timed out')
-      expect(KillProcess).toHaveBeenCalledWith(123, 3)
+      expect(StopOwnedCore).toHaveBeenCalledWith(123, 3)
       expect(store.running).toBe(false)
       expect(store.pid).toBe(-1)
       await exit!('late exit')
@@ -300,5 +300,27 @@ describe('kernel staged configuration integration', () => {
     } finally {
       clock.mockRestore()
     }
+  })
+  it('does not adopt a foreign controller or stop its listener', async () => {
+    vi.mocked(FindOwnedCore).mockResolvedValueOnce(0).mockResolvedValueOnce(0)
+    mocks.probe.mockResolvedValue(true)
+    const store = useKernelApiStore()
+    await store.initCoreState()
+    expect(store.running).toBe(false)
+    await expect(store.startCore()).rejects.toThrow('another process')
+    expect(mocks.start).not.toHaveBeenCalled()
+    expect(StopOwnedCore).not.toHaveBeenCalled()
+  })
+
+  it('finishes a stop when the exit event is lost and ignores its late delivery', async () => {
+    const store = useKernelApiStore()
+    mocks.probe.mockResolvedValueOnce(false).mockResolvedValue(true)
+    await store.startCore()
+    const lateExit = mocks.start.mock.calls[0]![3]
+    await store.stopCore()
+    expect(store.running).toBe(false)
+    expect(store.stopping).toBe(false)
+    await lateExit()
+    expect(mocks.stoppedHook).toHaveBeenCalledOnce()
   })
 })

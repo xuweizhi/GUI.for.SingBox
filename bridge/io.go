@@ -20,6 +20,23 @@ const (
 	Text   = "Text"
 )
 
+func checkFileRevision(path, expected string) error {
+	if expected == "" {
+		return nil
+	}
+	content, err := os.ReadFile(path)
+	actual := "missing"
+	if err == nil {
+		actual = fmt.Sprintf("%x", sha256.Sum256(content))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if actual != expected {
+		return fmt.Errorf("%s changed since it was loaded. Reload the page and retry", filepath.Base(path))
+	}
+	return nil
+}
+
 func (a *App) WriteFile(path string, content string, options IOOptions) FlagResult {
 	log.Printf("WriteFile [%s %s]: %s", options.Mode, options.Range, path)
 	dataMutationMu.Lock()
@@ -46,13 +63,27 @@ func (a *App) WriteFile(path string, content string, options IOOptions) FlagResu
 		return FlagResult{false, "Unsupported IO mode: " + options.Mode}
 	}
 
+	if err := checkFileRevision(fullPath, options.ExpectedSHA256); err != nil {
+		return FlagResult{false, err.Error()}
+	}
+
+	if len(options.Related) > 0 && (fullPath != resolvePath(profilesFilePath) || options.ExpectedSHA256 == "" || options.Range != "" || options.Mode != Text) {
+		return FlagResult{false, "related configuration writes require a versioned profile update"}
+	}
 	if options.Range == "" {
 		if fullPath == resolvePath(profilesFilePath) {
 			if err := snapshotBeforeProfileChange(resolvePath("data"), data); err != nil {
 				return FlagResult{false, err.Error()}
 			}
 		}
-		if err := atomicWriteFile(fullPath, data, 0o600); err != nil {
+		files := make([]fileUpdate, 0, len(options.Related))
+		for _, related := range options.Related {
+			if related.Path != subscribesFilePath && related.Path != "data/node-groups.yaml" {
+				return FlagResult{false, "invalid related profile configuration file"}
+			}
+			files = append(files, fileUpdate{resolvePath(related.Path), []byte(related.Content)})
+		}
+		if err := commitFileUpdates(files, func() error { return atomicWriteFile(fullPath, data, 0o600) }); err != nil {
 			return FlagResult{false, err.Error()}
 		}
 		return FlagResult{true, "Success"}

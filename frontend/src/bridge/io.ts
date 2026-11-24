@@ -3,6 +3,8 @@ import * as Bridge from '@/bridge/browser/go/bridge/App'
 interface IOOptions {
   Mode?: 'Binary' | 'Text'
   Range?: string
+  ExpectedSHA256?: string
+  Related?: { path: string; content: string }[]
 }
 
 export const WriteFile = async (path: string, content: string, options: IOOptions = {}) => {

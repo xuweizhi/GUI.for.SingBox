@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const bridgeMocks = vi.hoisted(() => ({
   ClearScheduledTaskWorkerLogs: vi.fn(),
   Cron: vi.fn(function () {
-    return { stop: vi.fn() }
+    return { nextRun: () => new Date(10000), stop: vi.fn() }
   }),
   EventsOn: vi.fn(),
   GetScheduledTaskWorkerLogs: vi.fn(),

@@ -1,12 +1,13 @@
+import sha256 from 'crypto-js/sha256'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { parse } from 'yaml'
 
-import { ReadFile, WriteFile } from '@/bridge'
+import { FileExists, ReadFile, WriteFile } from '@/bridge'
 import { ProfilesFilePath } from '@/constant/app'
 import { DefaultOutboundIds } from '@/constant/outbound'
 import * as Defaults from '@/constant/profile'
-import { ignoredError, eventBus, stringifyNoFolding, migrateProfiles, sampleID } from '@/utils'
+import { eventBus, stringifyNoFolding, migrateProfiles, sampleID } from '@/utils'
 import { withConfigMutation } from '@/utils/configPersistence'
 
 import { useAppSettingsStore } from './appSettings'
@@ -17,29 +18,46 @@ export const useProfilesStore = defineStore('profiles', () => {
   const profiles = ref<App.Profile[]>([])
   const currentProfile = computed(() => getProfileById(appSettingsStore.app.kernel.profile))
 
-  const setupProfiles = async () => {
-    const data = await ignoredError(ReadFile, ProfilesFilePath)
-    data && (profiles.value = parse(data))
+  let revision = 'missing'
 
+  const setupProfiles = async () => {
+    const data = (await FileExists(ProfilesFilePath)) ? await ReadFile(ProfilesFilePath) : undefined
+    profiles.value = data ? parse(data) : []
+    revision = data === undefined ? 'missing' : sha256(data).toString()
     await migrateProfiles(profiles.value, saveProfiles)
   }
 
-  const saveProfiles = () =>
-    withConfigMutation(() => WriteFile(ProfilesFilePath, stringifyNoFolding(profiles.value)))
+  // The server compares the loaded revision and commits related metadata under the same lock.
+  const writeProfiles = async (
+    next: App.Profile[],
+    related?: { path: string; content: string }[],
+  ) => {
+    const content = stringifyNoFolding(next)
+    const result = await WriteFile(ProfilesFilePath, content, {
+      ExpectedSHA256: revision,
+      Related: related,
+    })
+    revision = sha256(content).toString()
+    return result
+  }
+
+  const saveProfiles = () => withConfigMutation(() => writeProfiles(profiles.value))
 
   const reloadFromDisk = (options: { emitChanges?: boolean } = {}) =>
     withConfigMutation(async () => {
-      const parsed = parse(await ReadFile(ProfilesFilePath))
+      const content = await ReadFile(ProfilesFilePath)
+      const parsed = parse(content)
       if (!Array.isArray(parsed)) throw new Error('Profiles file must contain an array')
       const changed = new Set([...profiles.value, ...parsed].map((profile) => profile.id))
       profiles.value = parsed
+      revision = sha256(content).toString()
       if (options.emitChanges) changed.forEach((id) => eventBus.emit('profileChange', { id }))
     })
 
   const addProfile = (p: App.Profile) =>
     withConfigMutation(async () => {
       const next = [...profiles.value, p]
-      await WriteFile(ProfilesFilePath, stringifyNoFolding(next))
+      await writeProfiles(next)
       profiles.value.push(p)
     })
 
@@ -48,7 +66,7 @@ export const useProfilesStore = defineStore('profiles', () => {
       const idx = profiles.value.findIndex((v) => v.id === id)
       if (idx === -1) return
       const next = profiles.value.filter((v) => v.id !== id)
-      await WriteFile(ProfilesFilePath, stringifyNoFolding(next))
+      await writeProfiles(next)
       profiles.value.splice(idx, 1)
       eventBus.emit('profileChange', { id })
     })
@@ -58,7 +76,7 @@ export const useProfilesStore = defineStore('profiles', () => {
       const idx = profiles.value.findIndex((v) => v.id === id)
       if (idx === -1) return
       const next = profiles.value.map((profile, index) => (index === idx ? p : profile))
-      await WriteFile(ProfilesFilePath, stringifyNoFolding(next))
+      await writeProfiles(next)
       profiles.value.splice(idx, 1, p)
       eventBus.emit('profileChange', { id })
     })
@@ -87,6 +105,7 @@ export const useProfilesStore = defineStore('profiles', () => {
     setupProfiles,
     reloadFromDisk,
     saveProfiles,
+    writeProfiles,
     addProfile,
     editProfile,
     deleteProfile,

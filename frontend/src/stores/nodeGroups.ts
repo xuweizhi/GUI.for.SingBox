@@ -3,9 +3,9 @@ import { ref } from 'vue'
 import { parse } from 'yaml'
 
 import { ReadFile, WriteFile } from '@/bridge'
-import { NodeGroupsFilePath, ProfilesFilePath } from '@/constant/app'
+import { NodeGroupsFilePath } from '@/constant/app'
 import { DefaultNodeGroup } from '@/constant/nodeGroup'
-import { persistConfigFiles, withConfigMutation } from '@/utils/configPersistence'
+import { withConfigMutation } from '@/utils/configPersistence'
 import { eventBus } from '@/utils/eventBus'
 import {
   getNodeGroupDependencies,
@@ -122,8 +122,7 @@ export const useNodeGroupsStore = defineStore('nodeGroups', () => {
         }),
       )
       const groups = nodeGroups.value.map((value, idx) => (idx === index ? next : value))
-      await persistConfigFiles([
-        { path: ProfilesFilePath, content: stringifyNoFolding(profiles) },
+      await profilesStore.writeProfiles(profiles, [
         { path: NodeGroupsFilePath, content: stringifyNoFolding(groups) },
       ])
       nodeGroups.value.splice(index, 1, next)
@@ -141,12 +140,10 @@ export const useNodeGroupsStore = defineStore('nodeGroups', () => {
       const profiles = deepClone(profilesStore.profiles)
       const groups = nodeGroups.value.filter((group) => group.id !== id)
       const removedReferences = removeNodeGroupReferences(id, profiles)
-      await persistConfigFiles([
-        ...(removedReferences
-          ? [{ path: ProfilesFilePath, content: stringifyNoFolding(profiles) }]
-          : []),
-        { path: NodeGroupsFilePath, content: stringifyNoFolding(groups) },
-      ])
+      const content = stringifyNoFolding(groups)
+      if (removedReferences)
+        await profilesStore.writeProfiles(profiles, [{ path: NodeGroupsFilePath, content }])
+      else await WriteFile(NodeGroupsFilePath, content)
       nodeGroups.value.splice(index, 1)
       profilesStore.profiles = profiles
       new Set(dependencies.map((dependency) => dependency.profileId)).forEach((id) =>

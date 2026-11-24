@@ -38,6 +38,7 @@ import { makeNodeCatalog, profileNodeKey, subscriptionNodeKey } from './nodePref
 import { findOutboundGraphIssues } from './outboundPolicy'
 import {
   extractSubscriptionConfig,
+  prefixSubscriptionReferences,
   isSubscriptionEndpoint,
   stripSubscriptionMetadata,
   parseSubscriptionDnsAddresses,
@@ -201,6 +202,23 @@ const generateOutbounds = async (
       if (!subscription) throw new Error(`Subscription not found: ${subscriptionId}`)
       const extracted = extractSubscriptionConfig(JSON.parse(await ReadFile(subscription.path)))
       const parsed = extracted.outbounds
+      // Older same-file subscriptions have prefixed metadata but an untouched source.
+      if (
+        subscription.type === 'File' &&
+        subscription.url === subscription.path &&
+        subscription.proxyPrefix
+      ) {
+        const rawTags = new Set(parsed.map((node) => node.tag))
+        const prefix = subscription.proxyPrefix
+        if (
+          subscription.proxies.some(
+            ({ tag }) =>
+              !rawTags.has(tag) && tag.startsWith(prefix) && rawTags.has(tag.slice(prefix.length)),
+          )
+        ) {
+          prefixSubscriptionReferences(parsed, extracted.importedDns, prefix)
+        }
+      }
       if (parsed.some((proxy) => !proxy || typeof proxy.tag !== 'string' || !proxy.tag.trim())) {
         throw new Error(`Invalid subscription data: ${subscription.name || subscriptionId}`)
       }

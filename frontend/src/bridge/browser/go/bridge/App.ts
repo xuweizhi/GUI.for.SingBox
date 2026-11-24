@@ -37,6 +37,10 @@ export const ExecBackground = (
 ) => flagResult('ExecBackground', [arg1, arg2, arg3, arg4, arg5])
 export const FileExists = (arg1: string) => flagResult('FileExists', [arg1])
 export const FileSHA256 = (arg1: string) => flagResult('FileSHA256', [arg1])
+export const FindOwnedCore = (branch: string, args: string[]) =>
+  invokeBridge<number>('FindOwnedCore', [branch, args])
+export const StopOwnedCore = (pid: number, timeout = 10) =>
+  invokeBridge<void>('StopOwnedCore', [pid, timeout])
 export const FindListeningProcess = (arg1: number) => flagResult('FindListeningProcess', [arg1])
 export const GetEnv = () => invokeBridge<any>('GetEnv')
 export const GetInterfaces = () => flagResult('GetInterfaces')
@@ -54,9 +58,12 @@ export const ProcessInfo = (arg1: number) => flagResult('ProcessInfo', [arg1])
 export const ProcessMemory = (arg1: number) => flagResult('ProcessMemory', [arg1])
 export const QueryMMDB = (arg1: string, arg2: string, arg3: string) =>
   flagResult('QueryMMDB', [arg1, arg2, arg3])
+export const ReadCoreLog = () => invokeBridge<string>('ReadCoreLog')
 export const ReadDir = (arg1: string) => flagResult('ReadDir', [arg1])
 export const ReadFile = (arg1: string, arg2: Record<string, any>) =>
   flagResult('ReadFile', [arg1, arg2])
+export const ClaimLocalTask = (id: string, spec: string, occurrence: number) =>
+  invokeBridge<boolean>('ClaimLocalTask', [id, spec, occurrence])
 export const RecordScheduledTaskLog = (arg1: string) => flagResult('RecordScheduledTaskLog', [arg1])
 type SubscriptionUsageReport = Pick<
   App.Subscription,

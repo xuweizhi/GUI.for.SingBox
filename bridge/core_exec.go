@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -20,34 +21,88 @@ func isCoreExecRequest(path string, options ExecOptions) bool {
 	if filepath.ToSlash(filepath.Clean(options.PidFile)) != filepath.ToSlash(filepath.Clean(headlessCorePidFilePath)) {
 		return false
 	}
-	logName := filepath.Base(filepath.ToSlash(filepath.Clean(options.LogFile)))
-	if filepath.ToSlash(filepath.Clean(options.LogFile)) != filepath.ToSlash(filepath.Clean(headlessCoreLogFilePath)) && !regexpCoreLogName.MatchString(logName) {
+	logPath := resolvePath(options.LogFile)
+	daily := filepath.Dir(logPath) == resolvePath(logsDirectory) && regexpCoreLogName.MatchString(filepath.Base(logPath))
+	if logPath != resolvePath(headlessCoreLogFilePath) && !daily {
 		return false
 	}
-	return strings.HasPrefix(filepath.Base(resolvePath(path)), "sing-box")
+	exe := resolvePath(path)
+	return exe == resolvePath(headlessCoreWorkingDirectory+"/"+headlessCoreFileName("main")) ||
+		exe == resolvePath(headlessCoreWorkingDirectory+"/"+headlessCoreFileName("alpha"))
 }
 
-func (a *App) reuseExistingCoreProcess(path string, args []string, endEvent string, pidPath string) (FlagResult, bool) {
-	if pid, ok := existingCorePIDFromFile(path, pidPath, args); ok {
-		log.Printf("Reusing existing core from pid file with PID %d", pid)
-		if endEvent != "" {
-			watchExistingCoreExit(a, pid, endEvent, pidPath)
-		}
-		return FlagResult{true, strconv.Itoa(pid)}, true
+// Hold a process handle so later UI actions still identify the same child
+// after a binary upgrade, a branch switch or recycling of a numeric PID.
+func (a *App) rememberCore(handle *os.Process) {
+	if a.coreProcess != nil {
+		_ = a.coreProcess.Release()
 	}
+	a.coreProcess = handle
+}
 
-	if pid, ok := a.existingCorePIDFromController(path, args); ok {
-		if pidPath != "" {
-			_ = os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
+func (a *App) findOwnedCore(branch string, args []string) int {
+	coreStartMu.Lock()
+	defer coreStartMu.Unlock()
+	path := headlessCoreWorkingDirectory + "/" + headlessCoreFileName(branch)
+	return a.locateCore(path, args, resolvePath(headlessCorePidFilePath))
+}
+
+// All callers hold coreStartMu.
+func (a *App) locateCore(path string, args []string, pidPath string) int {
+	if a.coreProcess != nil {
+		if alive, _ := IsProcessAlive(a.coreProcess); alive {
+			return a.coreProcess.Pid
 		}
-		log.Printf("Reusing existing core from controller port with PID %d", pid)
-		if endEvent != "" {
-			watchExistingCoreExit(a, pid, endEvent, pidPath)
-		}
-		return FlagResult{true, strconv.Itoa(pid)}, true
+		a.rememberCore(nil)
 	}
+	pid, ok := existingCorePIDFromFile(path, pidPath, args)
+	if !ok {
+		pid, ok = a.existingCorePIDFromController(path, args)
+	}
+	if !ok {
+		return 0
+	}
+	handle, err := os.FindProcess(pid)
+	if err != nil {
+		return 0
+	}
+	if !processMatchesCore(int32(pid), path, args) {
+		_ = handle.Release()
+		return 0
+	}
+	a.rememberCore(handle)
+	if err := atomicWriteFile(pidPath, []byte(strconv.Itoa(pid)), 0600); err != nil {
+		log.Printf("Failed to record verified core PID: %v", err)
+	}
+	return pid
+}
 
-	return FlagResult{}, false
+func (a *App) stopOwnedCore(pid, timeout int) error {
+	coreStartMu.Lock()
+	defer coreStartMu.Unlock()
+	p := a.coreProcess
+	if p == nil || pid <= 1 || p.Pid != pid {
+		return fmt.Errorf("core ownership changed; refresh the page before stopping")
+	}
+	if alive, err := IsProcessAlive(p); err != nil {
+		return err
+	} else if alive {
+		if err := SendExitSignal(p); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return err
+		}
+		if err := waitForProcessExitWithTimeout(p, max(1, min(timeout, 300))); err != nil {
+			return err
+		}
+	}
+	removePIDIfCurrent(resolvePath(headlessCorePidFilePath), pid)
+	return nil
+}
+
+func removePIDIfCurrent(path string, pid int) {
+	data, err := os.ReadFile(path)
+	if err == nil && strings.TrimSpace(string(data)) == strconv.Itoa(pid) {
+		_ = os.Remove(path)
+	}
 }
 
 func existingCorePIDFromFile(path string, pidPath string, args []string) (int, bool) {
@@ -70,6 +125,7 @@ func existingCorePIDFromFile(path string, pidPath string, args []string) (int, b
 		return 0, false
 	}
 
+	defer processHandle.Release()
 	alive, err := IsProcessAlive(processHandle)
 	if err != nil || !alive {
 		return 0, false
@@ -296,13 +352,16 @@ func watchExistingCoreExit(a *App, pid int, endEvent string, pidPath string) {
 			return
 		}
 
+		defer processHandle.Release()
 		if err := waitForProcessExit(processHandle); err != nil {
 			a.EventsEmit(endEvent, err.Error())
 			return
 		}
 
 		if pidPath != "" {
-			_ = os.Remove(pidPath)
+			coreStartMu.Lock()
+			removePIDIfCurrent(pidPath, pid)
+			coreStartMu.Unlock()
 		}
 		a.EventsEmit(endEvent)
 	}()
