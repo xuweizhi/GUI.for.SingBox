@@ -31,21 +31,31 @@ export const useLogsStore = defineStore("logs", () => {
   const kernelApiLogs = ref<CoreApiLogsData[]>([]);
   const scheduledtasksLogs = ref<TaskLogRecord[]>([]);
 
+  const limit = 2000
+  let skipHydration = false
+  const trimLogs = () => {
+    if (kernelLogs.value.length > limit) kernelLogs.value.length = limit
+    if (kernelApiLogs.value.length > limit) kernelApiLogs.value.length = limit
+  }
   const recordKernelLog = (msg: string) => {
     kernelLogs.value.unshift(msg);
     kernelApiLogs.value.unshift(parseKernelLogLine(msg));
+    trimLogs()
   };
 
   const recordKernelApiLog = (log: CoreApiLogsData) => {
     kernelLogs.value.unshift(formatKernelApiLog(log));
     kernelApiLogs.value.unshift(log);
+    trimLogs()
   };
 
   const hydrateKernelLogs = (content: string) => {
+    if (skipHydration) return
     const nextKernelLogs = content
       .split("\n")
       .map((line) => line.replace(/\r$/, ""))
       .filter(Boolean)
+      .slice(-limit)
       .reverse();
 
     kernelLogs.value = nextKernelLogs;
@@ -62,7 +72,8 @@ export const useLogsStore = defineStore("logs", () => {
 
   const isEmpty = computed(() => kernelLogs.value.length === 0);
 
-  const clearKernelLog = () => {
+  const clearKernelLog = (userCleared = false) => {
+    if (userCleared) skipHydration = true
     kernelLogs.value.splice(0);
     kernelApiLogs.value.splice(0);
   };

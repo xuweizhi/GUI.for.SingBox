@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 
 import { ClipboardGetText } from '@/bridge'
 import useI18n from '@/lang'
 import { debounce } from '@/utils'
 
 export interface Props {
+  modelModifiers?: { lazy?: boolean }
   modelValue?: string | number | undefined
   autoSize?: boolean
   placeholder?: string
@@ -51,14 +52,14 @@ const emits = defineEmits(['change', 'update:modelValue', 'submit'])
 
 const showEdit = ref(false)
 const showPassword = ref(false)
-const draftNumber = ref(props.modelValue === undefined ? '' : String(props.modelValue))
+const draftValue = ref(props.modelValue === undefined ? '' : String(props.modelValue))
 const isFocused = ref(false)
 const inputRef = useTemplateRef('inputRef')
 const innerClearable = computed(
   () =>
     props.clearable &&
     props.type !== 'code' &&
-    (props.type === 'number' ? draftNumber.value !== '' : Boolean(props.modelValue)) &&
+    draftValue.value !== '' &&
     !props.disabled,
 )
 const innerAllowPaste = computed(() => props.allowPaste && props.type !== 'code' && !props.disabled)
@@ -72,8 +73,8 @@ const { t } = useI18n.global
 watch(
   () => props.modelValue,
   (val) => {
-    if (props.type === 'number' && !isFocused.value) {
-      draftNumber.value = val === undefined || val === null ? '' : String(val)
+    if (props.type !== 'number' || !isFocused.value) {
+      draftValue.value = val === undefined || val === null ? '' : String(val)
     }
   },
 )
@@ -93,7 +94,7 @@ const clampNumber = (val: string | number) => {
   return num
 }
 
-const emitInput = debounce((rawVal: string) => {
+const emitInput = (rawVal: string) => {
   if (props.type === 'number') {
     const trimmed = rawVal.trim()
     if (trimmed === '' || trimmed === '-' || trimmed === '.' || trimmed === '-.') {
@@ -101,29 +102,40 @@ const emitInput = debounce((rawVal: string) => {
     }
     const parsed = Number(trimmed)
     if (Number.isNaN(parsed)) return
-    emits('update:modelValue', parsed)
-    emits('change', parsed)
+    const value = clampNumber(parsed)
+    emits('update:modelValue', value)
+    emits('change', value)
     return
   }
   emits('update:modelValue', rawVal)
   emits('change', rawVal)
-}, props.delay)
+}
+const delayedInput = debounce(emitInput, props.delay)
+let editRevision = 0
+const cancelPending = () => {
+  editRevision++
+  delayedInput.cancel()
+}
+onUnmounted(cancelPending)
 
 const onInput = (e: any) => {
+  editRevision++
   const rawVal = String(e.target.value ?? '')
-  if (props.type === 'number') {
-    draftNumber.value = rawVal
-  }
-  emitInput(rawVal)
+  draftValue.value = rawVal
+  if (props.modelModifiers?.lazy) return
+  if (props.delay) void delayedInput(rawVal)
+  else emitInput(rawVal)
 }
 
 const handleClear = () => {
+  cancelPending()
   if (props.type === 'number') {
-    draftNumber.value = ''
+    draftValue.value = ''
     const val = props.min !== undefined ? props.min : 0
     emits('update:modelValue', val)
     emits('change', val)
   } else {
+    draftValue.value = ''
     emits('update:modelValue', '')
     emits('change', '')
   }
@@ -131,11 +143,12 @@ const handleClear = () => {
 }
 
 const handlePaste = async () => {
+  cancelPending()
+  const revision = editRevision
   const text = await ClipboardGetText()
+  if (revision !== editRevision) return
   const val = props.type === 'number' ? clampNumber(text) : text
-  if (props.type === 'number') {
-    draftNumber.value = String(val)
-  }
+  draftValue.value = String(val)
   emits('update:modelValue', val)
   emits('change', val)
 }
@@ -143,7 +156,7 @@ const handlePaste = async () => {
 const showInput = () => {
   if (props.disabled) return
   if (props.type === 'number') {
-    draftNumber.value = props.modelValue === undefined ? '' : String(props.modelValue)
+    draftValue.value = props.modelValue === undefined ? '' : String(props.modelValue)
   }
   showEdit.value = true
   nextTick(() => inputRef.value?.focus())
@@ -155,15 +168,17 @@ const onFocus = () => {
 
 const onSubmit = (e: any) => {
   isFocused.value = false
+  cancelPending()
   if (props.type === 'number') {
     const clamped = clampNumber(e.target.value)
-    draftNumber.value = String(clamped)
+    draftValue.value = String(clamped)
     e.target.value = clamped
     emits('update:modelValue', clamped)
     emits('change', clamped)
     emits('submit', clamped)
   } else {
     const val = e.target.value
+    if ((props.modelModifiers?.lazy || props.delay) && val !== props.modelValue) emitInput(val)
     emits('submit', val)
   }
   props.editable && (showEdit.value = false)
@@ -233,14 +248,14 @@ defineExpose({
         :editable="!disabled"
         :placeholder="placeholder"
         class="code w-full overflow-y-auto"
-        @change="(value: string) => onInput({ target: { value } })"
+        @update:model-value="(value: string) => onInput({ target: { value } })"
       />
       <input
         v-else
         :id="inputId"
         ref="inputRef"
         :aria-label="label"
-        :value="type === 'number' ? draftNumber : modelValue"
+        :value="draftValue"
         :placeholder="placeholder"
         :type="effectiveInputType"
         :disabled="disabled"

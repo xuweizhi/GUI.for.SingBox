@@ -37,12 +37,19 @@ func checkFileRevision(path, expected string) error {
 	return nil
 }
 
-func (a *App) WriteFile(path string, content string, options IOOptions) FlagResult {
+func (a *App) WriteFile(path string, content string, options IOOptions) (result FlagResult) {
 	log.Printf("WriteFile [%s %s]: %s", options.Mode, options.Range, path)
 	dataMutationMu.Lock()
 	defer dataMutationMu.Unlock()
 
 	fullPath := resolvePath(path)
+	if fullPath == resolvePath("data/user.yaml") {
+		defer func() {
+			if result.Flag {
+				loadConfig()
+			}
+		}()
+	}
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), os.ModePerm); err != nil {
 		return FlagResult{false, err.Error()}

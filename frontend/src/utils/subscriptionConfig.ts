@@ -22,6 +22,7 @@ export const prefixSubscriptionReferences = (
     if (Array.isArray(proxy.outbounds)) proxy.outbounds = proxy.outbounds.map(reference)
   })
   dns?.servers.forEach((server) => {
+    if (server.endpoint) server.endpoint = reference(server.endpoint)
     if (server.detour) server.detour = reference(server.detour)
   })
 }
@@ -56,11 +57,19 @@ export const validateSubscriptionEntries = (entries: unknown): Recordable[] => {
 
 /** Parse addresses entered by the user (or Clash proxy-server-nameserver). */
 export const parseSubscriptionDnsAddresses = (addresses: string[]): Recordable[] =>
-  [...new Set(addresses.map((address) => address.trim()).filter(Boolean))].map((address, index) => {
+  [
+    ...new Set(addresses.map((address) => address.trim().replace(/#DIRECT$/, '')).filter(Boolean)),
+  ].map((address, index) => {
     const tag = `dns-${index + 1}`
-    if (address === 'local' || address === 'local://') return { type: 'local', tag }
+    if (['local', 'local://', 'system', 'system://'].includes(address))
+      return { type: 'local', tag }
     const fail = () => new Error(`Invalid or unsupported subscription DNS address: ${address}`)
     if (/\s/.test(address)) throw fail()
+    if (address.startsWith('dhcp://')) {
+      const iface = address.slice('dhcp://'.length)
+      if (/[/?#@]/.test(iface)) throw fail()
+      return { type: 'dhcp', tag, ...(iface && iface !== 'auto' ? { interface: iface } : {}) }
+    }
     // Bare IPv6 addresses need brackets before URL parsing.
     const bare = !address.includes('://')
     const host =

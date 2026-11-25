@@ -22,12 +22,12 @@ import {
   getGitHubApiAuthorization,
   confirm,
   message,
-  debounce,
   getKernelFileName,
   getKernelAssetFileName,
   getKernelRuntimeEnv,
   replaceFileWithRollback,
 } from '@/utils'
+import { downloadProgressText, parseReleaseSha256 } from '@/utils/releaseAsset'
 
 const StableUrl = 'https://api.github.com/repos/SagerNet/sing-box/releases/latest'
 const AlphaUrl = 'https://api.github.com/repos/SagerNet/sing-box/releases?per_page=3'
@@ -35,11 +35,7 @@ const AlphaUrl = 'https://api.github.com/repos/SagerNet/sing-box/releases?per_pa
 const StablePage = 'https://github.com/SagerNet/sing-box/releases/latest'
 const AlphaPage = 'https://github.com/SagerNet/sing-box/releases'
 
-export const parseReleaseSha256 = (digest: unknown) => {
-  const match = typeof digest === 'string' ? digest.match(/^sha256:([a-f\d]{64})$/i) : null
-  if (!match) throw new Error('Release asset does not contain a valid SHA-256 digest')
-  return match[1]!.toLowerCase()
-}
+export { parseReleaseSha256 } from '@/utils/releaseAsset'
 
 export const parseCoreVersionOutput = (output: string) => {
   return output.match(/\bversion\s+v?(\S+)/i)?.[1] || ''
@@ -60,6 +56,7 @@ export const useCoreBranch = (isAlpha = false) => {
   const cancelDownload = ref<() => void>()
 
   const rollbackable = ref(false)
+  const rollingBack = ref(false)
 
   const { t } = useI18n()
   const appSettings = useAppSettingsStore()
@@ -79,6 +76,7 @@ export const useCoreBranch = (isAlpha = false) => {
   const CoreBakFilePath = `${CoreFilePath}.bak`
 
   const downloadCore = async () => {
+    if (downloading.value || rollingBack.value) return
     downloading.value = true
     downloadProgress.value = ''
     cancelDownload.value = undefined
@@ -107,7 +105,7 @@ export const useCoreBranch = (isAlpha = false) => {
       }
 
       downloadCacheFile = `data/.cache/${assetName}`
-      candidatePath = `${downloadCacheFile}.candidate`
+      candidatePath = `${downloadCacheFile}.candidate${CoreFilePath.endsWith('.exe') ? '.exe' : ''}`
 
       cancelDownload.value = () => {
         HttpCancel(downloadCacheFile)
@@ -122,8 +120,7 @@ export const useCoreBranch = (isAlpha = false) => {
         downloadCacheFile,
         undefined,
         (progress, total) => {
-          const txt = t('common.downloading') + ((progress / total) * 100).toFixed(2) + '%'
-          downloadProgress.value = txt
+          downloadProgress.value = downloadProgressText(t('common.downloading'), progress, total)
         },
         {
           CancelId: downloadCacheFile,
@@ -256,19 +253,30 @@ export const useCoreBranch = (isAlpha = false) => {
   }
 
   const rollbackCore = async () => {
-    await confirm('common.warning', 'settings.kernel.rollback')
-
-    const doRollback = () => MoveFile(CoreBakFilePath, CoreFilePath)
-
-    const { branch } = appSettings.app.kernel
-    const isCurrentRunning = kernelApiStore.running && (branch === Branch.Alpha) === isAlpha
-    if (isCurrentRunning) {
-      await kernelApiStore.restartCore(doRollback)
-    } else {
-      await doRollback()
+    if (rollingBack.value || downloading.value) return
+    rollingBack.value = true
+    try {
+      const confirmed = await confirm('common.warning', 'settings.kernel.rollback').then(
+        () => true,
+        () => false,
+      )
+      if (!confirmed) return
+      const doRollback = () => MoveFile(CoreBakFilePath, CoreFilePath)
+      const { branch } = appSettings.app.kernel
+      if (kernelApiStore.running && (branch === Branch.Alpha) === isAlpha) {
+        await kernelApiStore.restartCore(doRollback)
+      } else {
+        await doRollback()
+      }
+      await refreshLocalVersion()
+      downloadCompleted.value = false
+      message.success('common.success')
+    } catch (error: any) {
+      message.error(error.message || error)
+    } finally {
+      await refreshRollbackable()
+      rollingBack.value = false
     }
-    await refreshLocalVersion()
-    message.success('common.success')
   }
 
   const openReleasePage = () => {
@@ -280,12 +288,10 @@ export const useCoreBranch = (isAlpha = false) => {
     () => (downloadCompleted.value = false),
   )
 
-  watch(
-    [localVersion, downloadCompleted],
-    debounce(async () => {
-      rollbackable.value = await FileExists(CoreBakFilePath)
-    }, 500),
-  )
+  const refreshRollbackable = async () => {
+    rollbackable.value = await FileExists(CoreBakFilePath).catch(() => false)
+  }
+  watch([localVersion, downloadCompleted], refreshRollbackable, { immediate: true })
 
   refreshLocalVersion()
   refreshRemoteVersion()
@@ -294,6 +300,7 @@ export const useCoreBranch = (isAlpha = false) => {
     restartable,
     updatable,
     rollbackable,
+    rollingBack,
     versionDetail,
     localVersion,
     localVersionLoading,

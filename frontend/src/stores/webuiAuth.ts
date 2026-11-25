@@ -17,6 +17,9 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
   const hydrated = ref(false)
   const bootstrapped = ref(false)
   const lastError = ref('')
+  const sessionRevision = ref(0)
+  let handlingUnauthorized = false
+  let loggingOut = false
   let verificationRevision = 0
   let verificationController: AbortController | undefined
   let pendingVerification: Promise<boolean> | undefined
@@ -56,6 +59,7 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
     const controller = new AbortController()
     verificationController = controller
     const nextToken = candidate.trim()
+    if (nextToken) lastError.value = ''
     status.value = 'checking'
     const verification = (async () => {
       try {
@@ -80,6 +84,8 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
           throw new Error(`Unexpected auth status: ${response.status}`)
         }
         setToken(nextToken)
+        sessionRevision.value++
+        handlingUnauthorized = false
         status.value = 'authenticated'
         lastError.value = ''
         return true
@@ -104,25 +110,37 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
     return pendingVerification || verifyToken(token.value)
   }
 
-  const handleUnauthorized = async () => {
+  const handleUnauthorized = async (revision = sessionRevision.value) => {
+    const currentPath = router.currentRoute.value.fullPath
+    if (
+      revision !== sessionRevision.value ||
+      loggingOut ||
+      handlingUnauthorized ||
+      status.value === 'checking' ||
+      (status.value !== 'authenticated' && /^\/login(?:[?#]|$)/.test(currentPath))
+    )
+      return
+    handlingUnauthorized = true
+    sessionRevision.value++
     invalidateVerification()
     clearToken()
     status.value = 'idle'
     bootstrapped.value = false
     lastError.value = 'auth.invalidToken'
 
-    const currentPath = router.currentRoute.value.fullPath
-    await router.replace(
-      currentPath.startsWith('/login') ? '/login' : buildLoginRedirect(currentPath),
-    )
+    if (!/^\/login(?:[?#]|$)/.test(currentPath))
+      await router.replace(buildLoginRedirect(currentPath))
   }
 
   const logout = async () => {
+    loggingOut = true
+    sessionRevision.value++
     invalidateVerification()
     const revision = verificationRevision
     try {
       await fetch(WEBUI_SESSION_ENDPOINT, { method: 'DELETE' })
     } finally {
+      loggingOut = false
       if (revision === verificationRevision) {
         clearToken()
         status.value = 'idle'
@@ -137,6 +155,7 @@ export const useWebuiAuthStore = defineStore('webui-auth', () => {
     token,
     status,
     hydrated,
+    sessionRevision,
     bootstrapped,
     lastError,
     hydrate,

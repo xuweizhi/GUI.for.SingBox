@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n, I18nT } from 'vue-i18n'
 
 import { ClipboardSetText } from '@/bridge'
@@ -43,30 +44,44 @@ const filteredProfiles = computed(() => {
   return profilesStore.profiles.filter((p) => p.name.toLowerCase().includes(q))
 })
 
-const handleStartWithProfile = async (id: string) => {
-  appSettingsStore.app.kernel.profile = id
+const selectProfile = async (id: string, start = false) => {
+  const previous = appSettingsStore.app.kernel.profile
+  const wasRunning = kernelApiStore.running
+  if (
+    switchingProfileId.value || kernelApiStore.starting || kernelApiStore.stopping ||
+    kernelApiStore.restarting || (id === previous && (wasRunning || !start))
+  ) return
+
   switchingProfileId.value = id
+  appSettingsStore.app.kernel.profile = id
   try {
-    const e = await kernelApiStore.stopCore().catch((e) => e)
-    if (e && e !== 'The core is not running') {
-      throw e
-    }
-    await kernelApiStore.startCore()
+    if (wasRunning) await kernelApiStore.restartCore()
+    else if (start) await kernelApiStore.startCore()
     message.success('common.success')
-  } catch (error: any) {
+  } catch (error) {
+    appSettingsStore.app.kernel.profile = previous
     message.error(error)
-    console.error(error)
+    if (wasRunning && previous && !kernelApiStore.running) {
+      await kernelApiStore.startCore().catch((restoreError) => message.error(restoreError))
+    }
   } finally {
     switchingProfileId.value = ''
   }
 }
 
-const handleDuplicateProfile = (id: string) => {
+const handleStartWithProfile = (id: string) => selectProfile(id, true)
+const handleUseProfile = (profile: App.Profile) => selectProfile(profile.id)
+
+const handleDuplicateProfile = async (id: string) => {
   const p = deepClone(profilesStore.getProfileById(id)!)
   p.id = sampleID()
   p.name = p.name + '(Copy)'
-  profilesStore.addProfile(p)
-  message.success('common.success')
+  try {
+    await profilesStore.addProfile(p)
+    message.success('common.success')
+  } catch (error) {
+    message.error(error)
+  }
 }
 
 const handleCopyGeneratedConfig = async (id: string) => {
@@ -223,27 +238,6 @@ const handleDeleteProfile = async (p: App.Profile) => {
   }
 }
 
-const handleUseProfile = async (p: App.Profile) => {
-  if (appSettingsStore.app.kernel.profile === p.id) return
-
-  appSettingsStore.app.kernel.profile = p.id
-  if (!kernelApiStore.running) {
-    message.success('common.success')
-    return
-  }
-
-  switchingProfileId.value = p.id
-  try {
-    await kernelApiStore.restartCore()
-    message.success('common.success')
-  } catch (error: any) {
-    console.error('handleUseProfile: ', error)
-    message.error(error.message || error)
-  } finally {
-    switchingProfileId.value = ''
-  }
-}
-
 const isCreatedBySubscription = (id: string) => {
   return !!subscribesStore.getSubscribeById(id)
 }
@@ -297,12 +291,12 @@ const onSortUpdate = debounce(
 
   <Empty v-if="profilesStore.profiles.length > 0 && filteredProfiles.length === 0" />
 
-  <div
+  <VueDraggable
     v-else-if="profilesStore.profiles.length > 0"
-    v-draggable="[
-      profilesStore.profiles,
-      { ...DraggableOptions, disabled: Boolean(keywords.trim()), onUpdate: onSortUpdate },
-    ]"
+    v-model="profilesStore.profiles"
+    v-bind="DraggableOptions"
+    @update="onSortUpdate"
+    :disabled="Boolean(keywords.trim())"
     :class="'grid-list-' + appSettingsStore.app.profilesView"
   >
     <Card
@@ -510,5 +504,5 @@ const onSortUpdate = debounce(
         </Button>
       </div>
     </Card>
-  </div>
+  </VueDraggable>
 </template>

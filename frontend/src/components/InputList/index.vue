@@ -54,6 +54,10 @@ const handleEdit = (item: Item) => {
 const handleDel = (item: Item) => {
   const idx = innerList.value.indexOf(item)
   if (idx !== -1) {
+    if (editItem.value === item) {
+      editItem.value = undefined
+      inputVal.value = ''
+    }
     innerList.value.splice(idx, 1)
     emitUpdate()
   }

@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { h, inject, ref } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n } from 'vue-i18n'
 
 import { DraggableOptions } from '@/constant/app'
@@ -110,15 +111,15 @@ defineExpose({ modalSlots })
       <template #args>
         <Empty v-if="model.args.length === 0" />
         <Card v-else :title="t('common.preview')">
-          <div v-draggable="[model.args, DraggableOptions]" class="flex flex-wrap items-center">
-            <div v-for="item in model.args" :key="item">
+          <VueDraggable v-model="model.args" v-bind="DraggableOptions" class="flex flex-wrap items-center">
+            <div v-for="(item, index) in model.args" :key="index">
               <Tag size="small">
                 <div class="py-2 break-all whitespace-pre-wrap">
                   {{ processMagicVariables(item) }}
                 </div>
               </Tag>
             </div>
-          </div>
+          </VueDraggable>
         </Card>
         <InputList v-model="model.args" class="mt-16" />
       </template>

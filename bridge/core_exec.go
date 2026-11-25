@@ -38,6 +38,24 @@ func (a *App) rememberCore(handle *os.Process) {
 		_ = a.coreProcess.Release()
 	}
 	a.coreProcess = handle
+	a.coreStartTime = 0
+	if handle != nil {
+		if p, err := process.NewProcess(int32(handle.Pid)); err == nil {
+			a.coreStartTime, _ = p.CreateTime()
+		}
+	}
+}
+
+func (a *App) sameCoreProcess() bool {
+	if a.coreProcess == nil || a.coreStartTime == 0 {
+		return false
+	}
+	proc, err := process.NewProcess(int32(a.coreProcess.Pid))
+	if err != nil {
+		return false
+	}
+	started, err := proc.CreateTime()
+	return err == nil && started == a.coreStartTime
 }
 
 func (a *App) findOwnedCore(branch string, args []string) int {
@@ -50,7 +68,7 @@ func (a *App) findOwnedCore(branch string, args []string) int {
 // All callers hold coreStartMu.
 func (a *App) locateCore(path string, args []string, pidPath string) int {
 	if a.coreProcess != nil {
-		if alive, _ := IsProcessAlive(a.coreProcess); alive {
+		if alive, _ := IsProcessAlive(a.coreProcess); alive && a.sameCoreProcess() {
 			return a.coreProcess.Pid
 		}
 		a.rememberCore(nil)
@@ -87,13 +105,18 @@ func (a *App) stopOwnedCore(pid, timeout int) error {
 	if alive, err := IsProcessAlive(p); err != nil {
 		return err
 	} else if alive {
+		if !a.sameCoreProcess() {
+			a.rememberCore(nil)
+			return errors.New("core ownership changed")
+		}
 		if err := SendExitSignal(p); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return err
 		}
-		if err := waitForProcessExitWithTimeout(p, max(1, min(timeout, 300))); err != nil {
+		if err := waitForProcessExitBeforeKill(p, max(1, min(timeout, 300)), a.sameCoreProcess); err != nil {
 			return err
 		}
 	}
+	a.rememberCore(nil)
 	removePIDIfCurrent(resolvePath(headlessCorePidFilePath), pid)
 	return nil
 }
@@ -345,6 +368,7 @@ func processMatchesCore(pid int32, expectedPath string, expectedArgs []string) b
 }
 
 func watchExistingCoreExit(a *App, pid int, endEvent string, pidPath string) {
+	owned := a.coreProcess
 	go func() {
 		processHandle, err := os.FindProcess(pid)
 		if err != nil {
@@ -360,7 +384,10 @@ func watchExistingCoreExit(a *App, pid int, endEvent string, pidPath string) {
 
 		if pidPath != "" {
 			coreStartMu.Lock()
-			removePIDIfCurrent(pidPath, pid)
+			if a.coreProcess == owned {
+				a.rememberCore(nil)
+				removePIDIfCurrent(pidPath, pid)
+			}
 			coreStartMu.Unlock()
 		}
 		a.EventsEmit(endEvent)

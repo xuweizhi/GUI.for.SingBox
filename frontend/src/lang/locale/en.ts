@@ -43,6 +43,7 @@ export default {
     },
   },
   common: {
+    duplicateKey: 'Each key must be unique.',
     grid: 'Grid',
     list: 'List',
     add: 'Add',
@@ -159,7 +160,7 @@ export default {
       path: 'Path to the cache file',
       cache_id: 'Identifier in the cache file',
       store_fakeip: 'Store Fake-IP',
-      store_rdrc: 'Store Rejected DNS Response',
+      store_dns: 'Store DNS cache',
       rdrc_timeout: 'Timeout of rejected DNS response cache',
     },
     inbounds: {
@@ -265,6 +266,8 @@ export default {
           'The home proxy-node picker controls only this group. Custom profiles can select their primary proxy group here.',
         validationTitle: 'Outbound policy configuration needs attention',
         issue: {
+          'missing-node-group': 'Referenced node group is missing',
+          'reserved-tag': 'Outbound tag uses a reserved name',
           missing: 'Referenced outbound group is missing',
           cycle: 'Circular reference detected',
         },
@@ -444,6 +447,7 @@ export default {
     scheduledtasks: 'Tasks',
   },
   nodeGroups: {
+    addOnSave: 'The node will be added when you save.',
     title: 'Node Groups',
     empty: 'No node groups yet. Node groups are reusable collections shared by profiles.',
     name: 'Name',
@@ -761,6 +765,7 @@ export default {
     },
   },
   subscribe: {
+    duplicateNodeTag: 'A node with the tag {0} already exists.',
     preferOutboundDns: 'Use subscription DNS for nodes',
     outboundDnsHint:
       'Only resolves node server names in this subscription. Website DNS continues to use the profile settings.',

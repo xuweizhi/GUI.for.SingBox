@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n, I18nT } from 'vue-i18n'
 
-import { BrowserOpenURL, ClipboardSetText, RemoveFile } from '@/bridge'
+import { BrowserOpenURL, ClipboardSetText } from '@/bridge'
+import { removeUnusedResourceCache } from '@/utils/configPersistence'
 import { DraggableOptions, ViewOptions } from '@/constant/app'
 import { RequestProxyMode, View } from '@/enums/app'
 import { useSubscribesStore, useAppSettingsStore, usePluginsStore, useAppStore } from '@/stores'
@@ -148,13 +150,18 @@ const handleShowSubForm = (id?: string) => {
   m.setContent(SubscribeForm, { id }).open()
 }
 
+const updatingAll = ref(false)
 const handleUpdateSubs = async () => {
+  if (updatingAll.value || subscribeStore.subscribes.some((item) => item.updating)) return
+  updatingAll.value = true
   try {
     await subscribeStore.updateSubscribes({ throwOnFailure: true })
     message.success('common.success')
   } catch (error: any) {
     console.error('updateSubscribes: ', error)
     message.error(error.message || error)
+  } finally {
+    updatingAll.value = false
   }
 }
 
@@ -188,6 +195,7 @@ const handleEditScript = (id: string) => {
 }
 
 const handleUpdateSub = async (s: App.Subscription, options?: Partial<App.Subscription>) => {
+  if (updatingAll.value || s.updating) return
   try {
     await subscribeStore.updateSubscribe(s.id, options)
   } catch (error: any) {
@@ -222,8 +230,8 @@ const handleDeleteSub = async (s: App.Subscription) => {
   }
 
   try {
-    await ignoredError(RemoveFile, s.path)
     await subscribeStore.deleteSubscribe(s.id)
+    await ignoredError(removeUnusedResourceCache, s, subscribeStore.subscribes)
     message.success('common.success')
   } catch (error: any) {
     console.error('deleteSubscribe: ', error)
@@ -232,8 +240,11 @@ const handleDeleteSub = async (s: App.Subscription) => {
 }
 
 const handleDisableSub = async (s: App.Subscription) => {
-  s.disabled = !s.disabled
-  subscribeStore.editSubscribe(s.id, s)
+  try {
+    await subscribeStore.editSubscribe(s.id, { ...s, disabled: !s.disabled })
+  } catch (error) {
+    message.error(error)
+  }
 }
 
 const noUpdateNeeded = computed(() => subscribeStore.subscribes.every((v) => v.disabled))
@@ -292,7 +303,7 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
       <Button
         :disabled="noUpdateNeeded"
         :type="noUpdateNeeded ? 'text' : 'link'"
-        @click="handleUpdateSubs"
+        :loading="updatingAll" @click="handleUpdateSubs"
       >
         {{ t('common.updateAll') }}
       </Button>
@@ -307,12 +318,12 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
 
   <Empty v-if="subscribeStore.subscribes.length > 0 && filteredSubscribes.length === 0" />
 
-  <div
+  <VueDraggable
     v-else-if="subscribeStore.subscribes.length > 0"
-    v-draggable="[
-      subscribeStore.subscribes,
-      { ...DraggableOptions, disabled: Boolean(keywords.trim()), onUpdate: onSortUpdate },
-    ]"
+    v-model="subscribeStore.subscribes"
+    v-bind="DraggableOptions"
+    @update="onSortUpdate"
+    :disabled="Boolean(keywords.trim())"
     :class="'grid-list-' + appSettingsStore.app.subscribesView"
   >
     <Card
@@ -591,7 +602,7 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         </Button>
       </div>
     </Card>
-  </div>
+  </VueDraggable>
 </template>
 
 <style lang="less" scoped>

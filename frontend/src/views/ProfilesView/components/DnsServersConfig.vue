@@ -155,7 +155,7 @@ const renderServer = (server: App.DnsServerConfig) => {
       <template v-if="isSupportDetourAndDomainResolver">
         <div class="form-item">
           {{ t('kernel.dns.domain_resolver') }}
-          <Select v-model="fields.domain_resolver" :options="serversOptions" clearable />
+          <Select v-model="fields.domain_resolver" :options="serversOptions.filter((option) => option.value !== fields.id)" clearable />
         </div>
         <div class="form-item">
           {{ t('kernel.dns.detour') }}

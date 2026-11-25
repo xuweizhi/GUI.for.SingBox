@@ -358,8 +358,9 @@ declare global {
         path: string
         cache_id: string
         store_fakeip: boolean
-        store_rdrc: boolean
-        rdrc_timeout: string
+        store_dns: boolean
+        store_rdrc?: boolean
+        rdrc_timeout?: string
       }
     }
 

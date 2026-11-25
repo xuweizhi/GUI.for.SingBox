@@ -118,6 +118,8 @@ describe('NodeDiagnosticsPanel', () => {
       },
     })
 
+    await wrapper.get('[data-delay="HK 01"]').trigger('keydown', { key: 'Enter' })
+    expect(controller.switchNode).not.toHaveBeenCalled()
     await wrapper.get('[data-action="test-group"]').trigger('click')
     await wrapper.get('[data-node="HK 01"]').trigger('click')
     await wrapper.get('[data-delay="HK 01"]').trigger('click')

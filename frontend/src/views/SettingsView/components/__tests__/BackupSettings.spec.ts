@@ -5,6 +5,7 @@ import BackupSettings from '../BackupSettings.vue'
 
 const errors = vi.hoisted(() => vi.fn())
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/lang', () => ({ default: { global: { t: (key: string) => key } } }))
 vi.mock('@/utils', () => ({ formatBytes: String, message: { error: errors, success: vi.fn() } }))
 vi.mock('@/stores', () => ({ useWebuiAuthStore: () => ({ handleUnauthorized: vi.fn() }) }))
 vi.mock('@/utils/configPersistence', () => ({
@@ -62,6 +63,33 @@ it('previews the chosen archive and resubmits the same bytes only after confirma
     })
     expect(errors).toHaveBeenCalledWith(new Error('restore unavailable'))
     expect(wrapper.find('[data-preview]').exists()).toBe(true)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('keeps the switch at the saved value after a failed request and retries the same change', async () => {
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(new Response('failed', { status: 500 }))
+    .mockResolvedValueOnce(new Response())
+  vi.stubGlobal('fetch', fetch)
+  const { default: Switch } = await import('@/components/Switch/index.vue')
+  const wrapper = mount(BackupSettings, {
+    global: {
+      components: { Switch },
+      directives: { tips: {} },
+      stubs: { Card: { template: '<section><slot/></section>' }, Input: true, Button: true, Modal: true },
+    },
+  })
+  try {
+    const toggle = wrapper.get('[role="switch"]')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(fetch.mock.calls.map((args) => JSON.parse(args[1].body))).toEqual([{ enabled: true }, { enabled: true }])
   } finally {
     wrapper.unmount()
   }

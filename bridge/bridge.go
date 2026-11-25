@@ -9,10 +9,15 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+var configMu sync.RWMutex
+
+func currentConfig() *AppConfig { configMu.RLock(); defer configMu.RUnlock(); return Config }
 
 var Config = &AppConfig{}
 
@@ -101,6 +106,7 @@ func (a *App) GetInterfaces() FlagResult {
 func extractEmbeddedFiles(fs embed.FS) {
 	workerDst := resolvePath(scheduledTaskWorkerScriptDst)
 	proxyUtilsDst := resolvePath(scheduledTaskWorkerProxyUtilsDst)
+	extractEmbeddedFile(fs, scheduledTaskWorkerYamlSrc, resolvePath(scheduledTaskWorkerYamlDst))
 	extractEmbeddedFile(fs, scheduledTaskWorkerScriptSrc, workerDst)
 	extractEmbeddedFile(fs, scheduledTaskWorkerProxyUtilsSrc, proxyUtilsDst)
 }
@@ -121,10 +127,19 @@ func extractEmbeddedFile(fs embed.FS, srcPath, dstPath string) {
 }
 
 func loadConfig() {
+	var next AppConfig
 	b, err := os.ReadFile(resolvePath("data/user.yaml"))
+	if err != nil && !os.IsNotExist(err) {
+		log.Printf("Failed to read user config: %v", err)
+		return
+	}
 	if err == nil {
-		if err := yaml.Unmarshal(b, &Config); err != nil {
+		if err = yaml.Unmarshal(b, &next); err != nil {
 			log.Printf("Failed to parse user config: %v", err)
+			return
 		}
 	}
+	configMu.Lock()
+	Config = &next
+	configMu.Unlock()
 }

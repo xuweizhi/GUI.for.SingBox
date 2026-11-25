@@ -19,11 +19,16 @@ export const isValidBase64 = (str: string) => {
   }
 }
 
+const hasSubscriptionNodes = (value: any) =>
+  Array.isArray(value) ||
+  Array.isArray(value?.outbounds) ||
+  Array.isArray(value?.endpoints) ||
+  Array.isArray(value?.proxies)
+
 export const isValidSubYAML = (str: string) => {
   if (typeof str !== 'string') return false
   try {
-    const { proxies } = parse(str)
-    return !!proxies
+    return hasSubscriptionNodes(parse(str))
   } catch {
     return false
   }
@@ -32,13 +37,7 @@ export const isValidSubYAML = (str: string) => {
 export const isValidSubJson = (str: string) => {
   if (typeof str !== 'string') return false
   try {
-    const value = JSON.parse(str)
-    return (
-      !!value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      (Array.isArray(value.outbounds) || Array.isArray(value.endpoints))
-    )
+    return hasSubscriptionNodes(JSON.parse(str))
   } catch {
     return false
   }
@@ -65,10 +64,15 @@ export const isValidRulesJson = (str: string) => {
 export const isValidIPv4 = (ip: string) =>
   /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/.test(ip)
 
-export const isValidIPv6 = (ip: string) =>
-  /^([\da-fA-F]{1,4}:){6}((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)|::([\da−fA−F]1,4:)0,4((25[0−5]|2[0−4]\d|[01]?\d\d?)\.)3(25[0−5]|2[0−4]\d|[01]?\d\d?)|::([\da−fA−F]1,4:)0,4((25[0−5]|2[0−4]\d|[01]?\d\d?)\.)3(25[0−5]|2[0−4]\d|[01]?\d\d?)|^([\da-fA-F]{1,4}:):([\da-fA-F]{1,4}:){0,3}((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)|([\da−fA−F]1,4:)2:([\da−fA−F]1,4:)0,2((25[0−5]|2[0−4]\d|[01]?\d\d?)\.)3(25[0−5]|2[0−4]\d|[01]?\d\d?)|([\da−fA−F]1,4:)2:([\da−fA−F]1,4:)0,2((25[0−5]|2[0−4]\d|[01]?\d\d?)\.)3(25[0−5]|2[0−4]\d|[01]?\d\d?)|^([\da-fA-F]{1,4}:){3}:([\da-fA-F]{1,4}:){0,1}((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)|([\da−fA−F]1,4:)4:((25[0−5]|2[0−4]\d|[01]?\d\d?)\.)3(25[0−5]|2[0−4]\d|[01]?\d\d?)|([\da−fA−F]1,4:)4:((25[0−5]|2[0−4]\d|[01]?\d\d?)\.)3(25[0−5]|2[0−4]\d|[01]?\d\d?)|^([\da-fA-F]{1,4}:){7}[\da-fA-F]{1,4}|:((:[\da−fA−F]1,4)1,6|:)|:((:[\da−fA−F]1,4)1,6|:)|^[\da-fA-F]{1,4}:((:[\da-fA-F]{1,4}){1,5}|:)|([\da−fA−F]1,4:)2((:[\da−fA−F]1,4)1,4|:)|([\da−fA−F]1,4:)2((:[\da−fA−F]1,4)1,4|:)|^([\da-fA-F]{1,4}:){3}((:[\da-fA-F]{1,4}){1,3}|:)|([\da−fA−F]1,4:)4((:[\da−fA−F]1,4)1,2|:)|([\da−fA−F]1,4:)4((:[\da−fA−F]1,4)1,2|:)|^([\da-fA-F]{1,4}:){5}:([\da-fA-F]{1,4})?|([\da−fA−F]1,4:)6:|([\da−fA−F]1,4:)6:/.test(
-    ip,
-  )
+export const isValidIPv6 = (ip: string) => {
+  // Restrict input to a bare literal before invoking the browser's IPv6 parser.
+  if (typeof ip !== 'string' || !ip.includes(':') || /[^a-fA-F0-9:.]/.test(ip)) return false
+  try {
+    return Boolean(new URL(`http://[${ip}]/`).hostname)
+  } catch {
+    return false
+  }
+}
 
 export const isValidJson = (str: string) => {
   try {

@@ -63,6 +63,13 @@ const disabled = computed(
     (['Http', 'File'].includes(ruleset.value.type) && (!ruleset.value.url || !ruleset.value.path)),
 )
 
+if (props.isUpdate) {
+  const r = rulesetsStore.getRulesetById(props.id)
+  if (r) {
+    ruleset.value = deepClone(r)
+  }
+}
+
 watch(
   () => ruleset.value.type,
   (v) => {
@@ -82,18 +89,11 @@ watch(
       return
     }
     ruleset.value.path = ruleset.value.path.replace(
-      isJson ? '.srs' : '.json',
+      isJson ? /\.srs$/i : /\.json$/i,
       isJson ? '.json' : '.srs',
     )
   },
 )
-
-if (props.isUpdate) {
-  const r = rulesetsStore.getRulesetById(props.id)
-  if (r) {
-    ruleset.value = deepClone(r)
-  }
-}
 
 const modalSlots = {
   cancel: () =>

@@ -63,7 +63,7 @@ func (a *App) startHeadlessCoreIfNeeded() error {
 }
 
 func loadHeadlessCoreStartupSpec() (*headlessCoreStartupSpec, error) {
-	if !Config.AutoStartKernel {
+	if !currentConfig().AutoStartKernel {
 		return nil, nil
 	}
 
@@ -114,9 +114,9 @@ func (a *App) findExistingHeadlessCore(port uint32) (int, bool) {
 }
 
 func getHeadlessKernelRuntimeConfig() KernelRuntimeConfig {
-	runtimeConfig := Config.Kernel.Main
-	if strings.EqualFold(Config.Kernel.Branch, "alpha") {
-		runtimeConfig = Config.Kernel.Alpha
+	runtimeConfig := currentConfig().Kernel.Main
+	if strings.EqualFold(currentConfig().Kernel.Branch, "alpha") {
+		runtimeConfig = currentConfig().Kernel.Alpha
 	}
 	if len(runtimeConfig.Args) == 0 {
 		runtimeConfig.Args = []string{
@@ -135,7 +135,7 @@ func getHeadlessKernelRuntimeConfig() KernelRuntimeConfig {
 }
 
 func getHeadlessCoreFileName() string {
-	return headlessCoreFileName(Config.Kernel.Branch)
+	return headlessCoreFileName(currentConfig().Kernel.Branch)
 }
 
 func headlessCoreFileName(branch string) string {

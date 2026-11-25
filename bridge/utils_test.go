@@ -41,3 +41,14 @@ func TestRequestTransportFallsBackWhenDefaultTransportIsCustom(t *testing.T) {
 		t.Fatal("expected insecure TLS config to be preserved")
 	}
 }
+
+func TestDiagnosticRequestTransportUsesFreshConnectionPool(t *testing.T) {
+	options := RequestOptions{FreshConnection: true}
+	first, second := requestTransport(options), requestTransport(options)
+	if first == second || first == requestTransport(RequestOptions{}) {
+		t.Fatal("diagnostic requests must not reuse another request's connections")
+	}
+	if first.DisableKeepAlives || first.IdleConnTimeout <= 0 {
+		t.Fatal("the completed request should remain observable briefly")
+	}
+}

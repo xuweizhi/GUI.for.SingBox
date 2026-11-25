@@ -20,6 +20,7 @@ export interface CoreApiProxy {
   type: string
   udp: boolean
   history: {
+    time?: string
     delay: number
   }[]
 }

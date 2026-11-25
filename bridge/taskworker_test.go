@@ -5,13 +5,16 @@ import (
 	"crypto/cipher"
 	"crypto/md5"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func encryptSubscriptionPayload(password string, plaintext string) string {
@@ -44,6 +47,7 @@ func seedTaskWorkerArtifacts(t *testing.T) {
 
 	artifacts := map[string]string{
 		scheduledTaskWorkerScriptSrc:     scheduledTaskWorkerScriptDst,
+		scheduledTaskWorkerYamlSrc:       scheduledTaskWorkerYamlDst,
 		scheduledTaskWorkerProxyUtilsSrc: scheduledTaskWorkerProxyUtilsDst,
 	}
 
@@ -946,5 +950,97 @@ func TestManualNativeTaskDoesNotRequireNode(t *testing.T) {
 	defer app.StopScheduledTaskWorker()
 	if result := app.RunScheduledTaskWorker("r"); !result.Flag {
 		t.Fatal(result.Data)
+	}
+}
+
+func TestWorkerUsesYAMLAndConfiguredNetwork(t *testing.T) {
+	backendFixtureBase(t)
+	seedTaskWorkerArtifacts(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/latest":
+			http.Redirect(w, r, "/config", http.StatusFound)
+		case "/config":
+			w.Write([]byte("items:\n  - first\n"))
+		default:
+			http.Error(w, "missing", 404)
+		}
+	}))
+	defer server.Close()
+	backendFixtureWrite(t, "data/user.yaml", "requestProxyMode: custom\ncustomProxy: "+server.URL+"\n")
+	backendFixtureWrite(t, "data/previous.txt", "preserved")
+	worker := NewApp().taskWorker()
+	defer worker.stop()
+	script := `
+const response = await Plugins.HttpGet("http://fixture.invalid/latest")
+const value = Plugins.YAML.parse(response.body)
+const name = Plugins.YAML.parse(Plugins.YAML.stringify(value)).items[0]
+try {await Plugins.Download("http://fixture.invalid/missing", "data/previous.txt"); throw new Error("download should fail")}
+catch (error) {if (!String(error).includes("404")) throw error}
+return name
+`
+	result, err := worker.call("task.run", map[string]any{"task": scheduledTaskConfig{Type: "run::script", Script: script}}, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []scheduledTaskWorkerResultItem
+	if err := json.Unmarshal(result, &records); err != nil || len(records) != 1 || !records[0].OK || records[0].Result != "first" {
+		t.Fatalf("unexpected result %s (%v)", result, err)
+	}
+	if data := backendFixtureRead(t, "data/previous.txt"); data != "preserved" {
+		t.Fatal(data)
+	}
+}
+
+func TestPluginUpgradeCommitsOnlyAfterRedirectedDownload(t *testing.T) {
+	backendFixtureBase(t)
+	var fail atomic.Bool
+	fail.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/latest" {
+			http.Redirect(w, r, "/asset", 302)
+			return
+		}
+		if fail.Load() {
+			http.Error(w, "unavailable", 503)
+			return
+		}
+		w.Write([]byte("new"))
+	}))
+	defer server.Close()
+	installed := pluginConfig{ID: "plugin-one", Type: "Http", Path: "data/plugins/one.js", Version: "1.0", Status: 2, Name: "One"}
+	items := []pluginConfig{installed}
+	hub := installed
+	hub.URL = server.URL + "/latest"
+	hub.Version = "2.0"
+	hub.Path = "data/unwanted.js"
+	hub.Status = 0
+	hub.Configuration = []pluginConfigurationConfig{{Key: "number", Value: float64(5)}}
+	raw, err := json.Marshal([]pluginConfig{hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendFixtureWrite(t, pluginHubFilePath, string(raw))
+	backendFixtureWrite(t, installed.Path, "old")
+	backendFixtureWrite(t, "data/user.yaml", "pluginSettings:\n  plugin-one:\n    number: 9\n")
+	if err := savePlugins(items); err != nil {
+		t.Fatal(err)
+	}
+	worker := NewApp().taskWorker()
+	if err := worker.doUpdatePlugin(&items[0], &items, backendNetworkSettings{RequestProxyMode: "none"}); err == nil {
+		t.Fatal("expected HTTP error")
+	}
+	if items[0].Version != "1.0" || backendFixtureRead(t, installed.Path) != "old" {
+		t.Fatal("failed upgrade changed installed plugin")
+	}
+	fail.Store(false)
+	if err := worker.doUpdatePlugin(&items[0], &items, backendNetworkSettings{RequestProxyMode: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	if items[0].Path != installed.Path || items[0].Status != 2 || items[0].Version != "2.0" || backendFixtureRead(t, installed.Path) != "new" {
+		t.Fatal(items[0])
+	}
+	if !strings.Contains(backendFixtureRead(t, "data/user.yaml"), "number: 9") {
+		t.Fatal("integer override was lost")
 	}
 }

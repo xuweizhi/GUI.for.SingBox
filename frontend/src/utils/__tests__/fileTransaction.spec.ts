@@ -61,9 +61,10 @@ describe('replaceFileWithRollback', () => {
 
 import { mkdtemp, readFile, writeFile, access, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
-import { withConfigMutation } from '@/utils/configPersistence'
+import * as bridge from '@/bridge'
+import { removeUnusedResourceCache, withConfigMutation } from '@/utils/configPersistence'
 import { writeFilesWithRollback } from '@/utils/fileTransaction'
 
 describe('related configuration file writes', () => {
@@ -161,4 +162,22 @@ describe('related configuration file writes', () => {
     await expect(second).resolves.toBe('saved')
     expect(order).toEqual(['first read', 'first rollback', 'second read'])
   })
+})
+
+it('removes only the unreferenced cache and preserves local source files', async () => {
+  const absolute = vi.spyOn(bridge, 'AbsolutePath').mockImplementation(async (path) => resolve('/app', path))
+  const remove = vi.spyOn(bridge, 'RemoveFile').mockResolvedValue('')
+  const local = { type: 'File' as const, url: '/app/source.json', path: './source.json' }
+  try {
+    await removeUnusedResourceCache(local, [])
+    expect(remove).not.toHaveBeenCalled()
+    const cached = { ...local, path: 'cache.json' }
+    await removeUnusedResourceCache(cached, [{ ...local, url: '/app/cache.json' }])
+    expect(remove).not.toHaveBeenCalled()
+    await removeUnusedResourceCache(cached, [])
+    expect(remove).toHaveBeenCalledExactlyOnceWith('cache.json')
+  } finally {
+    absolute.mockRestore()
+    remove.mockRestore()
+  }
 })

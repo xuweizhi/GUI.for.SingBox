@@ -2,11 +2,10 @@
 import { ref, inject, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ReadFile, WriteFile } from '@/bridge'
+import { FileExists, ReadFile, WriteFile } from '@/bridge'
 import { useSubscribesStore } from '@/stores'
 import {
   deepClone,
-  ignoredError,
   message,
   omitArray,
   reconcileSubscriptionProxyIds,
@@ -24,6 +23,7 @@ const props = defineProps<Props>()
 
 const loading = ref(false)
 const proxiesText = ref('')
+const ready = ref(false)
 const previousEntries = ref<Recordable[]>([])
 const sub = ref(deepClone(props.sub))
 
@@ -33,23 +33,29 @@ const subscribeStore = useSubscribesStore()
 const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
 
+const readContent = () => ReadFile(sub.value.path).catch(async (error) => {
+  if (sub.value.proxies.length || await FileExists(sub.value.path)) throw error
+  return '[]'
+})
+
 const handleSave = async () => {
+  if (!ready.value || loading.value) return
   loading.value = true
   try {
     const { path, proxies, id } = sub.value
     const parsed = JSON.parse(proxiesText.value)
     const { outbounds: proxiesWithId, importedDns } = extractSubscriptionConfig(parsed)
-    sub.value.proxies = reconcileSubscriptionProxyIds(
+    const nextProxies = reconcileSubscriptionProxyIds(
       proxies,
       previousEntries.value,
       proxiesWithId,
       sampleID,
     )
-    if (!Array.isArray(parsed)) sub.value.importedDns = importedDns
-    const previousContent = (await ignoredError(ReadFile, path)) || '[]'
+    const next = { ...sub.value, proxies: nextProxies, ...(!Array.isArray(parsed) ? { importedDns } : {}) }
+    const previousContent = await readContent()
     await WriteFile(path, JSON.stringify(omitArray(proxiesWithId, ['__id_in_gui']), null, 2))
     try {
-      await subscribeStore.editSubscribe(id, sub.value)
+      await subscribeStore.editSubscribe(id, next)
     } catch (saveError: any) {
       try {
         await WriteFile(path, previousContent)
@@ -70,7 +76,7 @@ const handleSave = async () => {
 }
 
 const initProxiesText = async () => {
-  const content = (await ignoredError(ReadFile, sub.value.path)) || '[]'
+  const content = await readContent()
   const { outbounds: proxies, importedDns } = extractSubscriptionConfig(JSON.parse(content))
   previousEntries.value = proxies
   if (importedDns) sub.value.importedDns = importedDns
@@ -87,7 +93,7 @@ const initProxiesText = async () => {
   )
 }
 
-initProxiesText().catch((error) => message.error(error.message || error))
+initProxiesText().then(() => { ready.value = true }).catch((error) => message.error(error.message || error))
 
 const modalSlots = {
   cancel: () =>
@@ -105,6 +111,7 @@ const modalSlots = {
       {
         type: 'primary',
         loading: loading.value,
+        disabled: !ready.value,
         onClick: handleSave,
       },
       () => t('common.save'),
@@ -117,6 +124,6 @@ defineExpose({ modalSlots })
 <template>
   <div class="h-full flex flex-col">
     <div class="text-12 text-secondary mb-8">{{ t('subscribe.endpointEditorHint') }}</div>
-    <CodeEditor v-model="proxiesText" lang="json" editable class="flex-1 min-h-0" />
+    <CodeEditor v-if="ready" v-model="proxiesText" lang="json" editable class="flex-1 min-h-0" />
   </div>
 </template>

@@ -1,5 +1,5 @@
 import { snippetCompletion, completeFromList } from '@codemirror/autocomplete'
-import type { CompletionContext, Completion } from '@codemirror/autocomplete'
+import type { Completion } from '@codemirror/autocomplete'
 import { scopeCompletionSource, localCompletionSource, snippets } from '@codemirror/lang-javascript'
 
 import { PluginTriggerEvent } from '@/enums/app'
@@ -234,17 +234,7 @@ export const getCompletions = (pluginScope: any = undefined) => {
     /**
      * Locally Defined
      */
-    (context: CompletionContext) => {
-      const word = context.matchBefore(/\w*/)
-      if (!word || context.explicit) return null
-
-      const codeCompletion = localCompletionSource(context) || { options: [] }
-
-      return {
-        from: word.from,
-        options: codeCompletion.options,
-      }
-    },
+    localCompletionSource,
   ]
 
   return completions

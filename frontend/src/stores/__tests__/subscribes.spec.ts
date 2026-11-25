@@ -196,7 +196,11 @@ describe('subscribes store', () => {
           id: 'outbound-select',
           tag: '🚀 节点选择',
           type: 'selector',
-          outbounds: [{ ...deletedRef }, { ...keptRef }],
+          outbounds: [
+            { ...deletedRef },
+            { id: 'selected-node', tag: 'Node', type: 'sub-id' },
+            { ...keptRef },
+          ],
         },
         {
           id: 'custom-urltest',

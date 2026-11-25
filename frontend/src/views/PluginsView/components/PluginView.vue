@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { ReadFile, WriteFile } from '@/bridge'
 import { PluginTriggerEvent } from '@/enums/app'
 import { usePluginsStore } from '@/stores'
-import { deepClone, ignoredError, message } from '@/utils'
+import { deepClone, message } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
 import Dropdown from '@/components/Dropdown/index.vue'
@@ -20,6 +20,7 @@ const loading = ref(false)
 const plugin = ref<App.Plugin>()
 const metadata = ref<Record<string, any>>()
 const code = ref('')
+const ready = ref(false)
 
 const { t } = useI18n()
 const pluginsStore = usePluginsStore()
@@ -28,7 +29,7 @@ const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
 
 const handleSave = async () => {
-  if (!plugin.value) return
+  if (!plugin.value || !ready.value || loading.value) return
   loading.value = true
   try {
     await WriteFile(plugin.value.path, code.value)
@@ -44,7 +45,7 @@ const handleSave = async () => {
 const testing = ref(false)
 
 const handleTest = async (event: PluginTriggerEvent, arg1?: any, arg2?: any) => {
-  if (!plugin.value || testing.value) return
+  if (!plugin.value || !ready.value || testing.value) return
   testing.value = true
   try {
     const metadata = JSON.stringify({
@@ -73,13 +74,12 @@ const handleTest = async (event: PluginTriggerEvent, arg1?: any, arg2?: any) => 
 }
 
 const initPluginCode = async (p: App.Plugin) => {
-  const _code = pluginsStore.getPluginCodefromCache(p.id)
-  if (_code) {
-    code.value = _code
-    return
+  try {
+    code.value = pluginsStore.getPluginCodefromCache(p.id) ?? await ReadFile(p.path)
+    ready.value = true
+  } catch (error) {
+    message.error(error)
   }
-  const content = (await ignoredError(ReadFile, p.path)) || ''
-  code.value = content
 }
 
 const p = pluginsStore.getPluginById(props.id)
@@ -123,11 +123,12 @@ const modalSlots = {
             Button,
             {
               loading: testing.value,
+              disabled: !ready.value,
               type: 'link',
             },
             () => t('plugins.testRun'),
           ),
-        overlay: () =>
+        overlay: ({ close }: { close: () => void }) =>
           h(
             'div',
             {
@@ -137,7 +138,7 @@ const modalSlots = {
               h(
                 Button,
                 {
-                  onClick: () => handleTest(type),
+                  onClick: () => { close(); void handleTest(type) },
                   type: 'text',
                   size: 'small',
                 },
@@ -163,6 +164,7 @@ const modalSlots = {
       {
         type: 'primary',
         loading: loading.value,
+        disabled: !ready.value,
         onClick: handleSave,
       },
       () => t('common.save'),
@@ -173,5 +175,5 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <CodeEditor v-model="code" :plugin="metadata" lang="javascript" editable />
+  <CodeEditor v-if="ready" v-model="code" :plugin="metadata" lang="javascript" editable />
 </template>

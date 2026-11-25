@@ -59,7 +59,7 @@ export const StartServer = async (
     ...options,
   }
 
-  EventsOn(id, async (...args) => {
+  const off = EventsOn(id, async (...args) => {
     const [id, method, url, headers, body] = args
     try {
       await handler(
@@ -88,9 +88,12 @@ export const StartServer = async (
     }
   })
 
-  const { flag, data } = await Bridge.StartServer(address, id, _options)
+  const { flag, data } = await Bridge.StartServer(address, id, _options).catch((error) => {
+    off()
+    throw error
+  })
   if (!flag) {
-    EventsOff(id)
+    off()
     throw data
   }
 

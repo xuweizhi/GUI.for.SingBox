@@ -93,6 +93,8 @@ const updatePosition = () => {
   overlayStyle.value.left = `${left}px`
 }
 
+defineExpose({ updatePosition })
+
 const onKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Escape' && show.value) {
     e.stopPropagation()

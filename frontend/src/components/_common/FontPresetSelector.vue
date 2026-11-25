@@ -30,10 +30,18 @@ const matchedFontPreset = computed(() =>
   matchedFontPresetKey(appSettings.app.fontFamily, customPresets.value),
 )
 const isCustomFont = ref(matchedFontPreset.value === 'custom')
-
-watch(matchedFontPreset, (nextKey) => {
-  isCustomFont.value = nextKey === 'custom'
+let editingFont = false
+const fontFamily = computed({
+  get: () => appSettings.app.fontFamily,
+  set: (value: string) => {
+    editingFont = true
+    appSettings.app.fontFamily = value
+    editingFont = false
+  },
 })
+watch(matchedFontPreset, (key) => {
+  if (!editingFont) isCustomFont.value = key === 'custom'
+}, { flush: 'sync' })
 
 const activeFontKey = computed(() => (isCustomFont.value ? 'custom' : matchedFontPreset.value))
 
@@ -239,7 +247,7 @@ const removePreset = (preset: App.CustomFontPreset) => {
 
     <div v-if="activeFontKey === 'custom'" class="font-custom-row" :class="{ 'is-wide': isSettings }">
       <Input
-        v-model="appSettings.app.fontFamily"
+        v-model="fontFamily"
         :placeholder="t('settings.font.customPlaceholder')"
         :label="t('settings.font.customInputAria')"
         :size="isSettings ? 'default' : 'small'"

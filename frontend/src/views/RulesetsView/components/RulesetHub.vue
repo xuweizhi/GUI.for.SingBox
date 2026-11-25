@@ -3,7 +3,6 @@ import { computed, h, inject, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { HttpGet } from '@/bridge'
-import { BuiltInOutbound } from '@/constant/kernel'
 import { DefaultRouteRule, DefaultRouteRuleset } from '@/constant/profile'
 import { RulesetFormat, RulesetType, RuleType } from '@/enums/kernel'
 import { useProfilesStore, useRulesetsStore } from '@/stores'
@@ -108,18 +107,18 @@ const handleAddRulesetToProfile = async (
       return
     }
 
-    const outboundOptions = [
-      ...BuiltInOutbound.map((outbound) => ({ label: outbound, value: outbound })),
-      ...profile.outbounds.map((outbound) => ({
-        label: outbound.tag,
-        value: outbound.id,
-        description: outbound.type,
-      })),
-    ]
+    const outboundOptions = profile.outbounds.map((outbound) => ({
+      label: outbound.tag,
+      value: outbound.id,
+      description: outbound.type,
+    }))
+    if (!outboundOptions.length) {
+      message.warn('kernel.route.rules.invalid')
+      return
+    }
     const target = await picker.single('kernel.route.rules.outbound', outboundOptions, [
-      profile.outbounds[0]?.id || BuiltInOutbound[0]!,
-    ])
-
+      outboundOptions[0]!.value,
+    ]).catch(() => undefined)
     if (!target) return
 
     const nextProfile = deepClone(profile)
@@ -154,7 +153,7 @@ const handlePreview = async (ruleset: App.RulesetHub['list'][number], format: Ru
   try {
     const { body } = await HttpGet(getRulesetUrlAndSuffix(ruleset, format)[0])
     destroy()
-    await alert(ruleset.name, JSON.stringify(body, null, 2))
+    await alert(ruleset.name, typeof body === 'string' ? body : JSON.stringify(body, null, 2))
   } catch (err: any) {
     error(err.message || err)
     setTimeout(destroy, 2000)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
@@ -16,10 +16,25 @@ import {
 import { Color, NavLayout } from '@/enums/app'
 import { useAppSettingsStore } from '@/stores'
 
+import Dropdown from '@/components/Dropdown/index.vue'
+
 import FontPresetSelector from './FontPresetSelector.vue'
 
 const { t } = useI18n()
 const appSettings = useAppSettingsStore()
+
+const dropdown = useTemplateRef('dropdown')
+watch(
+  () => [
+    appSettings.app.navLayout,
+    appSettings.app.uiDensity,
+    appSettings.app.fontSize,
+    appSettings.app.fontFamily,
+    appSettings.app.uiStyle,
+  ],
+  () => dropdown.value?.updatePosition?.(),
+  { flush: 'post' },
+)
 
 const currentStyleLabel = computed(
   () =>
@@ -49,7 +64,7 @@ const onThemeClick = (e: MouseEvent) => {
 </script>
 
 <template>
-  <Dropdown :trigger="['click']">
+  <Dropdown ref="dropdown" :trigger="['click']">
     <template #default="{ show }">
       <button
         type="button"

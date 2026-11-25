@@ -60,7 +60,7 @@ const onFormatChange = (val: 'json' | 'yaml', old: 'json' | 'yaml') => {
           @change="onFormatChange"
         />
       </div>
-      <CodeEditor v-model="model.mixin.config" :lang="model.mixin.format" editable />
+      <CodeEditor :key="model.mixin.format" v-model="model.mixin.config" :lang="model.mixin.format" editable />
     </template>
     <template #script>
       <CodeEditor v-model="model.script.code" lang="javascript" editable />

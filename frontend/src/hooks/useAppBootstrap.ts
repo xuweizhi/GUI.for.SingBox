@@ -27,7 +27,17 @@ export const useAppBootstrap = () => {
     message.error(error)
   }
 
+  let session = 0
+  const reset = () => {
+    ++session
+    initialized.value = false
+    loading.value = false
+    scheduledTasksStore.stopSession()
+    kernelApiStore.detachCore()
+  }
+
   const initialize = async () => {
+    const revision = session
     if (loading.value || initialized.value) return initialized.value
 
     loading.value = true
@@ -37,6 +47,7 @@ export const useAppBootstrap = () => {
     try {
       await envStore.setupEnv()
 
+      if (revision !== session) return false
       await Promise.all([
         appSettings.setupAppSettings(),
         profilesStore.setupProfiles(),
@@ -46,30 +57,42 @@ export const useAppBootstrap = () => {
         pluginsStore.setupPlugins(),
       ])
       // Task ownership depends on the loaded proxy settings, subscriptions and plugins.
+      if (revision !== session) return false
       await scheduledTasksStore.setupScheduledTasks()
 
+      if (revision !== session) return false
       const startTime = performance.now()
       percent.value = 20
 
-      if (await IsStartup()) {
+      const startup = await IsStartup()
+      if (revision !== session) return false
+      if (startup) {
         await pluginsStore.onStartupTrigger().catch(showError)
       }
 
+      if (revision !== session) return false
       percent.value = 40
       await pluginsStore.onReadyTrigger().catch(showError)
 
+      if (revision !== session) return false
       const duration = performance.now() - startTime
       percent.value = duration < 500 ? 80 : 100
       await sleep(Math.max(0, MIN_SPLASH_DURATION - duration))
-      await kernelApiStore.initCoreState()
+      if (revision !== session) return false
+      try {
+        await kernelApiStore.initCoreState()
+      } catch (error) {
+        if (revision === session) message.error(error)
+      }
 
+      if (revision !== session) return false
       initialized.value = true
       return true
     } catch (error) {
-      showError(error)
+      if (revision === session) showError(error)
       return false
     } finally {
-      loading.value = false
+      if (revision === session) loading.value = false
     }
   }
 
@@ -79,5 +102,6 @@ export const useAppBootstrap = () => {
     hasError,
     initialized,
     initialize,
+    reset,
   }
 }

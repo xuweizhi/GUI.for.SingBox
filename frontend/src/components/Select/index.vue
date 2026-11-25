@@ -68,12 +68,12 @@ const displayLabel = computed(() => {
   if (props.multiple) {
     const selected = model.value as string[]
     if (selected.length === 0) {
-      return props.placeholder || 'common.none'
+      return t(props.placeholder || 'common.none')
     }
     return selected.map((item) => t(optionsValueLabelMapping.value[item] ?? item)).join('、')
   }
   const label = props.options.find((v) => v.value === model.value)?.label ?? (model.value as string)
-  return label || props.placeholder || 'common.none'
+  return t(label || props.placeholder || 'common.none')
 })
 
 const isPlaceholder = computed(() => {
@@ -83,15 +83,10 @@ const isPlaceholder = computed(() => {
     : !props.options.some((v) => v.value === model.value) && !model.value
 })
 
-let internalUpdate = false
-
 watch(
   () => props.modelValue,
   (val) => {
-    if (!internalUpdate) {
-      model.value = props.multiple ? deepClone(val || []) : val
-    }
-    internalUpdate = false
+    model.value = props.multiple ? deepClone(val || []) : val
   },
   { deep: true },
 )
@@ -124,7 +119,6 @@ const handleSelect = (value: string) => {
     emit('update:modelValue', model.value)
     emit('change', model.value)
   }
-  internalUpdate = true
 }
 
 const handleClear = () => {
@@ -137,7 +131,6 @@ const handleClear = () => {
     emit('update:modelValue', '')
     emit('change', '')
   }
-  internalUpdate = true
 }
 
 watch(filteredOptions, () => {
@@ -205,7 +198,7 @@ const handleTriggerKeydown = (
         aria-haspopup="listbox"
         :aria-expanded="show"
         :aria-disabled="disabled"
-        :aria-label="t(displayLabel)"
+        :aria-label="displayLabel"
         :class="{
           border,
           [size]: true,
@@ -219,7 +212,7 @@ const handleTriggerKeydown = (
         @keydown="handleTriggerKeydown($event, { toggle, close, open, show })"
       >
         <span class="line-clamp-1 break-all flex-1" :class="{ 'text-muted': isPlaceholder }">
-          {{ t(displayLabel) }}
+          {{ displayLabel }}
         </span>
         <Button
           :icon="innerClearable ? 'close' : 'arrowDown'"

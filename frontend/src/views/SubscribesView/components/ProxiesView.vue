@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, inject, h } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n } from 'vue-i18n'
 
-import { ClipboardSetText, ReadFile, WriteFile } from '@/bridge'
+import { ClipboardSetText, FileExists, ReadFile } from '@/bridge'
 import { DraggableOptions } from '@/constant/app'
 import { useBool } from '@/hooks'
 import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
-import { buildSmartRegExp, deepClone, ignoredError, message, sampleID } from '@/utils'
+import { buildSmartRegExp, deepClone, message, sampleID } from '@/utils'
 import {
   extractSubscriptionConfig,
   isSubscriptionEndpoint,
@@ -21,7 +22,7 @@ interface Props {
 
 const props = defineProps<Props>()
 
-let editId = ''
+const editId = ref('')
 const isEdit = ref(false)
 const loading = ref(false)
 const keywords = ref('')
@@ -59,7 +60,7 @@ const handleInspectProxy = async (record: App.Subscription['proxies'][0], edit =
     const proxy = await getProxyByTag(record.tag)
     details.value = JSON.stringify(proxy, null, 2)
     isEdit.value = edit
-    if (edit) editId = record.tag
+    editId.value = edit ? record.tag : ''
     toggleDetails()
   } catch (error: any) {
     message.error(error)
@@ -76,27 +77,23 @@ const handleCopyProxy = async (record: App.Subscription['proxies'][0]) => {
   }
 }
 
-const handleDeleteProxy = (record: Pick<App.Subscription['proxies'][0], 'tag'>) => {
-  const idx = sub.value.proxies.findIndex((v) => v.tag === record.tag)
-  if (idx !== -1) {
-    sub.value.proxies.splice(idx, 1)
+const pendingAssignments = ref<{ groupId: string; nodeId: string }[]>([])
+
+const handleDeleteProxy = async (record: App.Subscription['proxies'][number]) => {
+  try {
+    await initAllFieldsProxies()
+    sub.value.proxies = sub.value.proxies.filter((node) => node.id !== record.id)
+    allFieldsProxies.value = allFieldsProxies.value.filter((node) => node.tag !== record.tag)
+    pendingAssignments.value = pendingAssignments.value.filter((item) => item.nodeId !== record.id)
+  } catch (error) {
+    message.error(error)
   }
 }
 
-const handleAddToManualGroup = async (
-  groupId: string,
-  record: App.Subscription['proxies'][0],
-) => {
-  try {
-    const added = await nodeGroupsStore.addMember(groupId, {
-      subscription_id: sub.value.id,
-      node_id: record.id,
-      last_known_tag: record.tag,
-    })
-    added && message.success('common.success')
-  } catch (error: any) {
-    message.error(error.message || error)
-  }
+const handleAddToManualGroup = (groupId: string, record: App.Subscription['proxies'][number]) => {
+  if (pendingAssignments.value.some((item) => item.groupId === groupId && item.nodeId === record.id)) return
+  pendingAssignments.value.push({ groupId, nodeId: record.id })
+  message.info('nodeGroups.addOnSave')
 }
 
 const menus: App.Menu[] = [
@@ -133,18 +130,7 @@ const generateMenus = (record: App.Subscription['proxies'][0]): App.Menu[] => [
     children: manualNodeGroups.value.length
       ? manualNodeGroups.value.map((group) => ({
           label: group.name,
-          handler: async () => {
-            try {
-              const added = await nodeGroupsStore.addMember(group.id, {
-                subscription_id: sub.value.id,
-                node_id: record.id,
-                last_known_tag: record.tag,
-              })
-              added && message.success('common.success')
-            } catch (error: any) {
-              message.error(error.message || error)
-            }
-          },
+          handler: () => handleAddToManualGroup(group.id, record),
         }))
       : [{ label: 'nodeGroups.noManualGroups' }],
   },
@@ -156,14 +142,17 @@ const handleSubmit = inject('submit') as any
 const handleSave = async () => {
   loading.value = true
   try {
-    const { path, proxies, id } = sub.value
     await initAllFieldsProxies()
-    const filteredProxies = allFieldsProxies.value.filter((v: any) =>
-      proxies.some((vv) => vv.tag === v.tag),
-    )
-    const sortedArray = proxies.map((v) => filteredProxies.find((vv) => vv.tag === v.tag))
-    await WriteFile(path, JSON.stringify(sortedArray, null, 2))
-    await subscribeStore.editSubscribe(id, sub.value)
+    const entries = new Map(allFieldsProxies.value.map((entry) => [entry.tag, entry]))
+    const sorted = sub.value.proxies.map((proxy) => {
+      const entry = entries.get(proxy.tag)
+      if (!entry) throw new Error(`Missing node configuration: ${proxy.tag}`)
+      return entry
+    })
+    await subscribeStore.editSubscribe(sub.value.id, sub.value, {
+      content: JSON.stringify(sorted, null, 2),
+      assignments: pendingAssignments.value,
+    })
     handleSubmit()
   } catch (error: any) {
     console.log(error)
@@ -173,7 +162,7 @@ const handleSave = async () => {
 }
 
 const handleAdd = async () => {
-  editId = ''
+  editId.value = ''
   details.value = ''
   isEdit.value = true
   toggleDetails()
@@ -185,20 +174,19 @@ const onEditEnd = async () => {
     proxy = JSON.parse(details.value)
 
     validateSubscriptionEntries([proxy])
+    if (sub.value.proxies.some((node) => node.tag === proxy.tag && node.tag !== editId.value))
+      throw new Error(t('subscribe.duplicateNodeTag', [proxy.tag]))
+    await initAllFieldsProxies()
   } catch (error: any) {
     console.log(error)
     message.error(error.message || error)
     return false
   }
 
-  await initAllFieldsProxies()
-
-  const allFieldsProxiesIdx = allFieldsProxies.value.findIndex((v: any) => v.tag === editId)
-  const subProxiesIdx = sub.value.proxies.findIndex((v) => v.tag === editId)
+  const allFieldsProxiesIdx = allFieldsProxies.value.findIndex((v: any) => v.tag === editId.value)
+  const subProxiesIdx = sub.value.proxies.findIndex((v) => v.tag === editId.value)
 
   if (allFieldsProxiesIdx !== -1 && subProxiesIdx !== -1) {
-    if (isSubscriptionEndpoint(allFieldsProxies.value[allFieldsProxiesIdx]))
-      proxy._gui_kind = 'endpoint'
     allFieldsProxies.value.splice(allFieldsProxiesIdx, 1, proxy)
     sub.value.proxies.splice(subProxiesIdx, 1, {
       ...sub.value.proxies[subProxiesIdx]!,
@@ -217,12 +205,21 @@ const onEditEnd = async () => {
   }
 }
 
-const initAllFieldsProxies = async () => {
-  if (allFieldsProxies.value.length) return
-  const content = (await ignoredError(ReadFile, sub.value!.path)) || '[]'
-  const extracted = extractSubscriptionConfig(JSON.parse(content))
-  allFieldsProxies.value = extracted.outbounds
-  if (extracted.importedDns) sub.value.importedDns = extracted.importedDns
+let loaded: Promise<void> | undefined
+const initAllFieldsProxies = () => {
+  loaded ??= (async () => {
+    const content = await ReadFile(sub.value.path).catch(async (error) => {
+      if (sub.value.proxies.length || await FileExists(sub.value.path)) throw error
+      return '[]'
+    })
+    const extracted = extractSubscriptionConfig(JSON.parse(content))
+    allFieldsProxies.value = extracted.outbounds
+    if (extracted.importedDns) sub.value.importedDns = extracted.importedDns
+  })().catch((error) => {
+    loaded = undefined
+    throw error
+  })
+  return loaded
 }
 
 const getProxyByTag = async (tag: string) => {
@@ -285,12 +282,11 @@ defineExpose({ modalSlots })
 
     <Empty v-if="filteredProxies.length === 0" />
 
-    <div
+    <VueDraggable
       v-else
-      v-draggable="[
-        sub.proxies,
-        { ...DraggableOptions, disabled: Boolean(keywords.trim() || proxyType) },
-      ]"
+      v-model="sub.proxies"
+      v-bind="DraggableOptions"
+      :disabled="Boolean(keywords.trim() || proxyType)"
       class="proxies-grid gap-8 mt-10 overflow-y-auto pb-8"
     >
       <Card
@@ -391,14 +387,14 @@ defineExpose({ modalSlots })
           </Tag>
         </div>
       </Card>
-    </div>
+    </VueDraggable>
   </div>
 
   <Modal
     v-model:open="showDetails"
     :submit="isEdit"
     :mask-closable="!isEdit"
-    :title="isEdit ? (details ? 'common.edit' : 'common.add') : 'common.details'"
+    :title="isEdit ? (editId ? 'common.edit' : 'common.add') : 'common.details'"
     :on-ok="onEditEnd"
     cancel-text="common.close"
     max-height="80"

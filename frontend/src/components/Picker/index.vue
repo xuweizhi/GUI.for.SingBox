@@ -1,6 +1,7 @@
 <script setup lang="ts" generic="ValueType = any, PickerType extends 'single' | 'multi' = 'single'">
-import { computed, onMounted, onUnmounted, ref, toRaw, type Ref } from 'vue'
+import { computed, useTemplateRef, ref, toRaw, type Ref } from 'vue'
 
+import { useOverlayFocus } from '@/hooks/useOverlayFocus'
 import useI18n from '@/lang'
 
 export type PickerItem<T> = {
@@ -55,6 +56,7 @@ const filteredOptions = computed(() => {
 const handleConfirm = () => {
   const res: any = Array.from(selected.value).map((v) => toRaw(v))
   if (props.type === 'single') {
+    if (!res.length) return
     emit('confirm', res[0])
   } else {
     emit('confirm', res)
@@ -71,7 +73,7 @@ const isSelected = (option: ValueType) => selected.value.has(option)
 
 const handleSelect = (option: PickerItem<ValueType>) => {
   if (isSelected(option.value)) {
-    selected.value.delete(option.value)
+    if (props.type === 'multi') selected.value.delete(option.value)
   } else {
     if (props.type === 'single') selected.value.clear()
     selected.value.add(option.value)
@@ -92,16 +94,8 @@ const handleSelectAll = () => {
   }
 }
 
-const onKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') {
-    e.stopPropagation()
-    e.preventDefault()
-    handleCancel()
-  }
-}
-
-onMounted(() => window.addEventListener('keydown', onKeydown, true))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
+const dialog = useTemplateRef<HTMLElement>('dialog')
+useOverlayFocus(dialog, handleCancel)
 </script>
 
 <template>
@@ -112,6 +106,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
     <Transition name="dialog-pop" appear>
       <div
         role="dialog"
+        ref="dialog"
+        tabindex="-1"
         aria-modal="true"
         :aria-label="t(title)"
         class="gui-picker flex flex-col rounded-12"
@@ -167,7 +163,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
             {{ selected.size }} / {{ options.length }}
           </span>
           <Button size="small" @click="handleCancel">{{ t('common.cancel') }}</Button>
-          <Button size="small" type="primary" @click="handleConfirm">
+          <Button size="small" type="primary" :disabled="type === 'single' && !selected.size" @click="handleConfirm">
             {{ t('common.confirm') }}
           </Button>
         </div>

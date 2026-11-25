@@ -414,8 +414,8 @@ export const getDomainSuffixes = (host: string) => {
 }
 
 export const createTextMatcher = (include: string, exclude: string, flags = '') => {
-  const includeRegex = include ? buildSmartRegExp(include, flags) : null
-  const excludeRegex = exclude ? buildSmartRegExp(exclude, flags) : null
+  const includeRegex = include?.trim() ? buildSmartRegExp(include, flags) : null
+  const excludeRegex = exclude?.trim() ? buildSmartRegExp(exclude, flags) : null
   return (text: string) => {
     const flag1 = includeRegex ? includeRegex.test(text) : true
     const flag2 = excludeRegex ? excludeRegex.test(text) : false
@@ -426,6 +426,7 @@ export const createTextMatcher = (include: string, exclude: string, flags = '') 
 const regexCache = new Map<string, RegExp>()
 
 export const buildSmartRegExp = (pattern: string, flags = '') => {
+  pattern = pattern.trim()
   const key = pattern + '::' + flags
   if (regexCache.has(key)) return regexCache.get(key)!
 

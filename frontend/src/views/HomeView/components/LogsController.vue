@@ -93,7 +93,8 @@ const addLogToRuleset = async (
     }
   })
 
-  const payloads = await picker.multi('rulesets.selectRuleType', options)
+  const payloads = await picker.multi('rulesets.selectRuleType', options).catch(() => [])
+  if (!payloads.length) return
 
   try {
     await addToRuleSet(ruleset, payloads)
@@ -115,6 +116,17 @@ const menus: App.Menu[] = (
   handler: (log: CoreApiLogsData) => addLogToRuleset(ruleset, log),
 }))
 
+const rowKeys = new WeakMap<CoreApiLogsData, number>()
+let nextKey = 0
+const logKey = (log: CoreApiLogsData) => {
+  let key = rowKeys.get(log)
+  if (key === undefined) {
+    key = ++nextKey
+    rowKeys.set(log, key)
+  }
+  return key
+}
+
 const logTagColor = (level: string) => {
   if (level === 'error' || level === 'fatal' || level === 'panic') return 'red'
   if (level === 'warn') return 'orange'
@@ -129,7 +141,7 @@ const logsStore = useLogsStore()
 
 const handleClear = () => {
   pausedLogs.value.splice(0)
-  logsStore.clearKernelLog()
+  logsStore.clearKernelLog(true)
 }
 
 watch(pause, (value) => {
@@ -181,8 +193,8 @@ onMounted(() => {
 
     <div v-else class="mt-8 overflow-y-auto flex-1 flex flex-col gap-4">
       <div
-        v-for="(log, i) in filteredLogs"
-        :key="`${i}-${log.type}-${log.payload}`"
+        v-for="log in filteredLogs"
+        :key="logKey(log)"
         v-menu="menus.map((v) => ({ ...v, handler: () => v.handler?.(log) }))"
         class="log select-text font-mono text-12 py-6 px-8 rounded-6 flex items-start gap-8"
       >

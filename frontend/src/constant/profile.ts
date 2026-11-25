@@ -68,8 +68,7 @@ export const DefaultExperimental = (): App.Experimental => ({
     path: 'cache.db',
     cache_id: sampleID(),
     store_fakeip: true,
-    store_rdrc: true,
-    rdrc_timeout: '7d',
+    store_dns: true,
   },
 })
 

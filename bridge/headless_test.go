@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -287,5 +288,49 @@ func TestStartupIsConsumedOnceAcrossClients(t *testing.T) {
 	}
 	if first != 1 {
 		t.Fatalf("%d clients reported startup", first)
+	}
+}
+
+func TestCoreProxyForwardsControllerAuthorizationOnly(t *testing.T) {
+	headers := make(chan http.Header, 2)
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { headers <- r.Header.Clone(); w.WriteHeader(204) }))
+	defer controller.Close()
+	auth := &headlessAuth{token: "webui-secret"}
+	handler := auth.wrap(http.HandlerFunc(NewApp().handleCoreProxy))
+	for _, authorization := range []string{"Bearer core-secret", "Bearer webui-secret"} {
+		req := httptest.NewRequest("GET", webUICoreEndpoint+strings.TrimPrefix(controller.URL, "http://")+"/configs", nil)
+		req.AddCookie(&http.Cookie{Name: webUITokenCookie, Value: auth.token})
+		req.Header.Set("Authorization", authorization)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		if response.Code != 204 {
+			t.Fatal(response.Code)
+		}
+		got := <-headers
+		if got.Get("Cookie") != "" {
+			t.Fatal("web session cookie reached controller")
+		}
+		want := ""
+		if authorization == "Bearer core-secret" {
+			want = authorization
+		}
+		if got.Get("Authorization") != want {
+			t.Fatal("incorrect controller authorization")
+		}
+	}
+}
+
+func TestAssetCacheRequiresFingerprint(t *testing.T) {
+	files := fstest.MapFS{}
+	for _, name := range []string{"index.html", "favicon.ico", "assets/app-Ccc2_Rzs.js"} {
+		files[name] = &fstest.MapFile{Data: []byte("content")}
+	}
+	for _, path := range []string{"/", "/index.html", "/favicon.ico", "/assets/app-Ccc2_Rzs.js"} {
+		response := httptest.NewRecorder()
+		serveHeadlessAssets(files, response, httptest.NewRequest("GET", path, nil))
+		immutable := strings.Contains(response.Header().Get("Cache-Control"), "immutable")
+		if immutable != strings.HasPrefix(path, "/assets/") {
+			t.Fatal(path, response.Header())
+		}
 	}
 }

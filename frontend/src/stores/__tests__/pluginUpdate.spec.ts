@@ -190,3 +190,46 @@ it('keeps local metadata on disk-save failure and refreshes a later backend upda
   expect(store.plugins[0]?.version).toBe('v2.0.0')
   expect(store.getPluginCodefromCache('plugin-example')).toBe(newCode)
 })
+
+it('shares pending module initialization and releases its URL across concurrent calls', async () => {
+  const { PluginTriggerEvent } = await import('@/enums/app')
+  const { ReadFile } = await import('@/bridge')
+  const plugin = { ...makePlugin(), id: 'concurrent-plugin', disabled: false }
+  mocks.files.set(plugin.path, `export default async (metadata) => {
+    await Promise.resolve()
+    globalThis.pluginInitCount++
+    return { onTask: () => metadata.name }
+  }`)
+  const revoke = vi.fn()
+  const urlClass = class extends URL {
+    static override createObjectURL(blob: Blob) {
+      return 'data:text/javascript;base64,' + btoa(String(blob))
+    }
+    static override revokeObjectURL = revoke
+  }
+  vi.stubGlobal('URL', urlClass)
+  vi.stubGlobal('Blob', class { constructor(private parts: string[]) {} toString() { return this.parts.join('') } })
+  vi.stubGlobal('pluginInitCount', 0)
+  try {
+    const store = usePluginsStore()
+    store.plugins.push(plugin)
+    const invoke = () => store.manualTrigger(plugin.id, PluginTriggerEvent.OnTask)
+    expect(await Promise.all([invoke(), invoke()])).toEqual([plugin.name, plugin.name])
+    expect(vi.mocked(ReadFile).mock.calls.filter(([path]) => path === plugin.path)).toHaveLength(1)
+    expect((globalThis as any).pluginInitCount).toBe(1)
+    expect(revoke).toHaveBeenCalledOnce()
+    expect(Object.keys((globalThis as any).__GUI_FOR_CORES_PLUGIN_CONTEXT__)).toEqual([])
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+it('never caches a missing file as an editable empty plugin', async () => {
+  const { PluginTriggerEvent } = await import('@/enums/app')
+  const plugin = { ...makePlugin(), id: 'missing-file', type: 'File' as const, disabled: false }
+  const store = usePluginsStore()
+  store.plugins.push(plugin)
+  mocks.files.delete(plugin.path)
+  await expect(store.manualTrigger(plugin.id, PluginTriggerEvent.OnTask)).rejects.toContain('missing')
+  expect(store.getPluginCodefromCache(plugin.id)).toBeUndefined()
+})

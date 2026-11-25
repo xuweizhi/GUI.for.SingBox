@@ -168,13 +168,13 @@ func parseSubscriptionDNSAddresses(addresses []string) ([]map[string]any, error)
 	servers := []map[string]any{}
 	seen := map[string]bool{}
 	for _, address := range addresses {
-		address = strings.TrimSpace(address)
+		address = strings.TrimSuffix(strings.TrimSpace(address), "#DIRECT")
 		if address == "" || seen[address] {
 			continue
 		}
 		seen[address] = true
 		tag := fmt.Sprintf("dns-%d", len(servers)+1)
-		if address == "local" || address == "local://" {
+		if address == "local" || address == "local://" || address == "system" || address == "system://" {
 			servers = append(servers, map[string]any{"type": "local", "tag": tag})
 			continue
 		}
@@ -183,6 +183,17 @@ func parseSubscriptionDNSAddresses(addresses []string) ([]map[string]any, error)
 		}
 		if strings.ContainsAny(address, " \t\r\n") {
 			return fail()
+		}
+		if iface, ok := strings.CutPrefix(address, "dhcp://"); ok {
+			server := map[string]any{"type": "dhcp", "tag": tag}
+			if strings.ContainsAny(iface, "/?#@") {
+				return fail()
+			}
+			if iface != "" && iface != "auto" {
+				server["interface"] = iface
+			}
+			servers = append(servers, server)
+			continue
 		}
 		raw := address
 		if !strings.Contains(raw, "://") {
@@ -261,8 +272,10 @@ func prefixSubscriptionReferences(proxies []map[string]any, dns *subscriptionDNS
 	}
 	if dns != nil {
 		for _, server := range dns.Servers {
-			if value, exists := server["detour"]; exists {
-				server["detour"] = reference(value)
+			for _, field := range []string{"detour", "endpoint"} {
+				if value, exists := server[field]; exists {
+					server[field] = reference(value)
+				}
 			}
 		}
 	}
@@ -362,51 +375,49 @@ func reconcileSubscriptionIDs(previous []subscriptionProxyConfig, oldNodes, next
 			candidates = append(candidates, candidate{meta: meta})
 		}
 	}
-	fingerprintCounts, endpointCounts, tagCounts := map[string]int{}, map[string]int{}, map[string]int{}
-	for _, node := range nextNodes {
-		fingerprintCounts[subscriptionFingerprint(node)]++
-		endpointCounts[subscriptionEndpointKey(node)]++
-		tagCounts[stringValue(node["tag"])]++
+	// Reserve stronger identities across the whole update before falling back to names.
+	matches := map[int]int{}
+	matchBy := func(oldKey func(candidate) string, newKey func(map[string]any) string) {
+		oldIndices, newIndices := map[string]int{}, map[string]int{}
+		collect := func(indices map[string]int, key string, index int) {
+			if key == "" {
+				return
+			}
+			if _, exists := indices[key]; exists {
+				indices[key] = -1
+			} else {
+				indices[key] = index
+			}
+		}
+		for i, c := range candidates {
+			if !c.used {
+				collect(oldIndices, oldKey(c), i)
+			}
+		}
+		for i, node := range nextNodes {
+			if _, matched := matches[i]; !matched {
+				collect(newIndices, newKey(node), i)
+			}
+		}
+		for key, i := range newIndices {
+			if old, ok := oldIndices[key]; ok && old >= 0 && i >= 0 {
+				matches[i] = old
+				candidates[old].used = true
+			}
+		}
 	}
+	matchBy(func(c candidate) string { return c.meta.ID }, func(n map[string]any) string { return stringValue(n["__id_in_gui"]) })
+	matchBy(func(c candidate) string { return subscriptionFingerprint(c.node) }, subscriptionFingerprint)
+	matchBy(func(c candidate) string { return subscriptionEndpointKey(c.node) }, subscriptionEndpointKey)
+	matchBy(func(c candidate) string { return c.meta.Tag }, func(n map[string]any) string { return stringValue(n["tag"]) })
+
 	output := make([]subscriptionProxyConfig, 0, len(nextNodes))
 	for index, node := range nextNodes {
-		match := -1
-		if explicit := stringValue(node["__id_in_gui"]); explicit != "" {
-			for i, candidate := range candidates {
-				if !candidate.used && candidate.meta.ID == explicit {
-					match = i
-					break
-				}
-			}
-		}
-		unique := func(key string, counts map[string]int, keyOf func(candidate) string) int {
-			if key == "" || counts[key] != 1 {
-				return -1
-			}
-			found := -1
-			for i, candidate := range candidates {
-				if !candidate.used && keyOf(candidate) == key {
-					if found != -1 {
-						return -1
-					}
-					found = i
-				}
-			}
-			return found
-		}
-		if match < 0 {
-			match = unique(subscriptionFingerprint(node), fingerprintCounts, func(c candidate) string { return subscriptionFingerprint(c.node) })
-		}
-		if match < 0 {
-			match = unique(subscriptionEndpointKey(node), endpointCounts, func(c candidate) string { return subscriptionEndpointKey(c.node) })
-		}
-		if match < 0 {
-			match = unique(stringValue(node["tag"]), tagCounts, func(c candidate) string { return c.meta.Tag })
-		}
-		meta := subscriptionProxyConfig{ID: fmt.Sprintf("proxy-%d-%d", time.Now().UnixNano(), index)}
-		if match >= 0 {
+		meta := subscriptionProxyConfig{}
+		if match, ok := matches[index]; ok {
 			meta = candidates[match].meta
-			candidates[match].used = true
+		} else {
+			meta.ID = fmt.Sprintf("proxy-%d-%d", time.Now().UnixNano(), index)
 		}
 		meta.Tag = stringValue(node["tag"])
 		meta.Type = stringValue(node["type"])

@@ -16,7 +16,12 @@ const authStore = useWebuiAuthStore()
 const input = ref(authStore.token)
 const loading = computed(() => authStore.status === 'checking')
 
-const submit = async () => {
+const submit = async (event?: Event) => {
+  if (
+    event instanceof KeyboardEvent &&
+    (!(event.target instanceof HTMLInputElement) || event.isComposing)
+  )
+    return
   if (!input.value.trim() || loading.value) return
 
   try {
@@ -50,7 +55,7 @@ const submit = async () => {
         :placeholder="t('auth.tokenPlaceholder')"
         autofocus
         class="w-full"
-        @keydown.enter.prevent="submit"
+        @keydown.enter="submit"
       />
 
       <div

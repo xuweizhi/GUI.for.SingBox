@@ -45,28 +45,6 @@ const endpointKey = (outbound?: Recordable) => {
   return type && server && port ? `${type}\u0000${server.toLowerCase()}\u0000${port}` : ''
 }
 
-const uniqueCandidate = (
-  previous: PreviousProxyIdentity[],
-  previousKey: (candidate: PreviousProxyIdentity) => string,
-  nextKey: string,
-  nextKeyCounts: Map<string, number>,
-) => {
-  if (!nextKey || nextKeyCounts.get(nextKey) !== 1) return
-  const candidates = previous.filter(
-    (candidate) => !candidate.used && previousKey(candidate) === nextKey,
-  )
-  return candidates.length === 1 ? candidates[0] : undefined
-}
-
-const countKeys = (outbounds: Recordable[], getKey: (outbound: Recordable) => string) => {
-  const counts = new Map<string, number>()
-  outbounds.forEach((outbound) => {
-    const key = getKey(outbound)
-    if (key) counts.set(key, (counts.get(key) || 0) + 1)
-  })
-  return counts
-}
-
 export const reconcileSubscriptionProxyIds = (
   previousMetadata: App.Subscription['proxies'],
   previousOutbounds: Recordable[],
@@ -91,38 +69,45 @@ export const reconcileSubscriptionProxyIds = (
     queue.forEach((metadata) => previous.push({ ...metadata, used: false }))
   })
 
-  const knownIds = new Map(previous.map((candidate) => [candidate.id, candidate]))
-  const fingerprintCounts = countKeys(nextOutbounds, fingerprint)
-  const endpointCounts = countKeys(nextOutbounds, endpointKey)
-  const tagCounts = countKeys(nextOutbounds, (outbound) => String(outbound.tag || ''))
+  // Reserve strong matches across the entire update before considering weaker keys.
+  const matches = new Map<number, PreviousProxyIdentity>()
+  const matchBy = (
+    oldKey: (candidate: PreviousProxyIdentity) => string,
+    newKey: (node: Recordable) => string,
+  ) => {
+    const candidates = new Map<string, PreviousProxyIdentity | null>()
+    for (const candidate of previous) {
+      if (candidate.used) continue
+      const key = oldKey(candidate)
+      if (key) candidates.set(key, candidates.has(key) ? null : candidate)
+    }
+    const indices = new Map<string, number | null>()
+    nextOutbounds.forEach((node, index) => {
+      if (matches.has(index)) return
+      const key = newKey(node)
+      if (key) indices.set(key, indices.has(key) ? null : index)
+    })
+    for (const [key, index] of indices) {
+      const candidate = candidates.get(key)
+      if (index === null || !candidate) continue
+      matches.set(index, candidate)
+      candidate.used = true
+    }
+  }
+  matchBy(
+    (c) => c.id,
+    (node) => String(node.__id_in_gui || ''),
+  )
+  matchBy((c) => fingerprint(c.outbound), fingerprint)
+  matchBy((c) => endpointKey(c.outbound), endpointKey)
+  matchBy(
+    (c) => c.tag,
+    (node) => String(node.tag || ''),
+  )
 
-  return nextOutbounds.map((outbound) => {
-    const explicitId = String(outbound.__id_in_gui || '')
-    let matched = explicitId ? knownIds.get(explicitId) : undefined
-    if (matched?.used) matched = undefined
-
-    matched ||= uniqueCandidate(
-      previous,
-      (candidate) => fingerprint(candidate.outbound),
-      fingerprint(outbound),
-      fingerprintCounts,
-    )
-    matched ||= uniqueCandidate(
-      previous,
-      (candidate) => endpointKey(candidate.outbound),
-      endpointKey(outbound),
-      endpointCounts,
-    )
-    matched ||= uniqueCandidate(
-      previous,
-      (candidate) => candidate.tag,
-      String(outbound.tag || ''),
-      tagCounts,
-    )
-
-    if (matched) matched.used = true
+  return nextOutbounds.map((outbound, index) => {
     return {
-      id: matched?.id || createId(),
+      id: matches.get(index)?.id || createId(),
       tag: String(outbound.tag || ''),
       type: String(outbound.type || ''),
       ...(isSubscriptionEndpoint(outbound) ? { kind: 'endpoint' as const } : {}),

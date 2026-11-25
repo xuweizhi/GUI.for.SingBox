@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { ProcessMemory } from '@/bridge'
 import { ModeOptions } from '@/constant/kernel'
 import { useKernelApiStore, useAppSettingsStore } from '@/stores'
-import { formatBytes, handleChangeMode } from '@/utils'
+import { formatBytes, handleChangeMode, message } from '@/utils'
 
 import CurrentNodeCard from './CurrentNodeCard.vue'
 
@@ -175,7 +175,7 @@ onUnmounted(() => {
             :title="t(mode.label)"
             interactive
             :class="['home-mode-card', `home-mode-card--${String(mode.value).toLowerCase()}`]"
-            @click="handleChangeMode(mode.value as any)"
+            @click="handleChangeMode(mode.value as any).catch((error) => message.error(error))"
           >
             <div class="text-12 text-muted py-2">{{ t(mode.desc) }}</div>
           </Card>

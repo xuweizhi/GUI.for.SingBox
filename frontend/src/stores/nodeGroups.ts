@@ -56,7 +56,7 @@ export const validateNodeGroup = (
   }
   if (group.max_nodes < 0) throw new Error('node group max_nodes must not be negative')
   for (const field of ['include', 'exclude'] as const) {
-    if (!group[field]) continue
+    if (group.mode !== 'filter' || !group[field]) continue
     try {
       new RegExp(group[field], 'i')
     } catch {

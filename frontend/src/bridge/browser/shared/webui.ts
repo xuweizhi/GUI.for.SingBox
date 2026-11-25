@@ -51,10 +51,11 @@ const closeEventStreamIfUnused = () => {
 }
 
 const probeEventStreamAuth = async () => {
+  const revision = useWebuiAuthStore().sessionRevision
   const response = await fetch(`${API_BASE}/session`, { method: 'GET' })
 
   if (response.status === 401 && response.headers.get(WEBUI_AUTH_HEADER) === 'required') {
-    await useWebuiAuthStore().handleUnauthorized()
+    await useWebuiAuthStore().handleUnauthorized(revision)
     return false
   }
 
@@ -85,7 +86,7 @@ const handleEventStreamError = async () => {
 }
 
 const ensureEventStream = () => {
-  if (eventSource || typeof window === 'undefined') return
+  if (!listeners.size || eventSource || typeof window === 'undefined') return
 
   clearEventStreamReconnect()
   eventSource = new EventSource(`${API_BASE}/events`)
@@ -98,21 +99,20 @@ const ensureEventStream = () => {
   }
 }
 
-const handleUnauthorized = async (response: Response) => {
+const handleUnauthorized = async (response: Response, revision: number) => {
   if (response.status !== 401 || response.headers.get(WEBUI_AUTH_HEADER) !== 'required') return
 
-  await useWebuiAuthStore().handleUnauthorized()
+  await useWebuiAuthStore().handleUnauthorized(revision)
   throw 'auth.invalidToken'
 }
 
 export const onRuntimeEvent = (name: string, callback: EventCallback) => {
-  ensureEventStream()
-
   if (!listeners.has(name)) {
     listeners.set(name, new Set())
   }
 
   listeners.get(name)!.add(callback)
+  ensureEventStream()
 
   return () => {
     const callbackSet = listeners.get(name)
@@ -135,6 +135,7 @@ export const offAllRuntimeEvents = () => {
 }
 
 export const emitRuntimeEvent = (name: string, ...data: any[]) => {
+  const revision = useWebuiAuthStore().sessionRevision
   dispatchEvent(name, data)
 
   void fetch(`${API_BASE}/emit`, {
@@ -144,14 +145,14 @@ export const emitRuntimeEvent = (name: string, ...data: any[]) => {
     },
     body: JSON.stringify({ name, data }),
   })
-    .then(handleUnauthorized)
+    .then((response) => handleUnauthorized(response, revision))
     .catch((error) => {
       console.warn('Failed to emit runtime event:', error)
     })
 }
 
 export const invokeBridge = async <T = unknown>(method: string, args: unknown[] = []) => {
-  ensureEventStream()
+  const revision = useWebuiAuthStore().sessionRevision
 
   const response = await fetch(`${API_BASE}/rpc`, {
     method: 'POST',
@@ -161,7 +162,7 @@ export const invokeBridge = async <T = unknown>(method: string, args: unknown[] 
     body: JSON.stringify({ method, args }),
   })
 
-  await handleUnauthorized(response)
+  await handleUnauthorized(response, revision)
 
   if (!response.ok) {
     const message = await response.text()

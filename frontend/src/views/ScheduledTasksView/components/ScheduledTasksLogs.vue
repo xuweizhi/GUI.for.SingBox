@@ -17,7 +17,7 @@ const { t } = useI18n();
 const logsStore = useLogsStore();
 const pluginsStore = useScheduledTasksStore();
 
-const plugin = ref(pluginsStore.getScheduledTaskById(props.id)?.name);
+const plugin = ref(pluginsStore.getScheduledTaskById(props.id)?.name ?? "");
 const keywords = ref("");
 
 const columns: Column[] = [
@@ -30,6 +30,7 @@ const columns: Column[] = [
     title: "scheduledtasks.startTime",
     align: "center",
     key: "startTime",
+    sort: (a, b) => a.startTime - b.startTime,
     customRender: ({ value }) => formatDate(value, "YYYY-MM-DD HH:mm:ss"),
   },
   {
@@ -41,10 +42,10 @@ const columns: Column[] = [
   {
     title: "scheduledtasks.duration",
     align: "center",
-    key: "endTime",
-    sort: (a, b) => b.endTime - b.startTime - (a.endTime - a.startTime),
-    customRender: ({ value, record }) => {
-      return ((value - record.startTime) / 1000).toFixed(2) + "s";
+    key: "duration",
+    sort: (a, b) => a.endTime - a.startTime - (b.endTime - b.startTime),
+    customRender: ({ record }) => {
+      return ((record.endTime - record.startTime) / 1000).toFixed(2) + "s";
     },
   },
   {
@@ -101,7 +102,7 @@ const clearLogs = () => pluginsStore.clearScheduledTaskLogs();
 
     <Empty v-if="filteredLogs.length === 0" />
 
-    <Table v-else :columns="columns" :data-source="filteredLogs" sort="start" class="mt-8">
+    <Table v-else :columns="columns" :data-source="filteredLogs" sort="startTime" class="mt-8">
       <template #result="{ record }">
         <div class="flex flex-col gap-8 text-left">
           <div v-for="item in record.result" :key="item">

@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -597,6 +598,9 @@ func (a *App) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+var coreHTTPClient = &http.Client{Transport: &http.Transport{}, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
+var coreWSDialer = websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+
 func (a *App) handleCoreProxy(w http.ResponseWriter, r *http.Request) {
 	targetURL, err := coreProxyURL(r.URL, webUICoreEndpoint, "http")
 	if err != nil {
@@ -610,9 +614,10 @@ func (a *App) handleCoreProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header = r.Header.Clone()
+	req.Header.Del("Cookie")
 	req.Host = targetURL.Host
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := coreHTTPClient.Do(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -650,9 +655,9 @@ func (a *App) handleCoreWebSocketProxy(w http.ResponseWriter, r *http.Request) {
 		headers.Set("Authorization", auth)
 	}
 
-	backendConn, _, err := websocket.DefaultDialer.Dial(backendURL.String(), headers)
+	backendConn, _, err := coreWSDialer.DialContext(r.Context(), backendURL.String(), headers)
 	if err != nil {
-		_ = clientConn.WriteMessage(websocket.TextMessage, []byte(err.Error()))
+		_ = clientConn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Controller unavailable"), time.Now().Add(time.Second))
 		return
 	}
 	defer backendConn.Close()
@@ -669,6 +674,9 @@ func (a *headlessAuth) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !a.authorize(w, r) {
 			return
+		}
+		if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) == a.token {
+			r.Header.Del("Authorization")
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -781,6 +789,8 @@ func hasJSONContentType(r *http.Request) bool {
 	return err == nil && mediaType == "application/json"
 }
 
+var hashedAssetPath = regexp.MustCompile(`^assets/[^/]+-[A-Za-z0-9_-]{8,}\.[^.]+$`)
+
 func serveHeadlessAssets(webuiFS fs.FS, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -795,7 +805,10 @@ func serveHeadlessAssets(webuiFS fs.FS, w http.ResponseWriter, r *http.Request) 
 
 	if requestPath != "" {
 		if info, err := fs.Stat(webuiFS, requestPath); err == nil && !info.IsDir() {
-			w.Header().Set("Cache-Control", "max-age=31536000, immutable")
+			w.Header().Set("Cache-Control", "no-cache")
+			if hashedAssetPath.MatchString(requestPath) {
+				w.Header().Set("Cache-Control", "max-age=31536000, immutable")
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}

@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  settings: { app: { requestProxyMode: 'none', customProxy: '', userAgent: 'proxy-test', kernel: { autoClose: false }, nodePreferences: { recent: [] as string[] } } },
+  settings: {
+    app: {
+      requestProxyMode: 'none',
+      customProxy: '',
+      userAgent: 'proxy-test',
+      kernel: { autoClose: false },
+      nodePreferences: { recent: [] as string[] },
+    },
+  },
   getSystemProxy: vi.fn().mockResolvedValue('http://environment-proxy.test:8080'),
   getProxyEndpoint: vi.fn(),
   requests: vi.fn(),
@@ -9,7 +17,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/stores', () => ({
   useAppSettingsStore: () => mocks.settings,
-  useKernelApiStore: () => ({ getProxyEndpoint: mocks.getProxyEndpoint, getNodePreferenceKey: (tag: string) => 'id:' + tag }),
+  useKernelApiStore: () => ({
+    getProxyEndpoint: mocks.getProxyEndpoint,
+    getNodePreferenceKey: (tag: string) => 'id:' + tag,
+  }),
   useAppStore: vi.fn(),
   useEnvStore: vi.fn(),
   usePluginsStore: vi.fn(),
@@ -43,8 +54,8 @@ vi.mock('@/utils', async () => ({
 
 import { Requests } from '@/bridge/net'
 
+import { deleteConnection, getConnections, useProxy } from '@/api/kernel'
 import { RequestProxyMode } from '@/enums/app'
-import { useProxy } from '@/api/kernel'
 import { GetRequestProxy, handleUseProxy } from '@/utils/helper'
 
 describe('request proxy mode across the frontend bridge', () => {
@@ -105,6 +116,7 @@ describe('request proxy mode across the frontend bridge', () => {
     mocks.settings.app.requestProxyMode = RequestProxyMode.Custom
     mocks.settings.app.customProxy = ' proxy.test:8080 '
     expect(await GetRequestProxy(RequestProxyMode.Global)).toBe('http://proxy.test:8080')
+    expect(await GetRequestProxy(RequestProxyMode.Custom, '   ')).toBe('http://proxy.test:8080')
     expect(await GetRequestProxy(RequestProxyMode.Custom, 'socks5://other.test:1080')).toBe(
       'socks5://other.test:1080',
     )
@@ -125,6 +137,28 @@ describe('request proxy mode across the frontend bridge', () => {
 })
 
 describe('manual selection history shared by both home selectors', () => {
+  it('keeps existing connections when a selector update fails', async () => {
+    mocks.settings.app.kernel.autoClose = true
+    try {
+      vi.mocked(getConnections).mockResolvedValue({
+        connections: [{ id: 'active', chains: ['group'] }],
+      } as any)
+      vi.mocked(useProxy).mockRejectedValueOnce(new Error('offline'))
+      const switchNode = () =>
+        handleUseProxy(
+          { type: 'Selector', name: 'group', now: 'before' },
+          { name: 'after' },
+          { refresh: false },
+        )
+      await expect(switchNode()).rejects.toThrow('offline')
+      expect(deleteConnection).not.toHaveBeenCalled()
+      await switchNode()
+      expect(deleteConnection).toHaveBeenCalledWith('active')
+    } finally {
+      mocks.settings.app.kernel.autoClose = false
+    }
+  })
+
   it('only updates recents for actual successful switches, newest first', async () => {
     const group = { type: 'Selector', name: 'US West', now: 'a' }
     const prefs = mocks.settings.app.nodePreferences
@@ -132,7 +166,9 @@ describe('manual selection history shared by both home selectors', () => {
     await handleUseProxy(group, { name: 'a' })
     await handleUseProxy({ ...group, type: 'URLTest' }, { name: 'x' })
     vi.mocked(useProxy).mockRejectedValueOnce(new Error('offline'))
-    await expect(handleUseProxy(group, { name: 'x' }, { refresh: false })).rejects.toThrow('offline')
+    await expect(handleUseProxy(group, { name: 'x' }, { refresh: false })).rejects.toThrow(
+      'offline',
+    )
     expect(prefs.recent).toEqual(['id:c', 'id:b'])
     await handleUseProxy(group, { name: 'b' }, { refresh: false })
     expect(prefs.recent).toEqual(['id:b', 'id:c'])

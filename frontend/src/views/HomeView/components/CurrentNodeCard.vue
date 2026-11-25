@@ -92,6 +92,9 @@ watch(
         >
           {{ primary.delay }} ms
         </span>
+        <span v-else-if="controller.nodeErrors.value.has(primary.leafName)" class="text-12 text-danger">
+          {{ t('home.nodes.unavailable') }}
+        </span>
         <Icon v-if="kernelApiStore.running" icon="arrowRight" :size="14" color="var(--muted-color)" />
       </template>
 

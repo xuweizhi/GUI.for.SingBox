@@ -121,3 +121,16 @@ it('preserves selection on v-model feedback and cancels stale change on external
   expect(wrapper.emitted('change')).toEqual([['[4,3]']])
   wrapper.unmount()
 })
+
+it('initializes each diff pane with its own document', async () => {
+  vi.useFakeTimers()
+  const wrapper = mount(CodeEditor, {
+    props: { original: 'before', modelValue: 'after', mode: 'diff', lang: 'javascript' },
+    global: { stubs: { Button: true } },
+  })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(wrapper.findAll('.cm-editor').map((el) =>
+    EditorView.findFromDOM(el.element as HTMLElement)!.state.doc.toString(),
+  )).toEqual(['before', 'after'])
+  wrapper.unmount()
+})

@@ -22,11 +22,10 @@ var managedLogPattern = regexp.MustCompile(`^(app|core|taskworker|scheduledtasks
 var regexpCoreLogName = regexp.MustCompile(`^core-\d{4}-\d{2}-\d{2}\.log$`)
 
 type dailyLogWriter struct {
-	mu            sync.Mutex
-	category      string
-	current       string
-	file          *os.File
-	retentionDays int
+	mu       sync.Mutex
+	category string
+	current  string
+	file     *os.File
 }
 
 func normalizeLogRetentionDays(days int) int {
@@ -138,13 +137,6 @@ func beginningOfDay(t time.Time) time.Time {
 	return time.Date(year, month, day, 0, 0, 0, 0, t.Location())
 }
 
-func newDailyLogWriter(category string, retentionDays int) *dailyLogWriter {
-	return &dailyLogWriter{
-		category:      category,
-		retentionDays: normalizeLogRetentionDays(retentionDays),
-	}
-}
-
 func (w *dailyLogWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -179,7 +171,7 @@ func appendManagedLog(category string, line string) error {
 	if _, err := file.WriteString(line + "\n"); err != nil {
 		return err
 	}
-	return cleanupExpiredLogs(Config.Log.RetentionDays, time.Now())
+	return cleanupExpiredLogs(currentConfig().Log.RetentionDays, time.Now())
 }
 
 func (w *dailyLogWriter) rotate(path string, now time.Time) error {
@@ -202,7 +194,7 @@ func (w *dailyLogWriter) rotate(path string, now time.Time) error {
 	}
 	w.file = file
 	w.current = path
-	return cleanupExpiredLogs(w.retentionDays, now)
+	return cleanupExpiredLogs(currentConfig().Log.RetentionDays, now)
 }
 
 func secureManagedLogs() error {
@@ -232,8 +224,8 @@ func configureAppLogging() {
 	if err := secureManagedLogs(); err != nil {
 		log.Printf("Failed to secure existing logs: %v", err)
 	}
-	retentionDays := normalizeLogRetentionDays(Config.Log.RetentionDays)
-	writer := newDailyLogWriter("app", retentionDays)
+	retentionDays := normalizeLogRetentionDays(currentConfig().Log.RetentionDays)
+	writer := &dailyLogWriter{category: "app"}
 	log.SetOutput(io.MultiWriter(os.Stderr, writer))
 	log.Printf("Logging to %s with retentionDays=%s", logFilePath("app", time.Now()), strconv.Itoa(retentionDays))
 }

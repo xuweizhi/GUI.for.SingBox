@@ -26,7 +26,7 @@ const openAll = () => {
 }
 
 const minimizeAll = () => {
-  appStore.modalMinimized.slice().forEach((m) => m.minimizeFn())
+  Array.from(appStore.modalMinimizers).reverse().forEach((minimize) => minimize())
 }
 </script>
 
@@ -46,10 +46,10 @@ const minimizeAll = () => {
   <CommandView v-if="!loading" />
 
   <div
-    v-if="appStore.modalMinimized.length || kernelApiStore.needRestart || kernelApiStore.restarting"
+    v-if="appStore.modalMinimizers.size || appStore.modalMinimized.length || kernelApiStore.needRestart || kernelApiStore.restarting"
     class="fixed right-32 bottom-32 flex flex-col gap-8 z-9999"
   >
-    <Dropdown v-if="appStore.modalMinimized.length" placement="top">
+    <Dropdown v-if="appStore.modalMinimizers.size || appStore.modalMinimized.length" placement="top">
       <Button
         icon="adjust"
         :aria-label="$t('common.modalList')"

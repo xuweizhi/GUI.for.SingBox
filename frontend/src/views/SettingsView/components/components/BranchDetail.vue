@@ -22,6 +22,7 @@ const {
   restartable,
   updatable,
   rollbackable,
+  rollingBack,
   versionDetail,
   localVersion,
   localVersionLoading,
@@ -72,6 +73,8 @@ const handleClearCoreCache = async () => {
       v-if="rollbackable"
       v-tips="'settings.kernel.rollbackTip'"
       :aria-label="t('settings.kernel.rollbackTip')"
+      :loading="rollingBack"
+      :disabled="downloading"
       icon="rollback"
       type="text"
       size="small"

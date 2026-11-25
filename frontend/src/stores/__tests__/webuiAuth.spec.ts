@@ -149,6 +149,19 @@ describe('webui auth store', () => {
     expect(replace).toHaveBeenCalledWith('/login?redirect=%2Fprofiles')
   })
 
+  it('ignores concurrent and stale unauthorized responses across login', async () => {
+    const store = useWebuiAuthStore()
+    const revision = store.sessionRevision
+    await Promise.all([store.handleUnauthorized(revision), store.handleUnauthorized(revision)])
+    expect(replace).toHaveBeenCalledTimes(1)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 }))
+    const login = store.verifyToken('fresh')
+    await store.handleUnauthorized()
+    expect(await login).toBe(true)
+    await store.handleUnauthorized(revision)
+    expect(store.status).toBe('authenticated')
+  })
+
   it('clears token and jumps to login on logout', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 })
     vi.stubGlobal('fetch', fetchMock)

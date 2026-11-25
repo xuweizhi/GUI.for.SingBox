@@ -60,7 +60,11 @@ export const ExecBackground = async (
     outEvent,
     endEvent,
     mergeExecOptions(options),
-  )
+  ).catch((error) => {
+    if (outEvent) EventsOff(outEvent)
+    if (endEvent) EventsOff(endEvent)
+    throw error
+  })
   if (!flag) {
     outEvent && EventsOff(outEvent)
     endEvent && EventsOff(endEvent)

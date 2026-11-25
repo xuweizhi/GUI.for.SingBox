@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, unref } from 'vue'
+import { useTemplateRef, ref, unref } from 'vue'
 
+import { useOverlayFocus } from '@/hooks/useOverlayFocus'
 import useI18n from '@/lang'
 
 import { type Props as InputProps } from '@/components/Input/index.vue'
@@ -23,7 +24,7 @@ const value = ref(props.initialValue)
 const { t } = useI18n.global
 
 const handleSubmit = (e?: Event) => {
-  if (e?.type === 'keydown' && props.props.type === 'code') return
+  if (e instanceof KeyboardEvent && (e.isComposing || e.keyCode === 229 || props.props.type === 'code')) return
   emits('submit', unref(value))
   emits('finish')
 }
@@ -33,16 +34,8 @@ const handleCancel = () => {
   emits('finish')
 }
 
-const onKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') {
-    e.stopPropagation()
-    e.preventDefault()
-    handleCancel()
-  }
-}
-
-onMounted(() => window.addEventListener('keydown', onKeydown, true))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
+const dialog = useTemplateRef<HTMLElement>('dialog')
+useOverlayFocus(dialog, handleCancel)
 </script>
 
 <template>
@@ -50,6 +43,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
     <Transition name="dialog-pop" appear>
       <div
         role="dialog"
+        ref="dialog"
+        tabindex="-1"
         aria-modal="true"
         :aria-label="t(title)"
         class="gui-prompt flex flex-col rounded-12"

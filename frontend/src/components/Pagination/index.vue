@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 
 interface Props {
   total: number
@@ -11,6 +11,10 @@ const model = defineModel<number>('current', { default: 1 })
 const props = withDefaults(defineProps<Props>(), { size: 'default', pageSize: 9 })
 
 const pageNum = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
+watch([model, pageNum], ([current, last]) => {
+  const page = Math.min(last, Math.max(1, current))
+  if (current !== page) model.value = page
+}, { immediate: true })
 const isFirstPage = computed(() => model.value <= 1)
 const isLastPage = computed(() => model.value >= pageNum.value)
 

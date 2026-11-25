@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 interface Props {
   modelValue?: Recordable
@@ -27,22 +27,29 @@ const handleAdd = () => {
   emitUpdate()
 }
 
-let internalUpdate = false
+const duplicateKeys = computed(() => {
+  const seen = new Set<string>()
+  return entries.value.some(([key]) => {
+    if (seen.has(key)) return true
+    seen.add(key)
+    return false
+  })
+})
 
 watch(
   () => props.modelValue,
   (val) => {
-    if (!internalUpdate) {
+    if (duplicateKeys.value || JSON.stringify(Object.fromEntries(entries.value)) !== JSON.stringify(val)) {
       entries.value = Object.entries(val).map(([k, v]) => [k, String(v ?? '')])
     }
-    internalUpdate = false
   },
   { deep: true },
 )
 
 const emitUpdate = () => {
+  if (duplicateKeys.value) return
   const obj = Object.fromEntries(entries.value)
-  internalUpdate = true
+  if (JSON.stringify(obj) === JSON.stringify(props.modelValue)) return
   emit('update:modelValue', obj)
   emit('change', obj)
 }
@@ -78,6 +85,7 @@ const emitUpdate = () => {
         @click="handleDel(i)"
       />
     </div>
+    <span v-if="duplicateKeys" role="alert" class="text-danger">{{ $t('common.duplicateKey') }}</span>
     <Button type="normal" size="small" icon="add" :aria-label="$t('common.add')" @click="handleAdd">
       {{ $t('common.add') }}
     </Button>

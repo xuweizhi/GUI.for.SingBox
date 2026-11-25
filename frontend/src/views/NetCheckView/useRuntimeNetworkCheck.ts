@@ -78,6 +78,7 @@ const requestWithoutBody = async (
     Proxy: options.Proxy || '',
     Insecure: false,
     Redirect: true,
+    FreshConnection: true,
     Timeout: options.Timeout ?? 15,
     CancelId: '',
     FileField: 'file',
@@ -167,7 +168,7 @@ export const useRuntimeNetworkCheck = () => {
       }
 
       return {
-        mode: primary.kind,
+        mode: primary.error ? 'unavailable' : primary.kind,
         groupName: primary.groupName,
         leafName: primary.leafName,
         chain: primary.chain,

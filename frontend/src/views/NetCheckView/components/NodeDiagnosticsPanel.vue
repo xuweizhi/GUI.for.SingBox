@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watchEffect } from 'vue'
+import { computed, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { NodeController } from '@/views/HomeView/useNodeController'
@@ -15,16 +15,31 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const nodeFilter = ref('')
+const operationError = ref('')
+watch(() => props.controller.selectedGroupName.value, () => {
+  nodeFilter.value = ''
+  operationError.value = ''
+})
 
 const filteredNodes = computed(() => {
   const q = nodeFilter.value.trim().toLowerCase()
-  if (!q) return props.controller.nodes.value
+  if (!q || props.controller.nodes.value.length <= 6) return props.controller.nodes.value
   return props.controller.nodes.value.filter(
     (node) =>
       node.name.toLowerCase().includes(q) ||
       (node.proxy?.type || '').toLowerCase().includes(q),
   )
 })
+
+const switchNode = async (name: string) => {
+  const result = await props.controller.switchNode(name)
+  operationError.value = result.ok ? '' : result.error
+}
+
+const testNode = async (name: string) => {
+  const result = await props.controller.testNode(name)
+  operationError.value = result.ok ? '' : result.error
+}
 
 const groupOptions = computed(() =>
   props.controller.groups.value.map((group) => ({ label: group.name, value: group.name })),
@@ -149,6 +164,7 @@ watchEffect(() => {
         />
       </div>
 
+      <div v-if="operationError" class="mb-8 text-12 text-danger" role="alert">{{ t(operationError) }}</div>
       <Empty v-if="filteredNodes.length === 0" />
       <div v-else class="node-list flex flex-col gap-8">
         <div
@@ -160,9 +176,9 @@ watchEffect(() => {
           role="button"
           tabindex="0"
           :aria-pressed="node.name === controller.selectedGroup.value?.now"
-          @click="controller.switchNode(node.name)"
-          @keydown.enter.prevent="controller.switchNode(node.name)"
-          @keydown.space.prevent="controller.switchNode(node.name)"
+          @click="switchNode(node.name)"
+          @keydown.enter.self.prevent="switchNode(node.name)"
+          @keydown.space.self.prevent="switchNode(node.name)"
         >
           <div class="flex items-center gap-8">
             <div class="min-w-0 flex-1">
@@ -178,7 +194,7 @@ watchEffect(() => {
               :data-delay="node.name"
               type="button"
               class="delay-button"
-              @click.stop="controller.testNode(node.name)"
+              @click.stop="testNode(node.name)"
             >
               <span v-if="controller.testingNodes.value.has(node.name)" class="text-muted">
                 ...

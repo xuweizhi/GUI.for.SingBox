@@ -61,14 +61,14 @@ import {
   sleep,
   replaceFileWithRollback,
 } from '@/utils'
+import { explainCoreConfigCheckError } from '@/utils/coreConfigValidation'
+import { profileUsesSubscription, getNodeGroupDependencies } from '@/utils/nodeGroup'
 import {
   legacyNodeKeys,
   profileNodeKey,
   readNodeCatalog,
   type NodeCatalog,
 } from '@/utils/nodePreferences'
-import { explainCoreConfigCheckError } from '@/utils/coreConfigValidation'
-import { profileUsesSubscription, getNodeGroupDependencies } from '@/utils/nodeGroup'
 
 import type { CoreApiConfig, CoreApiProxy } from '@/types/kernel'
 
@@ -121,19 +121,21 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   )
   const getNodePreferenceKey = (tag: string) =>
     nodeKeys.value.get(tag) ||
-    profileNodeKey(nodeCatalog.value?.profileId ?? profilesStore.currentProfile?.id ?? '', 'tag', tag)
+    profileNodeKey(
+      nodeCatalog.value?.profileId ?? profilesStore.currentProfile?.id ?? '',
+      'tag',
+      tag,
+    )
 
   const refreshConfig = async () => {
+    const revision = refreshRevision
     const _config = await getConfigs()
-
-    config.value = {
-      ..._config,
-      tun: config.value.tun,
-    }
+    if (revision !== refreshRevision) return
 
     if (!runtimeProfile) {
       const txt = await ReadFile(CoreConfigFilePath)
       const catalogText = await ReadFile(catalogPath).catch(() => '')
+      if (revision !== refreshRevision) return
       nodeCatalog.value = readNodeCatalog(txt, catalogText)
       runtimeProfile = restoreProfile(JSON.parse(txt))
       const profile = profilesStore.currentProfile
@@ -159,6 +161,8 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       }
     }
 
+    if (revision !== refreshRevision) return
+    config.value = { ..._config, tun: config.value.tun }
     const runtimeInboundState = resolveRuntimeInboundState(runtimeProfile.inbounds)
     config.value['mixed-port'] = runtimeInboundState.mixedPort
     config.value['port'] = runtimeInboundState.httpPort
@@ -232,12 +236,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       })
     }
 
-    const patchInboundTun = (options: {
-      enable: boolean
-      stack: string
-      device: string
-      interface_name: string
-    }) => {
+    const patchInboundTun = (options: { enable: boolean; stack: string; device: string }) => {
       if (!runtimeProfile) return
       const inbound = runtimeProfile.inbounds.find((v) => v.type === Inbound.Tun)
       if (!inbound) throw 'home.overview.needTun'
@@ -245,10 +244,6 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       inbound.enable = options.enable
       inbound.tun!.stack = (options.stack || TunStack.Mixed) as App.TunStack
       inbound.tun!.interface_name = options.device || ''
-      if (options.interface_name) {
-        runtimeProfile.route.default_interface = options.interface_name
-      }
-      runtimeProfile.route.auto_detect_interface = !options.interface_name
     }
 
     const fieldHandlerMap: Recordable<() => void> = {
@@ -260,17 +255,29 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
       tun: () => patchInboundTun(value),
       'tun-stack': () => patchInboundTun(value),
       'tun-device': () => patchInboundTun(value),
-      'interface-name': () => patchInboundTun(value),
+      'interface-name': () => {
+        if (!runtimeProfile) return
+        runtimeProfile.route.default_interface = value.interface_name || ''
+        runtimeProfile.route.auto_detect_interface = !value.interface_name
+      },
     }
 
-    fieldHandlerMap[field]?.()
-
-    await restartCore(undefined, true)
+    assertCoreIdle()
+    const previous = runtimeProfile
+    if (runtimeProfile) runtimeProfile = deepClone(runtimeProfile)
+    try {
+      fieldHandlerMap[field]?.()
+      await restartCore(undefined, true)
+    } catch (error) {
+      runtimeProfile = previous
+      throw error
+    }
   }
 
   const refreshProviderProxies = async () => {
+    const revision = refreshRevision
     const { proxies: b } = await getProxies()
-    proxies.value = b
+    if (revision === refreshRevision) proxies.value = b
   }
 
   /* Bridge API */
@@ -282,14 +289,17 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
   const needRestart = ref(false)
   const coreStateLoading = ref(true)
   let processGeneration = 0
+  let sessionRevision = 0
+  let refreshRevision = 0
   type StartedCore = { pid: number; generation: number; exited: () => boolean }
   let stopTransition: { generation: number; promise: Promise<void> } | undefined
 
   onLogs((data) => logsStore.recordKernelApiLog(data))
 
   const refreshKernelLogs = async () => {
+    const revision = sessionRevision
     const logs = await ReadCoreLog().catch(() => '')
-    logsStore.hydrateKernelLogs(logs)
+    if (revision === sessionRevision) logsStore.hydrateKernelLogs(logs)
   }
 
   const findOwnedCore = () => {
@@ -297,31 +307,65 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     return FindOwnedCore(branch, getKernelRuntimeArgs(branch === Branch.Alpha))
   }
 
-  const attachCore = async (pid: number) => {
-    corePid.value = pid
-    running.value = true
+  const detachCore = () => {
+    ++processGeneration
+    ++sessionRevision
+    ++refreshRevision
     needRestart.value = false
-    initWebsocket()
-    await Promise.all([refreshConfig(), refreshProviderProxies()])
+    destroyWebsocket()
+    running.value = false
+    corePid.value = -1
+    coreStateLoading.value = false
+    runtimeProfile = undefined
+    nodeCatalog.value = undefined
+    proxies.value = {}
+    resetConfig()
+  }
+  const attachCore = async (pid: number) => {
+    const generation = processGeneration
+    try {
+      await Promise.all([refreshConfig(), refreshProviderProxies()])
+      if (generation !== processGeneration) return
+      initWebsocket()
+      corePid.value = pid
+      running.value = true
+      needRestart.value = false
+    } catch (error) {
+      if (generation === processGeneration) detachCore()
+      throw error
+    }
   }
 
   const initCoreState = async () => {
-    await refreshKernelLogs()
-    const pid = await findOwnedCore()
-    coreStateLoading.value = false
-    if (pid > 0) await attachCore(pid)
-    else if (appSettingsStore.app.autoStartKernel) await startCore()
+    const generation = processGeneration
+    const session = sessionRevision
+    coreStateLoading.value = true
+    try {
+      await refreshKernelLogs()
+      if (generation !== processGeneration) return
+      const pid = await findOwnedCore()
+      if (generation !== processGeneration) return
+      if (pid > 0) await attachCore(pid)
+      else if (appSettingsStore.app.autoStartKernel) await startCore()
+    } finally {
+      if (session === sessionRevision) coreStateLoading.value = false
+    }
   }
 
-  const runCoreProcess = async (isAlpha: boolean, onSpawn: (process: StartedCore) => void) => {
+  const runCoreProcess = async (
+    isAlpha: boolean,
+    generation: number,
+    onSpawn: (process: StartedCore) => void,
+  ) => {
     let stopped = false
-    const generation = ++processGeneration
+    if (generation !== processGeneration) throw new Error('Core startup cancelled')
     const pid = await ExecBackground(
       CoreWorkingDirectory + '/' + getKernelFileName(isAlpha),
       getKernelRuntimeArgs(isAlpha),
       undefined,
       async (end) => {
         stopped = true
+        if (generation !== processGeneration) return
         const logs = await ReadCoreLog().catch((err) => String(err))
         if (generation !== processGeneration) return
         logsStore.hydrateKernelLogs(logs)
@@ -374,6 +418,8 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     if (stopTransition?.generation === generation) return stopTransition.promise
     const promise = Promise.resolve().then(async () => {
       if (generation !== processGeneration) return
+      ++refreshRevision
+      proxies.value = {}
       corePid.value = -1
       running.value = false
       needRestart.value = false
@@ -385,15 +431,17 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     return promise
   }
 
-  const startCore = async (_profile?: App.Profile) => {
+  const doStartCore = async (_profile?: App.Profile) => {
     if (running.value) throw 'The core is already running'
     if (starting.value) throw 'The core is already starting'
     starting.value = true
-    ++processGeneration
+    const generation = ++processGeneration
+    ++refreshRevision
     let startedProcess: StartedCore | undefined
     try {
       if (await probeApiAvailability().catch(() => false)) {
         const pid = await findOwnedCore()
+        if (generation !== processGeneration) throw new Error('Core startup cancelled')
         if (pid <= 0) throw new Error('The controller belongs to another process')
         await attachCore(pid)
         return
@@ -439,6 +487,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
         ).catch((error) => {
           throw explainCoreConfigCheckError(error, stagedConfig)
         })
+        if (generation !== processGeneration) throw new Error('Core startup cancelled')
         await replaceFileWithRollback(
           {
             activePath: CoreConfigFilePath,
@@ -451,13 +500,14 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
         await RemoveFile(CoreConfigStagedFilePath).catch(() => undefined)
         throw error
       }
+      if (generation !== processGeneration) throw new Error('Core startup cancelled')
       nodeCatalog.value = catalog
       if (catalog) {
         await WriteFile(catalogPath, JSON.stringify(catalog)).catch((error) =>
           logsStore.recordKernelLog(String(error)),
         )
       }
-      startedProcess = await runCoreProcess(isAlpha, (process) => {
+      startedProcess = await runCoreProcess(isAlpha, generation, (process) => {
         startedProcess = process
       })
       await onCoreStarted(startedProcess)
@@ -482,7 +532,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     }
   }
 
-  const stopCore = async () => {
+  const doStopCore = async () => {
     if (!running.value) throw 'The core is not running'
 
     stopping.value = true
@@ -497,14 +547,29 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     }
   }
 
+  const assertCoreIdle = () => {
+    if (starting.value || stopping.value || restarting.value)
+      throw new Error('A core operation is already in progress')
+  }
+  const startCore = async (profile?: App.Profile) => {
+    assertCoreIdle()
+    await doStartCore(profile)
+  }
+  const stopCore = async () => {
+    assertCoreIdle()
+    await doStopCore()
+  }
   const restartCore = async (cleanupTask?: () => Promise<any>, keepRuntimeProfile = false) => {
+    assertCoreIdle()
     restarting.value = true
+    const session = sessionRevision
     try {
-      await stopCore()
+      await doStopCore()
+      if (session !== sessionRevision) return
       await cleanupTask?.()
-      await startCore(keepRuntimeProfile ? runtimeProfile : undefined)
+      if (session !== sessionRevision) return
+      await doStartCore(keepRuntimeProfile ? runtimeProfile : undefined)
     } finally {
-      needRestart.value = false
       restarting.value = false
     }
   }
@@ -608,7 +673,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
 
   watch(needRestart, (v) => {
     if (v && appSettingsStore.app.autoRestartKernel) {
-      restartCore()
+      void restartCore().catch((error) => logsStore.recordKernelLog(String(error)))
     }
   })
 
@@ -617,6 +682,7 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
     stopCore,
     restartCore,
     initCoreState,
+    detachCore,
     pid: corePid,
     running,
     starting,

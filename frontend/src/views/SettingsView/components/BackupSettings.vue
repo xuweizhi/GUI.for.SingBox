@@ -21,6 +21,7 @@ const auth = useWebuiAuthStore()
 const busyAction = ref<BusyAction>('')
 const busy = computed(() => busyAction.value !== '')
 const auto = ref(false)
+const pendingSnapshot = ref('')
 const history = ref<string[]>([])
 const picker = ref<HTMLInputElement>()
 const selected = shallowRef<Blob>()
@@ -59,10 +60,10 @@ const refreshHistory = async () => {
 
 onActivated(() => void run('history', refreshHistory))
 
-const toggle = () =>
+const toggle = (enabled: boolean) =>
   run('history', async () => {
-    await request('history', { method: 'PUT', body: JSON.stringify({ enabled: !auto.value }) })
-    await refreshHistory()
+    await request('history', { method: 'PUT', body: JSON.stringify({ enabled }) })
+    auto.value = enabled
   })
 
 const exportZip = () =>
@@ -93,6 +94,7 @@ const chooseFile = (event: Event) => {
 
 const chooseSnapshot = (name: string) =>
   run('snapshot', async () => {
+    pendingSnapshot.value = name
     const response = await request('snapshot?name=' + encodeURIComponent(name))
     await inspect(await response.blob(), name)
   })
@@ -150,7 +152,7 @@ const webdav = (upload: boolean) =>
       </div>
     </Card>
     <Card :title="t('backup.history')">
-      <Switch :model-value="auto" :disabled="busy" label="backup.auto" @change="toggle" />
+      <Switch :model-value="auto" :disabled="busy" label="backup.auto" @update:model-value="toggle" />
       <div v-if="history.length" class="flex flex-col items-start gap-4 mt-12">
         <div class="text-12 text-muted">{{ t('backup.clickSnapshotHint') }}</div>
         <Button
@@ -158,8 +160,8 @@ const webdav = (upload: boolean) =>
           :key="name"
           type="link"
           size="small"
-          :loading="busyAction === 'snapshot'"
-          :disabled="busy && busyAction !== 'snapshot'"
+          :loading="busyAction === 'snapshot' && pendingSnapshot === name"
+          :disabled="busy"
           @click="chooseSnapshot(name)"
         >
           {{ name }}

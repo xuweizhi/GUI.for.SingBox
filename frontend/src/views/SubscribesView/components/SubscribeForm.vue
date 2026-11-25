@@ -33,15 +33,7 @@ const loading = ref(false)
 const proxyTesting = ref(false)
 const sub = ref<App.Subscription>(subscribeStore.getSubscribeTemplate())
 
-const dnsAddresses = computed({
-  get: () => (sub.value.outboundDns || []).join('\n'),
-  set: (value: string) => {
-    sub.value.outboundDns = value
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-  },
-})
+const dnsAddresses = ref('')
 const importedDnsSummary = computed(() =>
   (sub.value.importedDns?.servers || [])
     .map((server) => {
@@ -71,7 +63,8 @@ const handleSave = async () => {
   loading.value = true
 
   try {
-    parseSubscriptionDnsAddresses(sub.value.outboundDns || [])
+    sub.value.outboundDns = dnsAddresses.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    if (sub.value.preferOutboundDns) parseSubscriptionDnsAddresses(sub.value.outboundDns)
     if (props.id) {
       await subscribeStore.editSubscribe(props.id, sub.value)
     } else {
@@ -104,7 +97,7 @@ const handleTestProxy = async () => {
 
   proxyTesting.value = true
   try {
-    await HttpGet(DefaultTestURL, {}, { Proxy: proxy, Timeout: DefaultTestTimeout })
+    await HttpGet(DefaultTestURL, {}, { Proxy: proxy, Timeout: Math.max(1, Math.ceil(DefaultTestTimeout / 1000)) })
     message.success('settings.requestProxy.testSuccess')
   } catch (error) {
     message.error(error)
@@ -119,6 +112,8 @@ if (props.id) {
     sub.value = deepClone(s)
   }
 }
+
+dnsAddresses.value = (sub.value.outboundDns || []).join('\n')
 
 const modalSlots = {
   cancel: () =>

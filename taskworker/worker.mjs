@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import * as YAML from './yaml.mjs'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import readline from 'node:readline'
@@ -152,40 +153,20 @@ const ensureParentDir = async (target) => {
   await mkdir(path.dirname(target), { recursive: true })
 }
 
-const toHeaderObject = (headers) => {
-  const result = {}
-  headers.forEach((value, key) => {
-    result[key] = value
-  })
-  return result
-}
-
-const normalizeResponseBody = async (response, autoTransformBody = true) => {
-  const text = await response.text()
-  if (!autoTransformBody) return text
-
-  const contentType = response.headers.get('content-type') || ''
-  if (!contentType.includes('application/json')) {
-    return text
-  }
-
-  try {
-    return JSON.parse(text)
-  } catch {
-    return text
-  }
-}
+let networkId = 0
+const pendingNetwork = new Map()
+const requestNetwork = (operation, params, options = {}) => new Promise((resolve, reject) => {
+  const id = String(++networkId)
+  pendingNetwork.set(id, { resolve, reject })
+  process.stdout.write(JSON.stringify({
+    type: 'network', method: operation, id,
+    params: { ...params, options: { Redirect: true, ...options }, useGlobalProxy: options.Proxy == null },
+  }) + '\n')
+})
 
 const request = async (options = {}) => {
   const method = (options.method || 'GET').toUpperCase()
   const headers = { ...(options.headers || {}) }
-  const timeout = Number(options.options?.Timeout || 15) * 1000
-  const init = {
-    method,
-    headers,
-    signal: AbortSignal.timeout(timeout),
-  }
-
   let url = options.url || ''
   let body = options.body ?? ''
   const contentType = String(headers['Content-Type'] || headers['content-type'] || '')
@@ -208,15 +189,20 @@ const request = async (options = {}) => {
     ) {
       body = new URLSearchParams(body).toString()
     }
-    init.body = typeof body === 'string' ? body : String(body)
+    body = typeof body === 'string' ? body : JSON.stringify(body)
   }
 
-  const response = await fetch(url, init)
-  return {
-    status: response.status,
-    headers: toHeaderObject(response.headers),
-    body: await normalizeResponseBody(response, options.autoTransformBody !== false),
+  const response = await requestNetwork('request', {
+    method, url, headers, body: ['GET', 'HEAD', 'DELETE'].includes(method) ? '' : body,
+  }, options.options)
+  const responseHeaders = Object.fromEntries(Object.entries(response.headers || {}).map(
+    ([key, values]) => [key.toLowerCase(), values.length === 1 ? values[0] : values],
+  ))
+  let responseBody = response.body
+  if (options.autoTransformBody !== false && String(responseHeaders['content-type']).includes('application/json')) {
+    try { responseBody = JSON.parse(responseBody) } catch { /* Preserve non-JSON response text. */ }
   }
+  return { status: response.status, headers: responseHeaders, body: responseBody }
 }
 
 const resolveExecPath = (command = '') => {
@@ -273,11 +259,8 @@ const normalizeSubscriptionProxiesNative = async (payload = {}) => {
 
 const plugins = new Proxy(
   {
-    YAML: {
-      parse: (value) => JSON.parse(String(value || 'null')),
-      stringify: (value) => JSON.stringify(value, null, 2),
-    },
-    APP_TITLE: state.env.appName || 'GUI.for.SingBox',
+    YAML,
+    get APP_TITLE() {return state.env.appName || 'GUI.for.SingBox'},
     message: {
       success: (...args) => console.info(...args),
       info: (...args) => console.info(...args),
@@ -367,22 +350,14 @@ const plugins = new Proxy(
       request({ method: 'POST', url, headers, body, options, autoTransformBody: true }),
     HttpPatch: async (url, headers = {}, body = {}, options = {}) =>
       request({ method: 'PATCH', url, headers, body, options, autoTransformBody: true }),
-    Download: async (method, url, target, headers = {}, _event = '', options = {}) => {
-      const timeout = Number(options.Timeout || 20 * 60) * 1000
-      const response = await fetch(url, {
-        method: (method || 'GET').toUpperCase(),
-        headers,
-        signal: AbortSignal.timeout(timeout),
-      })
-      const body = Buffer.from(await response.arrayBuffer())
-      const resolvedTarget = resolvePath(target)
-      await ensureParentDir(resolvedTarget)
-      await writeFile(resolvedTarget, body)
-      return {
-        status: response.status,
-        headers: toHeaderObject(response.headers),
-        body: 'Success',
-      }
+    Download: async (...args) => {
+      // Accept the public frontend signature and the legacy worker signature.
+      const legacy = ['GET','POST','PUT','PATCH','DELETE','HEAD'].includes(String(args[0]).toUpperCase())
+      const [url, target, headers = {}, _progress, options = {}] = legacy ? args.slice(1) : args
+      const response = await requestNetwork('download', {
+        method: legacy ? args[0] : (options.Method || 'GET'), url, path: target, headers,
+      }, { Timeout: 1200, ...options })
+      return { status: response.status, headers: response.headers, body: response.body }
     },
   },
   {
@@ -411,7 +386,9 @@ const runScriptTask = async (task) => {
   try {
     const result = await new AsyncFunction(task.script || '')()
     if (Array.isArray(result)) {
-      return result
+      return result.map(item => item && typeof item.ok === 'boolean' && 'result' in item
+        ? {ok: item.ok, result: normalizeScriptResult(item.result)}
+        : {ok: true, result: normalizeScriptResult(item)})
     }
     return [{ ok: true, result: normalizeScriptResult(result) }]
   } catch (error) {
@@ -615,6 +592,14 @@ rl.on('line', (line) => {
     return
   }
 
+  if (message.type === 'network-result') {
+    const pending = pendingNetwork.get(message.id)
+    if (!pending) return
+    pendingNetwork.delete(message.id)
+    if (message.error) pending.reject(new Error(message.error))
+    else pending.resolve(message.result)
+    return
+  }
   if (message.type !== 'request') return
 
   const execute = async () => {

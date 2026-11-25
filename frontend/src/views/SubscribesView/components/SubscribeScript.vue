@@ -27,8 +27,7 @@ const handleSave = async () => {
   if (!subscribe.value) return
   loading.value = true
   try {
-    subscribe.value.script = code.value
-    await subscribeStore.editSubscribe(props.id, subscribe.value)
+    await subscribeStore.editSubscribe(props.id, { ...subscribe.value, script: code.value })
     handleSubmit()
   } catch (error: any) {
     message.error(error)

@@ -141,3 +141,17 @@ it.each(['{}', '{"rules":{}}', '{"version":4,"rules":[null]}', 'broken'])(
     expect(mocks.emit).not.toHaveBeenCalled()
   },
 )
+
+it('serializes additions at the configured path without downgrading the ruleset', async () => {
+  const store = useRulesetsStore()
+  store.rulesets.push({ ...makeRule(), id: 'direct' })
+  await Promise.all([
+    store.appendRules('direct', [{ domain: 'first.example' }]),
+    store.appendRules('direct', [{ domain: 'second.example' }]),
+  ])
+  expect(JSON.parse(mocks.files.get(path)!)).toEqual({
+    version: 4, rules: [{ domain: ['old.example', 'first.example', 'second.example'] }],
+  })
+  expect(store.rulesets[0]?.count).toBe(3)
+  expect(mocks.files.has('data/rulesets/direct.json')).toBe(false)
+})

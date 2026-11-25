@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isValidSubJson } from '@/utils/is'
+import { isValidIPv6, isValidSubJson, isValidSubYAML } from '@/utils/is'
 import {
   extractSubscriptionConfig,
   isSubscriptionEndpoint,
@@ -29,6 +29,13 @@ const wireguard = {
 }
 
 describe('subscription configuration import and editing', () => {
+  it('recognizes native JSON arrays, YAML endpoints and bare IPv6 addresses', () => {
+    expect(isValidSubJson(JSON.stringify([wireguard]))).toBe(true)
+    expect(isValidSubYAML('endpoints: []')).toBe(true)
+    for (const ip of ['2001:db8::1', '::', '::ffff:192.0.2.1']) expect(isValidIPv6(ip)).toBe(true)
+    for (const value of ['foo::bar', '[::1]', '::/64', '1::2::3']) expect(isValidIPv6(value)).toBe(false)
+  })
+
   it('accepts endpoints-only subscriptions without dropping unknown protocol fields', async () => {
     const source = {
       endpoints: [wireguard, { type: 'future-vpn', tag: 'Future', nested: { field: [1, 2] } }],
@@ -186,6 +193,9 @@ describe('subscription DNS addresses', () => {
         'tcp://dns.example:5353',
         'https://dns.example/custom',
         'local',
+        'system',
+        'dhcp://eth0',
+        '8.8.8.8#DIRECT',
         '1.1.1.1',
       ]),
     ).toEqual([
@@ -194,6 +204,9 @@ describe('subscription DNS addresses', () => {
       { type: 'tcp', tag: 'dns-3', server: 'dns.example', server_port: 5353 },
       { type: 'https', tag: 'dns-4', server: 'dns.example', path: '/custom' },
       { type: 'local', tag: 'dns-5' },
+      { type: 'local', tag: 'dns-6' },
+      { type: 'dhcp', tag: 'dns-7', interface: 'eth0' },
+      { type: 'udp', tag: 'dns-8', server: '8.8.8.8' },
     ])
   })
   it.each([

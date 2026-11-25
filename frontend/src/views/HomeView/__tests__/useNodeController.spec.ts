@@ -443,6 +443,21 @@ describe('useNodeController', () => {
     scope.stop()
   })
 
+  it('publishes progress while a group test is still running', async () => {
+    const finish = Promise.withResolvers<void>()
+    mocks.submit.mockReturnValueOnce({ done: finish.promise.then(() => summary({ total: 2, completed: 2, success: 2 })), cancel: vi.fn() })
+    const scope = effectScope()
+    const controller = scope.run(useNodeController)!
+    controller.selectGroup('Proxy')
+    const run = controller.testGroup()
+    mocks.submit.mock.calls[0]![0].onResult({ name: 'HK 01', ok: true, delay: 12, attempts: 1 })
+    expect(controller.batch.value).toMatchObject({ running: true, completed: 1, total: 2, success: 1 })
+    finish.resolve()
+    await run
+    expect(controller.testingNodes.value.size).toBe(0)
+    scope.stop()
+  })
+
   it('delegates group cancellation and does not count cancellation as failure', async () => {
     let resolve!: (value: any) => void
     const cancel = vi.fn()

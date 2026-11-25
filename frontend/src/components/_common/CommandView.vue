@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { hasActiveOverlay } from '@/hooks/useOverlayFocus'
 import { useAppSettingsStore, useAppStore, usePluginsStore } from '@/stores'
 import { debounce, message } from '@/utils'
 import { getCommands } from '@/utils/command'
@@ -62,6 +63,7 @@ const handleExecCommand = async (index: number) => {
 }
 
 const onKeydown = async (ev: KeyboardEvent) => {
+  if (hasActiveOverlay() || ev.isComposing) return
   const isCommandShortcut =
     ((ev.ctrlKey || ev.metaKey) && ev.code === 'KeyK') ||
     ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && ev.code === 'KeyP')
@@ -76,18 +78,15 @@ const onKeydown = async (ev: KeyboardEvent) => {
     return
   }
 
-  if (!showCommandPanel.value || loading.value) return
+  if (!showCommandPanel.value) return
 
-  if (ev.code === 'Escape') {
+  if (ev.key === 'Escape' || ev.code === 'Escape') {
     ev.preventDefault()
-    ev.stopPropagation()
-    if (userInput.value) {
-      userInput.value = ''
-      return
-    }
+    ev.stopImmediatePropagation()
     closePanel()
     return
   }
+  if (loading.value) return
   if (ev.code === 'ArrowUp') {
     ev.preventDefault()
     if (!hitCommand.value.length) return
@@ -120,16 +119,21 @@ const updateCommands = debounce(() => {
   commands.value = getCommands()
 }, 200)
 
-watch([() => appSettings.app.lang, pluginsStore.plugins, () => appStore.locales], updateCommands)
+watch(
+  [() => appSettings.app.lang, () => pluginsStore.plugins, () => appStore.locales],
+  updateCommands,
+  { deep: true },
+)
 
 const onOpenCommandPalette = () => openPanel()
 
 onMounted(() => {
-  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('keydown', onKeydown, true)
   window.addEventListener('open-command-palette', onOpenCommandPalette)
 })
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
+  updateCommands.cancel()
+  window.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('open-command-palette', onOpenCommandPalette)
 })
 </script>

@@ -65,6 +65,11 @@ const stepItems = [
 
 const profile = ref<App.Profile>(profilesStore.getProfileTemplate())
 
+const primaryProxy = computed({
+  get: () => getPrimaryProxyOutbound(profile.value)?.id || '',
+  set: (id) => { profile.value.primary_proxy_outbound = id },
+})
+
 const inboundOptions = computed(() =>
   profile.value.inbounds.map((v) => ({ label: v.tag, value: v.id })),
 )
@@ -123,7 +128,7 @@ const handleSave = async () => {
     return
   }
   const primaryProxy = getPrimaryProxyOutbound(profile.value)
-  if (primaryProxy) profile.value.primary_proxy_outbound = primaryProxy.id
+  profile.value.primary_proxy_outbound = primaryProxy?.id
 
   loading.value = true
   try {
@@ -270,7 +275,7 @@ defineExpose({ modalSlots })
         ref="routeRef"
         v-model="profile.route"
         v-model:outbounds="profile.outbounds"
-        v-model:primary-proxy-outbound="profile.primary_proxy_outbound"
+        v-model:primary-proxy-outbound="primaryProxy"
         :inbound-options="inboundOptions"
         :outbound-options="outboundOptions"
         :server-options="serverOptions"

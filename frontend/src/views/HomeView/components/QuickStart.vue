@@ -21,6 +21,7 @@ const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
 
 const handleSave = async () => {
+  if (loading.value) return
   if (!name.value) {
     name.value = sampleID()
   }
@@ -30,33 +31,26 @@ const handleSave = async () => {
 
   loading.value = true
 
+  let added = false
   try {
-    await subscribeStore.addSubscribe(sub)
+    await subscribeStore.addSubscribe(sub, false)
+    added = true
     await subscribeStore.updateSubscribe(sub.id)
-  } catch (error: any) {
-    loading.value = false
-    console.log(error)
+    const profile = profilesStore.getProfileTemplate(name.value)
+    for (const outbound of profile.outbounds.slice(0, 2)) {
+      outbound.outbounds.push({ id: sub.id, tag: sub.id, type: 'Subscription' })
+    }
+    await profilesStore.addProfile(profile)
+    added = false
+    appSettingsStore.app.kernel.profile = profile.id
+    message.success('home.initSuccessful')
+    await handleSubmit()
+  } catch (error) {
     message.error(error)
-    subscribeStore.deleteSubscribe(sub.id)
-    return
+    if (added) await subscribeStore.deleteSubscribe(sub.id).catch((err) => message.error(err))
+  } finally {
+    loading.value = false
   }
-
-  const profile = profilesStore.getProfileTemplate(name.value)
-
-  if (profile.outbounds[0] && profile.outbounds[1]) {
-    profile.outbounds[0].outbounds.push({ id: sub.id, tag: sub.id, type: 'Subscription' })
-    profile.outbounds[1].outbounds.push({ id: sub.id, tag: sub.id, type: 'Subscription' })
-  }
-
-  await profilesStore.addProfile(profile)
-
-  appSettingsStore.app.kernel.profile = profile.id
-
-  message.success('home.initSuccessful')
-
-  loading.value = false
-
-  handleSubmit()
 }
 
 const modalSlots = {

@@ -109,7 +109,7 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 		if err := os.MkdirAll(filepath.Dir(logPath), os.ModePerm); err != nil {
 			return FlagResult{false, err.Error()}
 		}
-		if err := cleanupExpiredLogs(Config.Log.RetentionDays, time.Now()); err != nil {
+		if err := cleanupExpiredLogs(currentConfig().Log.RetentionDays, time.Now()); err != nil {
 			return FlagResult{false, err.Error()}
 		}
 
@@ -138,6 +138,7 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 		return FlagResult{false, err.Error()}
 	}
 
+	var owned *os.Process
 	pid := strconv.Itoa(cmd.Process.Pid)
 	if lockedCoreStart {
 		handle, err := os.FindProcess(cmd.Process.Pid)
@@ -146,14 +147,18 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 			_ = cmd.Wait()
 			return FlagResult{false, err.Error()}
 		}
+		owned = handle
 		a.rememberCore(handle)
 	}
 
 	if pidPath != "" {
 		if err := atomicWriteFile(pidPath, []byte(pid), 0o600); err != nil {
 			_ = SendExitSignal(cmd.Process)
-			_ = waitForProcessExitWithTimeout(cmd.Process, 10)
+			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
+			if owned != nil {
+				a.rememberCore(nil)
+			}
 			return FlagResult{false, err.Error()}
 		}
 	}
@@ -175,7 +180,12 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 
 		if pidPath != "" {
 			coreStartMu.Lock()
-			removePIDIfCurrent(pidPath, cmd.Process.Pid)
+			if owned == nil || a.coreProcess == owned {
+				removePIDIfCurrent(pidPath, cmd.Process.Pid)
+				if owned != nil {
+					a.rememberCore(nil)
+				}
+			}
 			coreStartMu.Unlock()
 		}
 		if endEvent != "" {
@@ -313,6 +323,10 @@ func (a *App) KillProcess(pid int, timeout int) FlagResult {
 }
 
 func waitForProcessExitWithTimeout(process *os.Process, timeoutSeconds int) error {
+	return waitForProcessExitBeforeKill(process, timeoutSeconds, nil)
+}
+
+func waitForProcessExitBeforeKill(process *os.Process, timeoutSeconds int, sameProcess func() bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
@@ -322,6 +336,9 @@ func waitForProcessExitWithTimeout(process *os.Process, timeoutSeconds int) erro
 	for {
 		select {
 		case <-ctx.Done():
+			if sameProcess != nil && !sameProcess() {
+				return fmt.Errorf("core ownership changed before forced stop")
+			}
 			if killErr := process.Kill(); killErr != nil {
 				return fmt.Errorf(
 					"timed out after %d seconds waiting for process %d, and failed to kill it: %w",

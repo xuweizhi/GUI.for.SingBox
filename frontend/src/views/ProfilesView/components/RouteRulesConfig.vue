@@ -12,6 +12,7 @@ import {
 } from '@/constant/kernel'
 import { DefaultRouteRule } from '@/constant/profile'
 import {
+  RuleActionReject,
   RuleAction,
   RulesetFormat,
   RulesetType,
@@ -73,6 +74,9 @@ const handleAddInsertionPoint = () => {
 }
 
 const handleAddEnd = () => {
+  if (fields.value.action === RuleAction.Route && !fields.value.outbound && outletNodeGroup.value) {
+    if (!applyNodeGroupOutlet()) return false
+  }
   if (ruleId !== -1) {
     model.value[ruleId] = fields.value
   } else {
@@ -96,7 +100,10 @@ const handleEdit = (index: number) => {
 
 const applyNodeGroupOutlet = () => {
   const group = nodeGroupsStore.getNodeGroupById(outletNodeGroup.value)
-  if (!group) return
+  if (!group) {
+    message.error(t('kernel.outbounds.missingNodeGroup', [outletNodeGroup.value]))
+    return false
+  }
   const label = t(
     outletBehavior.value === 'auto' ? 'nodeGroups.outletAuto' : 'nodeGroups.outletManual',
   )
@@ -106,6 +113,25 @@ const applyNodeGroupOutlet = () => {
     outletBehavior.value,
     label,
   ).id
+  return true
+}
+
+const updateRuleType = () => {
+  const { type } = fields.value
+  if (type === RuleType.IpIsPrivate || type === RuleType.IpAcceptAny) fields.value.payload = 'true'
+  else if (type === RuleType.ClashMode) fields.value.payload = ClashMode.Global
+  else if (type === RuleType.Inline) fields.value.payload = '{}'
+  else fields.value.payload = ''
+}
+const updateRuleAction = () => {
+  const { action } = fields.value
+  outletNodeGroup.value = ''
+  fields.value.sniffer = []
+  fields.value.server = ''
+  fields.value.strategy = Strategy.Default
+  if (action === RuleAction.Reject) fields.value.outbound = RuleActionReject.Default
+  else if (action === RuleAction.RouteOptions) fields.value.outbound = '{}'
+  else fields.value.outbound = action === RuleAction.Route ? props.outboundOptions[0]?.value || '' : ''
 }
 
 const handleUse = (ruleset: any) => {
@@ -288,11 +314,11 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
   >
     <div class="form-item">
       {{ t('kernel.route.rules.type') }}
-      <Select v-model="fields.type" :options="RulesTypeOptions" />
+      <Select v-model="fields.type" @change="updateRuleType" :options="RulesTypeOptions" />
     </div>
     <div class="form-item">
       {{ t('kernel.route.rules.action.name') }}
-      <Radio v-model="fields.action" :options="RuleActionOptions" class="ml-8" />
+      <Radio v-model="fields.action" @change="updateRuleAction" :options="RuleActionOptions" class="ml-8" />
     </div>
     <div v-if="isSupportPayload" class="form-item">
       {{ t('kernel.route.rules.payload') }}
@@ -337,7 +363,7 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
       <template v-if="fields.action === RuleAction.Route">
         <div class="form-item">
           {{ t('kernel.route.rules.outbound') }}
-          <Select v-model="fields.outbound" :options="outboundOptions" clearable />
+          <Select v-model="fields.outbound" :options="outboundOptions" clearable @change="outletNodeGroup = ''" />
         </div>
         <div v-if="nodeGroupOptions.length" class="form-item">
           {{ t('router.nodeGroups') }}
@@ -346,7 +372,7 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
               v-model="outletNodeGroup"
               :options="nodeGroupOptions"
               clearable
-              @change="applyNodeGroupOutlet"
+              @change="fields.outbound = ''"
             />
             <Radio
               v-model="outletBehavior"
@@ -354,7 +380,7 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
                 { label: 'nodeGroups.outletManual', value: 'manual' },
                 { label: 'nodeGroups.outletAuto', value: 'auto' },
               ]"
-              @change="applyNodeGroupOutlet"
+              @change="fields.outbound = ''"
             />
           </div>
         </div>

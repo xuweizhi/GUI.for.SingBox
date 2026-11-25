@@ -79,17 +79,27 @@ const _generateRule = (
   return extra
 }
 
-const generateExperimental = (experimental: App.Experimental, outbounds: App.Outbound[]) => {
-  const getOutbound = (id: string) => outbounds.find((v) => v.id === id)?.tag
+const findOutbound = (id: string, outbounds: Pick<App.Outbound, 'id' | 'tag' | 'type'>[], native?: App.Profile['native']) =>
+  outbounds.find((entry) => entry.id === id) ||
+  native?.outbounds?.find((entry) => entry.tag === id) ||
+  native?.endpoints?.find((entry) => entry.tag === id)
+
+const dnsServerTag = (id: string, dns: App.Dns, native?: App.Profile['native']): string | undefined =>
+  dns.servers.find((entry) => entry.id === id)?.tag ||
+  native?.dnsServers?.find((entry, index) =>
+    !entry._gui_id && (entry.tag === id || (!entry.type && id === `dns-${index}`)),
+  )?.tag ||
+  (id === SystemDnsResolverTag ? SystemDnsResolverTag : undefined)
+
+const generateExperimental = (profile: App.Profile) => {
+  const { clash_api, cache_file } = profile.experimental
+  const { store_rdrc, rdrc_timeout: _timeout, ...cache } = cache_file
   return {
     clash_api: {
-      ...experimental.clash_api,
-      external_ui_download_detour: getOutbound(experimental.clash_api.external_ui_download_detour),
+      ...clash_api,
+      external_ui_download_detour: findOutbound(clash_api.external_ui_download_detour, profile.outbounds, profile.native)?.tag,
     },
-    cache_file: {
-      ...experimental.cache_file,
-      store_rdrc: undefined,
-    },
+    cache_file: { ...cache, store_dns: cache.store_dns ?? store_rdrc },
   }
 }
 
@@ -378,7 +388,7 @@ const generateOutbounds = async (
     activeRegistrations.delete(key)
     return tag
   }
-  const registerSubscriptionNode = async (
+  const findSubscriptionNode = async (
     subscriptionId: string,
     nodeId: string,
     lastKnownTag: string,
@@ -392,7 +402,7 @@ const generateOutbounds = async (
       throw new Error(
         `Proxy "${lastKnownTag || nodeId}" not found in subscription ${subscription.name}`,
       )
-    return { proxy, runtimeTag: await registerProxy(proxy, subscriptionId) }
+    return proxy
   }
 
   for (const outbound of outbounds) {
@@ -427,13 +437,13 @@ const generateOutbounds = async (
           const resolution = resolveNodeGroup(group, subscribesStore.subscribes)
           let matched = 0
           for (const node of resolution.nodes) {
-            const registered = await registerSubscriptionNode(
+            const source = await findSubscriptionNode(
               node.subscription.id,
               node.proxy.id,
               node.proxy.tag,
             )
-            if (!isTagMatching(registered.proxy.tag)) continue
-            members.add(registered.runtimeTag)
+            if (!isTagMatching(source.tag)) continue
+            members.add(await registerProxy(source, node.subscription.id))
             matched++
           }
           if (!matched) emptySources.push(`node group "${group.name}"`)
@@ -445,8 +455,8 @@ const generateOutbounds = async (
               if (isTagMatching(node.tag)) members.add(await registerProxy(node, subId))
             }
           } else {
-            const registered = await registerSubscriptionNode(subId, proxy.id, proxy.tag)
-            if (isTagMatching(registered.proxy.tag)) members.add(registered.runtimeTag)
+            const source = await findSubscriptionNode(subId, proxy.id, proxy.tag)
+            if (isTagMatching(source.tag)) members.add(await registerProxy(source, subId))
           }
         }
       }
@@ -579,20 +589,15 @@ const generateRoute = (
   dns: App.Dns,
   native?: App.Profile['native'],
 ) => {
-  const getOutbound = (id: string) =>
-    outbounds.find((v) => v.id === id)?.tag ||
-    [...(native?.outbounds || []), ...(native?.endpoints || [])].find((entry) => entry.tag === id)
-      ?.tag
-  const getDnsServer = (id: string) => dns.servers.find((v) => v.id === id)?.tag
-  const configuredDefaultResolver = dns.servers.find(
-    (server) => server.id === route.default_domain_resolver.server,
-  )
+  const getOutbound = (id: string) => findOutbound(id, outbounds, native)?.tag
+  const getDnsServer = (id: string) => dnsServerTag(id, dns, native)
+  const configuredDefaultResolver = getDnsServer(route.default_domain_resolver.server)
   const nativeResolverTag =
     dns.servers.find((server) => server.type === DnsServer.Local)?.tag || SystemDnsResolverTag
   const defaultDomainResolverTag =
     configuredDefaultResolver &&
-    !LegacyDefaultDomainResolverTags.some((tag) => tag === configuredDefaultResolver.tag)
-      ? configuredDefaultResolver.tag
+    !LegacyDefaultDomainResolverTags.some((tag) => tag === configuredDefaultResolver)
+      ? configuredDefaultResolver
       : nativeResolverTag
   const isInboundEnabled = (id: string) => inbounds.find((v) => v.id === id)?.enable
 
@@ -678,10 +683,8 @@ export const generateDnsTransports = (
   outbounds: Pick<App.Outbound, 'id' | 'tag' | 'type'>[],
   native?: App.Profile['native'],
 ) => {
-  const getOutbound = (id: string) =>
-    outbounds.find((v) => v.id === id) ||
-    [...(native?.outbounds || []), ...(native?.endpoints || [])].find((entry) => entry.tag === id)
-  const getDnsServer = (id: string) => dns.servers.find((v) => v.id === id)?.tag
+  const getOutbound = (id: string) => findOutbound(id, outbounds, native)
+  const getDnsServer = (id: string) => dnsServerTag(id, dns, native)
   const servers: Recordable[] = dns.servers.flatMap((server) => {
     const extra: Recordable = {}
     if (
@@ -726,7 +729,7 @@ export const generateDnsTransports = (
       }
     }
     if (server.type === DnsServer.Hosts) {
-      extra.path = server.hosts_path.reduce((p, c) => p.concat(c.split(',')), [] as string[])
+      extra.path = [server.hosts_path].flat().flatMap((path) => path.split(','))
       extra.predefined = Object.entries(server.predefined).reduce(
         (p, [k, v]) => ({ ...p, [k]: v.split(',') }),
         {},
@@ -791,7 +794,7 @@ const generateDns = (
   outbounds: App.Outbound[],
   native?: App.Profile['native'],
 ) => {
-  const getDnsServer = (id: string) => dns.servers.find((v) => v.id === id)?.tag
+  const getDnsServer = (id: string) => dnsServerTag(id, dns, native)
   const extra: Recordable = {}
   if (dns.strategy !== Strategy.Default) {
     extra.strategy = dns.strategy
@@ -902,6 +905,7 @@ export const generateConfig = async (
   )
   const nativeRouteRoots = [
     profile.route.final,
+    profile.experimental.clash_api.external_ui_download_detour,
     ...profile.route.rules
       .filter((rule) => rule.enable && rule.action === RuleAction.Route)
       .map((rule) => rule.outbound),
@@ -932,7 +936,7 @@ export const generateConfig = async (
   // step 1
   let config: Recordable = {
     log: profile.log,
-    experimental: generateExperimental(profile.experimental, profile.outbounds),
+    experimental: generateExperimental(profile),
     inbounds: generateInbounds(profile.inbounds),
     outbounds: generated.outbounds,
     ...(generated.endpoints.length ? { endpoints: generated.endpoints } : {}),

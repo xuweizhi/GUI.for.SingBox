@@ -15,6 +15,7 @@ const props = defineProps<Props>()
 
 const loading = ref(false)
 const profileText = ref('')
+const ready = ref(false)
 let baseline: Recordable | undefined
 
 const { t } = useI18n()
@@ -25,6 +26,7 @@ const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
 
 const handleSave = async () => {
+  if (!ready.value || loading.value) return
   loading.value = true
   try {
     const subscriptions = props.profile.outbounds.reduce((p, c) => {
@@ -66,7 +68,8 @@ onMounted(() => {
   }).then((text) => {
     baseline = JSON.parse(JSON.stringify(text))
     profileText.value = JSON.stringify(text, null, 2)
-  })
+    ready.value = true
+  }).catch((error) => message.error(error))
 })
 
 const modalSlots = {
@@ -85,6 +88,7 @@ const modalSlots = {
       {
         type: 'primary',
         loading: loading.value,
+        disabled: !ready.value,
         onClick: handleSave,
       },
       () => t('common.save'),
@@ -95,5 +99,5 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <CodeEditor v-model="profileText" lang="json" editable class="h-full" />
+  <CodeEditor v-if="ready" v-model="profileText" lang="json" editable class="h-full" />
 </template>

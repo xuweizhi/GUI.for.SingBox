@@ -50,7 +50,7 @@ const emptyBatch = (): BatchTestState => ({
   failure: 0,
 })
 
-export const useNodeController = () => {
+export const useNodeController = (options: { includePolicyNodes?: boolean } = {}) => {
   const appSettingsStore = useAppSettingsStore()
   const kernelApiStore = useKernelApiStore()
   const profilesStore = useProfilesStore()
@@ -61,6 +61,7 @@ export const useNodeController = () => {
   const query = ref('')
   const sortByDelay = ref(false)
   const nodeGroupFilter = ref('__all')
+  const failureTimes = new Map<string, number>()
   const nodeErrors = ref(new Map<string, NodeDelayError>())
   const localDelays = ref(new Map<string, number>())
   const nodeAttempts = ref(new Map<string, number>())
@@ -75,9 +76,11 @@ export const useNodeController = () => {
   const groups = computed(() =>
     getVisibleGroups(mode.value, profilesStore.currentProfile, kernelApiStore.proxies),
   )
-  const primary = computed(() =>
-    resolvePrimaryNode(mode.value, profilesStore.currentProfile, kernelApiStore.proxies),
-  )
+  const primary = computed(() => {
+    const current = resolvePrimaryNode(mode.value, profilesStore.currentProfile, kernelApiStore.proxies)
+    const localDelay = localDelays.value.get(current.leafName)
+    return localDelay === undefined ? current : { ...current, delay: localDelay || null }
+  })
   const proxyGroup = computed(() =>
     resolvePrimaryProxyGroup(profilesStore.currentProfile, kernelApiStore.proxies),
   )
@@ -159,9 +162,9 @@ export const useNodeController = () => {
         }
       })
       .filter(
-        (node) => !node.role || !['direct', 'block', 'fallback', 'global'].includes(node.role),
+        (node) => options.includePolicyNodes || !node.role || !['direct', 'block', 'fallback', 'global'].includes(node.role),
       )
-      .filter((node) => !['Direct', 'Reject'].includes(node.proxy?.type || ''))
+      .filter((node) => options.includePolicyNodes || !['Direct', 'Reject'].includes(node.proxy?.type || ''))
       .filter((node) => {
         if (nodeGroupFilter.value === '__all') return true
         if (nodeGroupFilter.value === '__favorites') return node.favorite
@@ -223,7 +226,10 @@ export const useNodeController = () => {
             if (protectedLocalResults.has(name)) return
             const history = kernelApiStore.proxies[name]?.history || []
             const latestDelay = history.at(-1)?.delay || 0
-            if (latestDelay > 0) {
+            const failedAt = failureTimes.get(name)
+            const newerSample = Date.parse(history.at(-1)?.time || '') > (failedAt ?? 0)
+            if (!kernelApiStore.proxies[name] || (latestDelay > 0 && (!failedAt || newerSample))) {
+              failureTimes.delete(name)
               nodeErrors.value.delete(name)
               localDelays.value.delete(name)
               nodeAttempts.value.delete(name)
@@ -265,6 +271,7 @@ export const useNodeController = () => {
     } catch (error) {
       refreshFailure = error
     }
+    query.value = ''
     selectedGroupName.value = proxyGroup.value?.name || groups.value[0]?.name || ''
     nodeGroupFilter.value = '__all'
     if (refreshFailure) throw refreshFailure
@@ -321,9 +328,11 @@ export const useNodeController = () => {
     proxy.history.push({ delay: result.ok ? result.delay : 0 })
     localDelays.value.set(result.name, result.ok ? result.delay : 0)
     if (result.ok) {
+      failureTimes.delete(result.name)
       nodeAttempts.value.set(result.name, result.attempts)
       nodeErrors.value.delete(result.name)
     } else {
+      failureTimes.set(result.name, Date.now())
       nodeAttempts.value.delete(result.name)
       nodeErrors.value.set(result.name, {
         category: result.category,
@@ -394,14 +403,20 @@ export const useNodeController = () => {
       return
     }
 
-    const { handle, release } = submit(names)
+    const { handle, release } = submit(names, (result) => {
+      if (disposed) return
+      applyResult(result)
+      batch.value.completed++
+      if (result.ok) batch.value.success++
+      else batch.value.failure++
+    })
     groupHandle = handle
 
     try {
       const summary = await handle.done
       if (!disposed)
         batch.value = {
-          running: false,
+          running: true,
           cancelled: summary.cancelled,
           total: summary.total,
           completed: summary.completed,
@@ -410,11 +425,9 @@ export const useNodeController = () => {
         }
     } finally {
       groupHandle = undefined
-      if (!disposed) {
-        batch.value.running = false
-        await refresh().catch(() => undefined)
-      }
+      if (!disposed) await refresh().catch(() => undefined)
       release()
+      if (!disposed) batch.value.running = false
     }
   }
 

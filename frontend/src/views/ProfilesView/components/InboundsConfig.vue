@@ -85,7 +85,7 @@ const inbounds = [
 ]
 
 const handleAdd = async () => {
-  const fns = await picker.multi('common.add', inbounds)
+  const fns = await picker.multi('common.add', inbounds).catch(() => [])
   fns.forEach((fn) => fn())
 }
 

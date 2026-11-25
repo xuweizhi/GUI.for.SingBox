@@ -9,14 +9,15 @@ import (
 
 // App struct
 type App struct {
-	Ctx         context.Context
-	Headless    *HeadlessRuntime
-	TaskWorker  *scheduledTaskWorkerSupervisor
-	coreProcess *os.Process // Protected by coreStartMu; independent of exec.Cmd.Wait.
-	workerOnce  sync.Once
-	startupOnce sync.Once
-	eventsOnce  sync.Once
-	events      *eventHub
+	Ctx           context.Context
+	Headless      *HeadlessRuntime
+	TaskWorker    *scheduledTaskWorkerSupervisor
+	coreStartTime int64
+	coreProcess   *os.Process // Protected by coreStartMu; independent of exec.Cmd.Wait.
+	workerOnce    sync.Once
+	startupOnce   sync.Once
+	eventsOnce    sync.Once
+	events        *eventHub
 }
 
 const RuntimeModeWebUI = "webui"
@@ -33,14 +34,15 @@ type EnvResult struct {
 }
 
 type RequestOptions struct {
-	Proxy     string
-	Insecure  bool
-	Redirect  bool
-	Timeout   int
-	CancelId  string
-	FileField string
-	Sha256    string
-	Stream    string
+	FreshConnection bool
+	Proxy           string
+	Insecure        bool
+	Redirect        bool
+	Timeout         int
+	CancelId        string
+	FileField       string
+	Sha256          string
+	Stream          string
 }
 
 type ExecOptions struct {

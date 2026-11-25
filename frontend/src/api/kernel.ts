@@ -93,14 +93,15 @@ const setupCoreApi = (protocol: 'http' | 'ws') => {
 const request = new Request({
   beforeRequest: () => setupCoreApi('http'),
   timeout: 60 * 1000,
-  onUnauthorized: () => useWebuiAuthStore().handleUnauthorized(),
+  sessionRevision: () => useWebuiAuthStore().sessionRevision,
+  onUnauthorized: (revision) => useWebuiAuthStore().handleUnauthorized(revision),
 })
 const websocket = new WebSockets({ beforeConnect: () => setupCoreApi('ws') })
 
 const wsChannels: {
   [K in WsKey]: WsChannel<K>
 } = {
-  logs: { url: Api.Logs, isActive: false, handlers: [], params: { level: 'debug' } },
+  logs: { url: Api.Logs, isActive: false, handlers: [], params: { level: 'trace' } },
   memory: { url: Api.Memory, isActive: false, handlers: [] },
   traffic: { url: Api.Traffic, isActive: false, handlers: [] },
   connections: { url: Api.Connections, isActive: false, handlers: [] },
@@ -188,6 +189,7 @@ export const onMemory = createCoreWSHandlerRegister('memory')
 export const onTraffic = createCoreWSHandlerRegister('traffic')
 export const onConnections = createCoreWSHandlerRegister('connections')
 export const initWebsocket = () => {
+  destroyWebsocket()
   Object.values(wsChannels).forEach((channel) => {
     const { connect, disconnect } = websocket.createWS({
       url: channel.url,

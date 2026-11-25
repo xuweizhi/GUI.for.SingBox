@@ -24,6 +24,7 @@ import { getCompletions } from '@/utils/completion'
 import { IS_IN_MODAL } from '@/components/Modal/index.vue'
 
 interface Props {
+  original?: string
   modelValue?: string
   editable?: boolean
   lang?: 'json' | 'javascript' | 'yaml'
@@ -114,7 +115,7 @@ const formatDoc = async (view: EditorView) => {
 watch(
   () => appSettings.themeMode,
   (theme) => {
-    const views = editorView ? [editorView] : [mergeView.a, mergeView.b]
+    const views = editorView ? [editorView] : mergeView ? [mergeView.a, mergeView.b] : []
     views.forEach((view) => {
       view.dispatch({
         effects: themeCompartment.reconfigure(
@@ -183,7 +184,7 @@ const initEditor = () => {
     mergeView = new MergeView({
       parent: domRef.value!,
       a: {
-        doc: props.modelValue,
+        doc: props.original ?? props.modelValue,
         extensions: [...extensions, EditorView.editable.of(false)],
       },
       b: {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, onUnmounted } from 'vue'
 
 const appStoreMock = vi.hoisted(() => ({
+  modalMinimizers: new Set<() => void>(),
   modalMinimized: [] as {
     id: string
     title: () => string
@@ -72,6 +73,7 @@ describe('Modal', () => {
 
   beforeEach(() => {
     modalModuleMode.real = false
+    appStoreMock.modalMinimizers.clear()
     appStoreMock.modalMinimized.splice(0)
     appStoreMock.modalStack.splice(0)
     appStoreMock.modalZIndexCounter = 999

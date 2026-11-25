@@ -93,6 +93,17 @@ const toggleMember = (
   }
 }
 
+const clearMissing = () => {
+  const subscriptions = new Map(subscribesStore.subscribes.map((sub) => [sub.id, sub]))
+  if (group.value.mode === 'manual') {
+    group.value.members = group.value.members.filter((member) =>
+      subscriptions.get(member.subscription_id)?.proxies.some((node) => node.id === member.node_id),
+    )
+  } else {
+    group.value.subscription_ids = group.value.subscription_ids.filter((id) => subscriptions.has(id))
+  }
+}
+
 const handleSave = async () => {
   loading.value = true
   try {
@@ -180,7 +191,7 @@ defineExpose({ modalSlots })
       </div>
       <div v-if="group.source_scope === 'selected'" class="form-item">
         {{ t('nodeGroups.sources') }}
-        <Select v-model="group.subscription_ids" :options="subscriptionOptions" multiple />
+        <Select v-model="group.subscription_ids" :options="subscriptionOptions" multiple clearable />
       </div>
       <div class="form-item">
         {{ t('nodeGroups.matchField') }}
@@ -225,6 +236,9 @@ defineExpose({ modalSlots })
     </div>
     <template v-if="resolution.issues.length">
       <Divider>{{ t('nodeGroups.unresolved') }} · {{ resolution.issues.length }}</Divider>
+      <Button v-if="resolution.issues.some((issue) => issue.type !== 'invalid-filter')" size="small" @click="clearMissing">
+        {{ t('common.clear') }}
+      </Button>
       <div class="text-12" style="color: var(--level-4-color)">
         <div v-for="(issue, index) in resolution.issues" :key="index">
           {{ issue.type }} · {{ 'label' in issue ? issue.label : issue.expression }}

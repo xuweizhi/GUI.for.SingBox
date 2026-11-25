@@ -75,8 +75,8 @@ const fixSecondaryMenuPos = () => {
 }
 
 watch(
-  () => props.position,
-  ({ x, y }) => {
+  [() => props.position, model],
+  ([{ x, y }]) => {
     nextTick(() => fixMenuPos(x, y))
     secondaryMenu.value = undefined
   },
@@ -136,32 +136,32 @@ onUnmounted(() => {
           <Icon v-if="menu.children" icon="arrowRight" :size="14" class="ml-8" />
         </Button>
       </template>
-      <Transition name="menu">
-        <div
-          v-show="secondaryMenu"
-          ref="secondaryMenuRef"
-          role="menu"
-          :style="secondaryMenuPosition"
-          class="gui-menu fixed z-9999 p-6 rounded-8 flex flex-col gap-2 backdrop-blur-sm"
+    </div>
+  </Transition>
+  <Transition name="menu">
+    <div
+      v-show="model && secondaryMenu"
+      ref="secondaryMenuRef"
+      role="menu"
+      :style="secondaryMenuPosition"
+      class="gui-menu fixed z-9999 p-6 rounded-8 flex flex-col gap-2 backdrop-blur-sm"
+    >
+      <template v-for="m in secondaryMenu">
+        <Divider v-if="m.separator" :key="m.label + '_divider'" size="small">
+          {{ m.label ? t(m.label) : '' }}
+        </Divider>
+        <Button
+          v-else
+          :key="m.label"
+          role="menuitem"
+          type="text"
+          size="small"
+          class="justify-start"
+          @click.stop="handleClick(m)"
         >
-          <template v-for="m in secondaryMenu">
-            <Divider v-if="m.separator" :key="m.label + '_divider'" size="small">
-              {{ m.label ? t(m.label) : '' }}
-            </Divider>
-            <Button
-              v-else
-              :key="m.label"
-              role="menuitem"
-              type="text"
-              size="small"
-              class="justify-start"
-              @click.stop="handleClick(m)"
-            >
-              <div class="text-nowrap">{{ t(m.label) }}</div>
-            </Button>
-          </template>
-        </div>
-      </Transition>
+          <div class="text-nowrap">{{ t(m.label) }}</div>
+        </Button>
+      </template>
     </div>
   </Transition>
 </template>

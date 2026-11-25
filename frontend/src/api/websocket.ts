@@ -44,7 +44,13 @@ export class WebSockets {
       ws = socket
       socket.onmessage = (event) => {
         if (active && revision === generation && socket === ws) {
-          options.cb(JSON.parse(event.data))
+          let data
+          try {
+            data = JSON.parse(event.data)
+          } catch {
+            return
+          }
+          options.cb(data)
         }
       }
       socket.onclose = () => {

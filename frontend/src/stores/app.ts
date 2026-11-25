@@ -26,6 +26,8 @@ import {
   modal,
 } from '@/utils'
 
+import { downloadProgressText, parseReleaseSha256 } from '@/utils/releaseAsset'
+
 import { AboutView } from '@/components'
 
 import { useEnvStore } from './env'
@@ -52,6 +54,7 @@ export const useAppStore = defineStore('app', () => {
   /* Modal Stack */
   const modalStack: (() => MaybePromise<void>)[] = []
   const modalZIndexCounter = 999
+  const modalMinimizers = ref(new Set<() => void>())
   const modalMinimized = ref<
     {
       id: string
@@ -67,16 +70,19 @@ export const useAppStore = defineStore('app', () => {
   const locales = ref<{ label: string; value: string }[]>([])
   const loadLocales = async (delay = true, reload = true) => {
     localesLoading.value = true
-    const dirs = await ReadDir(LocalesFilePath).catch(() => [])
-    const localLanguage = dirs.flatMap((file) => {
-      if (file.isDir) return []
-      const [name, ext] = file.name.split('.')
-      return name && ext === 'json' ? { label: name, value: name } : []
-    })
-    locales.value = [...LanguageOptions, ...localLanguage]
-    reload && (await loadLocale())
-    delay && (await sleep(200))
-    localesLoading.value = false
+    try {
+      const dirs = await ReadDir(LocalesFilePath).catch(() => [])
+      const localLanguage = dirs.flatMap((file) => {
+        if (file.isDir) return []
+        const [name, ext] = file.name.split('.')
+        return name && ext === 'json' ? { label: name, value: name } : []
+      })
+      locales.value = [...LanguageOptions, ...localLanguage]
+      reload && (await loadLocale())
+      delay && (await sleep(200))
+    } finally {
+      localesLoading.value = false
+    }
   }
 
   /* Actions */
@@ -122,8 +128,10 @@ export const useAppStore = defineStore('app', () => {
   const updatable = computed(() => downloadUrl.value && APP_VERSION !== remoteVersion.value)
 
   const downloadApp = async () => {
+    if (downloading.value || checkForUpdatesLoading.value || !updatable.value) return
     downloading.value = true
     try {
+      const sha256 = parseReleaseSha256(downloadDigest.value)
       const { appName, os, arch } = envStore.env
       const archiveName = `${APP_TITLE}-${os}-${arch}.tar.gz`
       const downloadCacheFile = `data/.cache/${archiveName}`
@@ -141,11 +149,11 @@ export const useAppStore = defineStore('app', () => {
         downloadCacheFile,
         undefined,
         (progress, total) => {
-          update(t('common.downloading') + ((progress / total) * 100).toFixed(2) + '%')
+          update(downloadProgressText(t('common.downloading'), progress, total))
         },
         {
           CancelId: downloadCacheFile,
-          Sha256: downloadDigest.value.slice(7),
+          Sha256: sha256,
         },
       ).finally(destroy)
 
@@ -179,6 +187,7 @@ export const useAppStore = defineStore('app', () => {
     checkForUpdatesLoading.value = true
     remoteVersion.value = APP_VERSION
     downloadDigest.value = ''
+    downloadUrl.value = ''
     try {
       const { body } = await HttpGet<Record<string, any>>(APP_VERSION_API, {
         Authorization: getGitHubApiAuthorization(),
@@ -192,7 +201,8 @@ export const useAppStore = defineStore('app', () => {
 
       const asset = assets.find((v: any) => v.name === assetName)
       if (!asset) throw 'Asset Not Found:' + assetName
-      if (asset.uploader.login !== 'github-actions[bot]') {
+      parseReleaseSha256(asset.digest)
+      if (asset.uploader?.login !== 'github-actions[bot]') {
         await confirm('common.warning', 'settings.kernel.risk', {
           type: 'text',
           okText: 'settings.kernel.stillDownload',
@@ -240,6 +250,7 @@ export const useAppStore = defineStore('app', () => {
     tipsPosition,
     modalStack,
     modalMinimized,
+    modalMinimizers,
     modalZIndexCounter,
     showAbout,
     lastCheckTime,

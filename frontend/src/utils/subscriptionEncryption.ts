@@ -37,7 +37,7 @@ const decodeBase64 = (value: string) => {
 }
 
 const encodeUtf8 = (value: Uint8Array) => {
-  return new TextDecoder().decode(value)
+  return new TextDecoder('utf-8', { fatal: true }).decode(value)
 }
 
 const bytesToWordArray = (value: Uint8Array) => {
@@ -50,7 +50,11 @@ const bytesToWordArray = (value: Uint8Array) => {
   return CryptoJS.lib.WordArray.create(words, value.length)
 }
 
-const decryptSubscriptionWithCryptoJS = (keyBytes: Uint8Array, iv: Uint8Array, ciphertext: Uint8Array) => {
+const decryptSubscriptionWithCryptoJS = (
+  keyBytes: Uint8Array,
+  iv: Uint8Array,
+  ciphertext: Uint8Array,
+) => {
   const decrypted = CryptoJS.AES.decrypt(
     CryptoJS.lib.CipherParams.create({
       ciphertext: bytesToWordArray(ciphertext),
@@ -59,16 +63,16 @@ const decryptSubscriptionWithCryptoJS = (keyBytes: Uint8Array, iv: Uint8Array, c
     {
       iv: bytesToWordArray(iv),
       mode: CryptoJS.mode.CBC,
-      padding: CryptoJS.pad.Pkcs7,
+      padding: CryptoJS.pad.NoPadding,
     },
   )
 
-  const hex = decrypted.toString(CryptoJS.enc.Hex)
-  if (!hex) {
+  const bytes = decodeHex(decrypted.toString(CryptoJS.enc.Hex))
+  const padding = bytes[bytes.length - 1]!
+  if (padding < 1 || padding > 16 || !bytes.subarray(-padding).every((byte) => byte === padding))
     return null
-  }
 
-  return encodeUtf8(decodeHex(hex))
+  return encodeUtf8(bytes.subarray(0, -padding)) || null
 }
 
 export const getHeaderValue = (headers: Record<string, unknown>, name: string) => {
@@ -81,7 +85,8 @@ export const isEncryptedSubscription = (headerValue: unknown) => {
   const values = Array.isArray(headerValue) ? headerValue : [headerValue]
 
   return values.some(
-    (value) => typeof value === 'string' && value.trim().toLowerCase() === SubscriptionEncryptionValue,
+    (value) =>
+      typeof value === 'string' && value.trim().toLowerCase() === SubscriptionEncryptionValue,
   )
 }
 
@@ -108,7 +113,7 @@ export const decryptEncryptedSubscription = async (password: string, base64Data:
     return null
   }
 
-  if (raw.length <= 16) {
+  if (raw.length <= 16 || raw.length % 16 !== 0) {
     return null
   }
 
@@ -128,10 +133,6 @@ export const decryptEncryptedSubscription = async (password: string, base64Data:
 
     return decryptSubscriptionWithCryptoJS(keyBytes, iv, ciphertext)
   } catch {
-    try {
-      return decryptSubscriptionWithCryptoJS(keyBytes, iv, ciphertext)
-    } catch {
-      return null
-    }
+    return null
   }
 }

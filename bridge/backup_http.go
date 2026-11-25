@@ -335,6 +335,7 @@ func (a *App) restorePortableData(root, stage string) error {
 		a.StopScheduledTaskWorker()
 		return errors.Join(err, a.StartScheduledTaskWorker())
 	}
+	loadConfig()
 	a.EventsEmit("configurationRestored")
 	return nil
 }

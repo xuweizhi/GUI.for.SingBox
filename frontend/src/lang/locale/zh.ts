@@ -43,6 +43,7 @@ export default {
     },
   },
   common: {
+    duplicateKey: '键名不能重复。',
     grid: '网格',
     list: '列表',
     add: '添加',
@@ -159,7 +160,7 @@ export default {
       path: '缓存文件路径',
       cache_id: '缓存文件中的标识符',
       store_fakeip: '持久化FakeIP',
-      store_rdrc: '持久化已拒绝的DNS响应',
+      store_dns: '持久化 DNS 缓存',
       rdrc_timeout: '拒绝的DNS响应缓存超时',
     },
     inbounds: {
@@ -263,6 +264,8 @@ export default {
         primaryProxyDesc: '主页“选择代理节点”只操作这个策略组；自定义配置可以在这里指定主代理组。',
         validationTitle: '策略组配置需要处理',
         issue: {
+          'missing-node-group': '引用的节点组不存在',
+          'reserved-tag': '出站标签使用了保留名称',
           missing: '引用的策略组不存在',
           cycle: '检测到循环引用',
         },
@@ -441,6 +444,7 @@ export default {
     scheduledtasks: '计划任务',
   },
   nodeGroups: {
+    addOnSave: '保存后会将此节点加入节点组。',
     title: '节点组',
     empty: '还没有节点组。节点组是可跨配置复用的节点集合。',
     name: '名称',
@@ -750,6 +754,7 @@ export default {
     },
   },
   subscribe: {
+    duplicateNodeTag: '节点标签 {0} 已存在。',
     preferOutboundDns: '使用订阅 DNS 解析节点',
     outboundDnsHint: '仅解析本订阅内的节点服务器域名，网站 DNS 继续使用配置中的设置。',
     outboundDns: '自定义节点 DNS',

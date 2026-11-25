@@ -10,6 +10,15 @@ const reconcile = (previous: Recordable[], next: Recordable[]) =>
   reconcileSubscriptionProxyIds(previousMetadata, previous, next, () => 'new-id')
 
 describe('subscription proxy identity reconciliation', () => {
+  it('reserves a renamed node before matching a new node that reuses its old name', () => {
+    const node = { type: 'socks', tag: 'Old Name', server: 'old.example', server_port: 1080 }
+    const next = [
+      { ...node, server: 'different.example' },
+      { ...node, tag: 'Renamed' },
+    ]
+    expect(reconcile([node], next).map(({ id }) => id)).toEqual(['new-id', 'stable-id'])
+  })
+
   it('retains an ID when only the presentation tag changes', () => {
     const previous = [
       { type: 'vmess', tag: 'Old Name', server: 'hk.example.com', server_port: 443, uuid: 'a' },
@@ -18,9 +27,7 @@ describe('subscription proxy identity reconciliation', () => {
       { type: 'vmess', tag: 'New Name', server: 'hk.example.com', server_port: 443, uuid: 'a' },
     ]
 
-    expect(reconcile(previous, next)).toEqual([
-      { id: 'stable-id', tag: 'New Name', type: 'vmess' },
-    ])
+    expect(reconcile(previous, next)).toEqual([{ id: 'stable-id', tag: 'New Name', type: 'vmess' }])
   })
 
   it('retains an ID by a unique protocol and endpoint when credentials rotate', () => {

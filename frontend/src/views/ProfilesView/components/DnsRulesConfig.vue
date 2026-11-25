@@ -89,6 +89,23 @@ const handleDeleteRule = (index: number) => {
   model.value.splice(index, 1)
 }
 
+const updateRuleType = () => {
+  const { type } = fields.value
+  if (type === RuleType.IpIsPrivate || type === RuleType.IpAcceptAny) fields.value.payload = 'true'
+  else if (type === RuleType.ClashMode) fields.value.payload = ClashMode.Global
+  else if (type === RuleType.Inline) fields.value.payload = '{}'
+  else fields.value.payload = ''
+}
+const updateRuleAction = () => {
+  const { action } = fields.value
+  fields.value.disable_cache = false
+  fields.value.client_subnet = ''
+  fields.value.strategy = Strategy.Default
+  if (action === RuleAction.Reject) fields.value.server = RuleActionReject.Default
+  else if (action === RuleAction.RouteOptions || action === RuleAction.Predefined) fields.value.server = '{}'
+  else fields.value.server = action === RuleAction.Route ? props.serversOptions[0]?.value || '' : ''
+}
+
 const handleUse = (ruleset: any) => {
   const ids = fields.value.payload.split(',').filter((v) => v)
   const idx = ids.findIndex((v) => v === ruleset.id)
@@ -151,6 +168,8 @@ const formatRuleParts = (rule: App.DnsRule) => {
       .split(',')
       .map((id) => props.ruleSet.find((v) => v.id === id)?.tag || id)
       .join(', ')
+  } else if (type === RuleType.Inbound) {
+    displayPayload = props.inboundOptions.find((option) => option.value === payload)?.label || payload
   } else if (type === RuleType.Inline && payload.includes('__is_fake_ip')) {
     displayPayload = 'FakeIP'
   }
@@ -261,11 +280,11 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
   >
     <div class="form-item">
       {{ t('kernel.dns.rules.type') }}
-      <Select v-model="fields.type" :options="DnsRuleTypeOptions" />
+      <Select v-model="fields.type" @change="updateRuleType" :options="DnsRuleTypeOptions" />
     </div>
     <div class="form-item">
       {{ t('kernel.dns.rules.action') }}
-      <Radio v-model="fields.action" :options="DnsRuleActionOptions" />
+      <Radio v-model="fields.action" @change="updateRuleAction" :options="DnsRuleActionOptions" />
     </div>
     <div v-if="fields.type !== RuleType.RuleSet" class="form-item">
       {{ t('kernel.dns.rules.payload') }}

@@ -3,7 +3,7 @@ import { computed, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useNodeGroupsStore } from '@/stores'
-import { ensureNodeGroupOutlet, type NodeGroupOutletBehavior } from '@/utils'
+import { ensureNodeGroupOutlet, message, type NodeGroupOutletBehavior } from '@/utils'
 
 import RoutePolicyOverview from './RoutePolicyOverview.vue'
 import RouteRulesConfig from './RouteRulesConfig.vue'
@@ -36,15 +36,30 @@ const tabs = [
 
 const { t } = useI18n()
 const nodeGroupsStore = useNodeGroupsStore()
+const currentOutlet = computed(() => outbounds.value.find((outbound) => outbound.id === model.value.final))
+const editFinalGroup = ref(false)
 const finalNodeGroup = ref('')
 const finalNodeGroupBehavior = ref<NodeGroupOutletBehavior>('manual')
+
+const chooseFinalGroup = () => {
+  finalNodeGroup.value = currentOutlet.value?.source_node_group || ''
+  finalNodeGroupBehavior.value = currentOutlet.value?.type === 'urltest' ? 'auto' : 'manual'
+  editFinalGroup.value = true
+}
 const nodeGroupOptions = computed(() =>
   nodeGroupsStore.nodeGroups.map((group) => ({ label: group.name, value: group.id })),
 )
 
 const applyFinalNodeGroup = () => {
   const group = nodeGroupsStore.getNodeGroupById(finalNodeGroup.value)
-  if (!group) return
+  if (!group) {
+    if (finalNodeGroup.value) {
+      message.error(t('kernel.outbounds.missingNodeGroup', [finalNodeGroup.value]))
+      return false
+    }
+    if (currentOutlet.value?.source_node_group) model.value.final = ''
+    return
+  }
   const label = t(
     finalNodeGroupBehavior.value === 'auto'
       ? 'nodeGroups.outletAuto'
@@ -108,22 +123,9 @@ defineExpose({ handleAdd })
       </div>
       <div v-if="nodeGroupOptions.length" class="form-item">
         {{ t('router.nodeGroups') }}
-        <div class="flex items-center gap-8">
-          <Select
-            v-model="finalNodeGroup"
-            :options="nodeGroupOptions"
-            clearable
-            @change="applyFinalNodeGroup"
-          />
-          <Radio
-            v-model="finalNodeGroupBehavior"
-            :options="[
-              { label: 'nodeGroups.outletManual', value: 'manual' },
-              { label: 'nodeGroups.outletAuto', value: 'auto' },
-            ]"
-            @change="applyFinalNodeGroup"
-          />
-        </div>
+        <Button size="small" @click="chooseFinalGroup">
+          {{ nodeGroupsStore.getNodeGroupById(currentOutlet?.source_node_group || '')?.name || t('common.select') }}
+        </Button>
       </div>
     </template>
     <template #rule_set>
@@ -145,4 +147,14 @@ defineExpose({ handleAdd })
       />
     </template>
   </Tabs>
+  <Modal v-model:open="editFinalGroup" title="router.nodeGroups" :on-ok="applyFinalNodeGroup">
+    <Select v-model="finalNodeGroup" :options="nodeGroupOptions" clearable />
+    <Radio
+      v-model="finalNodeGroupBehavior"
+      :options="[
+        { label: 'nodeGroups.outletManual', value: 'manual' },
+        { label: 'nodeGroups.outletAuto', value: 'auto' },
+      ]"
+    />
+  </Modal>
 </template>

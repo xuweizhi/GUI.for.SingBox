@@ -254,8 +254,8 @@ const openRoutePolicies = async () => {
               >
             </span>
             <span v-else-if="node.delayStatus === 'failed'" class="delay-failed">
-              {{ t(`home.nodes.delayError.${node.error?.category ?? 'unknown'}`) }} ·
-              {{ node.error?.attempts ?? 1 }}/{{ node.error?.maxAttempts ?? 3 }}
+              {{ t(`home.nodes.delayError.${node.error?.category ?? 'unknown'}`) }}
+              <template v-if="node.error"> · {{ node.error.attempts }}/{{ node.error.maxAttempts }}</template>
             </span>
             <span v-else class="text-muted">{{ t('home.nodes.untested') }}</span>
           </Button>

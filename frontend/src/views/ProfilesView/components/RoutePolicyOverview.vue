@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { useNodeGroupsStore } from '@/stores'
 import { Outbound } from '@/enums/kernel'
 import {
   findOutboundGraphIssues,
@@ -48,7 +49,8 @@ const primaryOptions = computed(() =>
     .map((outbound) => ({ label: outbound.tag, value: outbound.id })),
 )
 
-const graphIssues = computed(() => findOutboundGraphIssues(props.outbounds))
+const nodeGroupsStore = useNodeGroupsStore()
+const graphIssues = computed(() => findOutboundGraphIssues(props.outbounds, nodeGroupsStore.nodeGroups))
 
 const issueChain = (value: string[]) => getOutboundChainLabels(value, props.outbounds).join(' → ')
 

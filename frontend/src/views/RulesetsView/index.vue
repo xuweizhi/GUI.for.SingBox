@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n, I18nT } from 'vue-i18n'
 
-import { RemoveFile, WriteFile } from '@/bridge'
+import { removeUnusedResourceCache } from '@/utils/configPersistence'
 import { DraggableOptions, ViewOptions } from '@/constant/app'
-import { BuiltInOutbound, EmptyRuleSet } from '@/constant/kernel'
+import { EmptyRuleSet } from '@/constant/kernel'
 import { DefaultRouteRule, DefaultRouteRuleset } from '@/constant/profile'
 import { View } from '@/enums/app'
 import { RulesetFormat, RulesetType, RuleType } from '@/enums/kernel'
@@ -71,13 +72,20 @@ const handleShowRulesetForm = async (id?: string, isUpdate = false) => {
   m.setContent(RulesetForm, { id, isUpdate }).open()
 }
 
+const updatingAll = ref(false)
 const handleUpdateRulesets = async () => {
+  if (updatingAll.value || rulesetsStore.rulesets.some((item) => item.updating)) return
+  updatingAll.value = true
   try {
-    await rulesetsStore.updateRulesets()
+    const results = await rulesetsStore.updateRulesets()
+    const failures = results.filter((item) => !item.ok)
+    if (failures.length) throw new Error(failures.map((item) => item.result).join('\n'))
     message.success('common.success')
   } catch (error: any) {
     console.error('updateRulesets: ', error)
     message.error(error)
+  } finally {
+    updatingAll.value = false
   }
 }
 
@@ -91,6 +99,7 @@ const handleEditRulesetList = (id: string) => {
 }
 
 const handleUpdateRuleset = async (r: App.RuleSet) => {
+  if (updatingAll.value || r.updating) return
   try {
     await rulesetsStore.updateRuleset(r.id)
   } catch (error: any) {
@@ -111,8 +120,8 @@ const handleDeleteRuleset = async (r: App.RuleSet) => {
   }
 
   try {
-    await ignoredError(RemoveFile, r.path)
     await rulesetsStore.deleteRuleset(r.id)
+    await ignoredError(removeUnusedResourceCache, r, rulesetsStore.rulesets)
     message.success('common.success')
   } catch (error: any) {
     console.error('deleteRuleset: ', error)
@@ -121,8 +130,11 @@ const handleDeleteRuleset = async (r: App.RuleSet) => {
 }
 
 const handleDisableRuleset = async (r: App.RuleSet) => {
-  r.disabled = !r.disabled
-  rulesetsStore.editRuleset(r.id, r)
+  try {
+    await rulesetsStore.editRuleset(r.id, { ...r, disabled: !r.disabled })
+  } catch (error) {
+    message.error(error)
+  }
 }
 
 const handleClearRuleset = async (id: string) => {
@@ -131,8 +143,7 @@ const handleClearRuleset = async (id: string) => {
   if (r.format != RulesetFormat.Source) return
 
   try {
-    await WriteFile(r.path, JSON.stringify(EmptyRuleSet, null, 2))
-    rulesetsStore.editRuleset(r.id, r)
+    await rulesetsStore.saveLocalRuleset(r.id, JSON.stringify(EmptyRuleSet, null, 2))
     message.success('common.success')
   } catch (error: any) {
     message.error(error)
@@ -172,18 +183,18 @@ const handleAddRulesetToProfile = async (id: string) => {
       return
     }
 
-    const outboundOptions = [
-      ...BuiltInOutbound.map((outbound) => ({ label: outbound, value: outbound })),
-      ...profile.outbounds.map((outbound) => ({
-        label: outbound.tag,
-        value: outbound.id,
-        description: outbound.type,
-      })),
-    ]
+    const outboundOptions = profile.outbounds.map((outbound) => ({
+      label: outbound.tag,
+      value: outbound.id,
+      description: outbound.type,
+    }))
+    if (!outboundOptions.length) {
+      message.warn('kernel.route.rules.invalid')
+      return
+    }
     const target = await picker.single('kernel.route.rules.outbound', outboundOptions, [
-      profile.outbounds[0]?.id || BuiltInOutbound[0]!,
-    ])
-
+      outboundOptions[0]!.value,
+    ]).catch(() => undefined)
     if (!target) return
 
     const nextProfile = deepClone(profile)
@@ -268,7 +279,7 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
     <Button
       :disabled="noUpdateNeeded"
       :type="noUpdateNeeded ? 'text' : 'link'"
-      @click="handleUpdateRulesets"
+      :loading="updatingAll" @click="handleUpdateRulesets"
     >
       {{ t('common.updateAll') }}
     </Button>
@@ -279,12 +290,12 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
 
   <Empty v-if="rulesetsStore.rulesets.length > 0 && filteredRulesets.length === 0" />
 
-  <div
+  <VueDraggable
     v-else-if="rulesetsStore.rulesets.length > 0"
-    v-draggable="[
-      rulesetsStore.rulesets,
-      { ...DraggableOptions, disabled: Boolean(keywords.trim()), onUpdate: onSortUpdate },
-    ]"
+    v-model="rulesetsStore.rulesets"
+    v-bind="DraggableOptions"
+    @update="onSortUpdate"
+    :disabled="Boolean(keywords.trim())"
     :class="'grid-list-' + appSettingsStore.app.rulesetsView"
   >
     <Card
@@ -496,5 +507,5 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
         </Button>
       </div>
     </Card>
-  </div>
+  </VueDraggable>
 </template>

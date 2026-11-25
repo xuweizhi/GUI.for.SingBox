@@ -15,12 +15,13 @@ type RuntimeWithSubStore = typeof globalThis & {
 }
 
 let proxyUtilsModulePromise: Promise<ProxyUtilsModule> | undefined
+let importAttempt = 0
 const browserProxyUtilsSource = proxyUtilsSource.replace(
   /eval\('typeof process !== "undefined"'\)/g,
   'false',
 )
 
-const withMutedConsole = async <T>(fn: () => Promise<T>) => {
+const withMutedConsole = <T>(fn: () => T) => {
   const methods = ['log', 'info', 'warn', 'error', 'debug'] as const
   const previous = methods.map((method) => [method, console[method]] as const)
 
@@ -29,7 +30,7 @@ const withMutedConsole = async <T>(fn: () => Promise<T>) => {
   })
 
   try {
-    return await fn()
+    return fn()
   } finally {
     previous.forEach(([method, handler]) => {
       console[method] = handler
@@ -75,9 +76,13 @@ const withSubStoreGlobals = async <T>(fn: () => Promise<T>) => {
 const loadProxyUtilsModule = () => {
   if (!proxyUtilsModulePromise) {
     proxyUtilsModulePromise = withSubStoreGlobals(async () => {
-      return (await import(
-        /* @vite-ignore */ toDataURL(browserProxyUtilsSource)
-      )) as ProxyUtilsModule
+      const url = toDataURL(browserProxyUtilsSource)
+      return (await import(/* @vite-ignore */ `${url}#${importAttempt}`)) as ProxyUtilsModule
+    }).catch((error) => {
+      // Browsers also cache failed module evaluations by URL.
+      importAttempt++
+      proxyUtilsModulePromise = undefined
+      throw error
     })
   }
 
@@ -98,7 +103,7 @@ export const normalizeSubscriptionProxies = async (
   if (!needsNativeSubscriptionConvert(next)) return next
 
   const { parse, produce } = await loadProxyUtilsModule()
-  return withMutedConsole(async () => {
+  return withMutedConsole(() => {
     const parsed = typeof next[0]?.base64 === 'string' ? parse(next[0].base64) : next
     const native = parsed.filter(
       (proxy) => !proxy.name || proxy.tag || proxy._gui_kind === 'endpoint',

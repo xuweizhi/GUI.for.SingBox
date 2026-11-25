@@ -225,7 +225,7 @@ describe('GroupsController latency tasks', () => {
     expect(mocks.destroy).toHaveBeenCalledOnce()
   })
 
-  it('clears a pending completion destroy timer when unmounted', async () => {
+  it('destroys the completion toast immediately and clears its timer when unmounted', async () => {
     const task = deferredTask()
     mocks.submit.mockReturnValueOnce(task)
     const wrapper = mountController()
@@ -235,9 +235,13 @@ describe('GroupsController latency tasks', () => {
     expect(mocks.complete).toHaveBeenCalledOnce()
     expect(mocks.destroy).not.toHaveBeenCalled()
 
+    mocks.info.mock.calls[0]![2]()
+    expect(mocks.warn).not.toHaveBeenCalled()
+    expect(task.cancel).not.toHaveBeenCalled()
     wrapper.unmount()
+    expect(mocks.destroy).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(3000)
-    expect(mocks.destroy).not.toHaveBeenCalled()
+    expect(mocks.destroy).toHaveBeenCalledOnce()
   })
 
   it('submits a single, writes failure history and toasts the original error with node', async () => {

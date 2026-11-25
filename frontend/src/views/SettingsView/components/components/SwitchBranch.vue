@@ -10,6 +10,14 @@ const appSettings = useAppSettingsStore()
 const kernelApiStore = useKernelApiStore()
 
 const handleUseBranch = async (branch: Branch) => {
+  const previous = appSettings.app.kernel.branch
+  if (
+    branch === previous ||
+    kernelApiStore.starting ||
+    kernelApiStore.stopping ||
+    kernelApiStore.restarting
+  )
+    return
   appSettings.app.kernel.branch = branch
 
   if (!kernelApiStore.running) return
@@ -17,6 +25,7 @@ const handleUseBranch = async (branch: Branch) => {
   try {
     await kernelApiStore.restartCore()
   } catch (error: any) {
+    appSettings.app.kernel.branch = previous
     message.error(error)
   }
 }

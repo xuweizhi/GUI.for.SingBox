@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { Cron } from 'croner'
 import { useI18n, I18nT } from 'vue-i18n'
 
@@ -11,8 +12,17 @@ import { confirm, debounce, formatRelativeTime, formatDate, message, alert, moda
 import ScheduledTaskForm from './components/ScheduledTaskForm.vue'
 import ScheduledTasksLogs from './components/ScheduledTasksLogs.vue'
 
-const handleRunTaskNow = (id: string) => {
-  scheduledTasksStore.runScheduledTask(id)
+const runningTasks = ref(new Set<string>())
+const handleRunTaskNow = async (id: string) => {
+  if (runningTasks.value.has(id)) return
+  runningTasks.value.add(id)
+  try {
+    await scheduledTasksStore.runScheduledTask(id)
+  } catch (error) {
+    message.error(error)
+  } finally {
+    runningTasks.value.delete(id)
+  }
 }
 
 const handleShowNextRuns = (id: string) => {
@@ -102,8 +112,11 @@ const handleDeleteTask = async (s: App.ScheduledTask) => {
 }
 
 const handleDisableTask = async (s: App.ScheduledTask) => {
-  s.disabled = !s.disabled
-  scheduledTasksStore.editScheduledTask(s.id, s)
+  try {
+    await scheduledTasksStore.editScheduledTask(s.id, { ...s, disabled: !s.disabled })
+  } catch (error) {
+    message.error(error)
+  }
 }
 
 const onSortUpdate = debounce(scheduledTasksStore.saveScheduledTasks, 1000)
@@ -157,12 +170,12 @@ const onSortUpdate = debounce(scheduledTasksStore.saveScheduledTasks, 1000)
 
   <Empty v-if="scheduledTasksStore.scheduledtasks.length > 0 && filteredTasks.length === 0" />
 
-  <div
+  <VueDraggable
     v-else-if="scheduledTasksStore.scheduledtasks.length > 0"
-    v-draggable="[
-      scheduledTasksStore.scheduledtasks,
-      { ...DraggableOptions, disabled: Boolean(keywords.trim()), onUpdate: onSortUpdate },
-    ]"
+    v-model="scheduledTasksStore.scheduledtasks"
+    v-bind="DraggableOptions"
+    @update="onSortUpdate"
+    :disabled="Boolean(keywords.trim())"
     :class="'grid-list-' + appSettingsStore.app.scheduledtasksView"
   >
     <Card
@@ -268,7 +281,7 @@ const onSortUpdate = debounce(scheduledTasksStore.saveScheduledTasks, 1000)
       </template>
 
       <template v-else #extra>
-        <Button type="text" size="small" @click="handleRunTaskNow(s.id)">
+        <Button type="text" size="small" :loading="runningTasks.has(s.id)" @click="handleRunTaskNow(s.id)">
           {{ t('scheduledtasks.run') }}
         </Button>
         <Button type="text" size="small" @click="handleShowTaskLogs(s.id)">
@@ -308,7 +321,7 @@ const onSortUpdate = debounce(scheduledTasksStore.saveScheduledTasks, 1000)
       </div>
 
       <div v-if="appSettingsStore.app.scheduledtasksView === View.Grid" class="resource-card-footer">
-        <Button type="normal" size="small" icon="play" @click="handleRunTaskNow(s.id)">
+        <Button type="normal" size="small" icon="play" :loading="runningTasks.has(s.id)" @click="handleRunTaskNow(s.id)">
           {{ t('scheduledtasks.run') }}
         </Button>
         <Button type="text" size="small" @click="handleShowTaskLogs(s.id)">
@@ -319,5 +332,5 @@ const onSortUpdate = debounce(scheduledTasksStore.saveScheduledTasks, 1000)
         </Button>
       </div>
     </Card>
-  </div>
+  </VueDraggable>
 </template>

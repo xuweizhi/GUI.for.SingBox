@@ -15,8 +15,9 @@ const createValueWatcher = (
   let lastValue = initialValue
   return (newValue: number | boolean) => {
     if (newValue !== lastValue) {
-      lastValue = newValue
-      callback(newValue).catch((e) => message.error(e.message || e))
+      callback(newValue)
+        .then(() => (lastValue = newValue))
+        .catch((e) => message.error(e.message || e))
     }
   }
 }

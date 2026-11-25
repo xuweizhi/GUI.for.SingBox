@@ -107,7 +107,7 @@ const handleDeleteGroup = (index: number) => {
   model.value.splice(index, 1)
   proxyGroup.value = proxyGroup.value.map((v) => ({
     ...v,
-    proxies: v.proxies.filter((v) => v.id !== id),
+    proxies: v.id === 'Built-in' ? v.proxies.filter((proxy) => proxy.id !== id) : v.proxies,
   }))
 }
 
@@ -135,9 +135,21 @@ const handleClearGroup = async (outbound: App.Outbound) => {
 
 const handleAddEnd = () => {
   const { id, tag, type } = fields.value
+  if (type === Outbound.Direct || type === Outbound.Block) {
+    fields.value.pre_proxy = ''
+    fields.value.outbounds = []
+  }
   const next = model.value.map((outbound) => (outbound.id === id ? fields.value : outbound))
   if (updateGroupId === -1) next.unshift(fields.value)
-  const cycle = findOutboundGraphIssues(next, nodeGroupsStore.nodeGroups)[0]
+  const previous = findOutboundGraphIssues(model.value, nodeGroupsStore.nodeGroups)
+  const cycle = findOutboundGraphIssues(next, nodeGroupsStore.nodeGroups).find((issue) => {
+    if (issue.type === 'cycle') return issue.chain.includes(id)
+    if (issue.groupId !== id) return false
+    if (issue.type === 'reserved-tag') return true
+    return !previous.some((old) =>
+      old.groupId === id && old.type === issue.type && old.targetId === issue.targetId
+    )
+  })
   if (cycle?.type === 'reserved-tag') {
     message.error(t('kernel.outbounds.reservedTag'))
     return false
@@ -164,7 +176,7 @@ const handleAddEnd = () => {
     model.value
       .filter((outbound) => [Outbound.Selector, Outbound.Urltest].includes(outbound.type as any))
       .forEach(({ outbounds }) => {
-        const proxy = outbounds.find((v) => v.id === id)
+        const proxy = outbounds.find((v) => v.type === 'Built-in' && v.id === id)
         proxy && (proxy.tag = tag)
       })
   }
@@ -181,7 +193,7 @@ const handleAddProxy = (groupID: string, proxyID: string, proxyName: string) => 
   // self
   if (groupID === 'Built-in' && proxyID === fields.value.id) return
 
-  const idx = fields.value.outbounds.findIndex((outbound) => outbound.id === proxyID)
+  const idx = fields.value.outbounds.findIndex((outbound) => outbound.type === groupID && outbound.id === proxyID)
   if (idx !== -1) {
     fields.value.outbounds.splice(idx, 1)
   } else {
@@ -190,7 +202,7 @@ const handleAddProxy = (groupID: string, proxyID: string, proxyName: string) => 
 }
 
 const isInuse = (groupID: string, proxyID: string) => {
-  return fields.value.outbounds.find((outbound) => outbound.id === proxyID)
+  return fields.value.outbounds.find((outbound) => outbound.type === groupID && outbound.id === proxyID)
 }
 
 const hasLost = (outbound: App.Outbound) => {
@@ -373,7 +385,7 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
     <Divider>{{ t('kernel.outbounds.refs') }}</Divider>
     <Empty v-if="fields.outbounds.length === 0" />
     <div v-draggable="[fields.outbounds, DraggableOptions]" class="flex flex-wrap gap-6">
-      <Button v-for="proxy in fields.outbounds" :key="proxy.id" type="normal" size="small" icon="drag">
+      <Button v-for="proxy in fields.outbounds" :key="JSON.stringify([proxy.type, proxy.id])" type="normal" size="small" icon="drag">
         {{ proxy.tag }}
       </Button>
     </div>

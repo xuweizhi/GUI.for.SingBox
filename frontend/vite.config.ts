@@ -1,12 +1,34 @@
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { build, defineConfig } from 'vite'
 
 // https://vitejs.dev/config/
 export default defineConfig(() => {
   return {
     base: './',
-    plugins: [vue()],
+    plugins: [
+      vue(),
+      {
+        name: 'taskworker-yaml',
+        apply: 'build',
+        async closeBundle() {
+          await build({
+            configFile: false,
+            publicDir: false,
+            build: {
+              outDir: 'dist/taskworker',
+              lib: {
+                entry: fileURLToPath(
+                  new URL('./node_modules/yaml/browser/index.js', import.meta.url),
+                ),
+                formats: ['es'],
+                fileName: () => 'yaml.mjs',
+              },
+            },
+          })
+        },
+      },
+    ],
     server: {
       watch: {
         ignored: ['**/node_modules/**', '**/.git/**', '**/dist/**'],

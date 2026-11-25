@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useKernelApiStore } from '@/stores'
@@ -11,7 +11,7 @@ import { useRuntimeNodeDetails } from '@/views/NetCheckView/useRuntimeNodeDetail
 
 const { t, te } = useI18n()
 const kernelApiStore = useKernelApiStore()
-const nodeController = useNodeController()
+const nodeController = useNodeController({ includePolicyNodes: true })
 const networkCheck = useRuntimeNetworkCheck()
 const runError = ref('')
 
@@ -68,20 +68,14 @@ const clearResults = () => {
   networkCheck.clear()
 }
 
-onMounted(() => {
-  void syncNodeController(kernelApiStore.running)
-})
-
-watch(
-  () => kernelApiStore.running,
-  (running) => {
-    void syncNodeController(running)
-  },
-)
-
-onUnmounted(() => {
-  nodeController.stopPolling()
-})
+const active = ref(false)
+const activate = () => { active.value = true }
+const deactivate = () => { active.value = false }
+onMounted(activate)
+onActivated(activate)
+onDeactivated(deactivate)
+watch(() => active.value && kernelApiStore.running, (running) => void syncNodeController(running))
+onUnmounted(() => nodeController.stopPolling())
 </script>
 
 <template>

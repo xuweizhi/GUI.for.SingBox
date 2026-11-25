@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 
+import { useOverlayFocus } from '@/hooks/useOverlayFocus'
 import useI18n from '@/lang'
 
 import MarkdownViewer from '@/components/MarkdownViewer/index.vue'
@@ -48,17 +49,8 @@ const handleCancel = () => {
   emits('finish')
 }
 
-const onKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') {
-    e.stopPropagation()
-    e.preventDefault()
-    if (props.cancel) handleCancel()
-    else handleConfirm()
-  }
-}
-
-onMounted(() => window.addEventListener('keydown', onKeydown, true))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
+const dialog = useTemplateRef<HTMLElement>('dialog')
+useOverlayFocus(dialog, () => props.cancel ? handleCancel() : handleConfirm())
 </script>
 
 <template>
@@ -69,6 +61,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
     <Transition name="dialog-pop" appear>
       <div
         role="alertdialog"
+        ref="dialog"
+        tabindex="-1"
         aria-modal="true"
         :aria-label="t(title)"
         class="gui-confirm flex flex-col rounded-12"

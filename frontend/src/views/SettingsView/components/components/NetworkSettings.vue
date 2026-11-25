@@ -32,7 +32,7 @@ const handleTestProxy = async () => {
 
   testing.value = true
   try {
-    await HttpGet(DefaultTestURL, {}, { Proxy: proxy, Timeout: DefaultTestTimeout })
+    await HttpGet(DefaultTestURL, {}, { Proxy: proxy, Timeout: Math.max(1, Math.ceil(DefaultTestTimeout / 1000)) })
     message.success('settings.requestProxy.testSuccess')
   } catch (error) {
     message.error(error)

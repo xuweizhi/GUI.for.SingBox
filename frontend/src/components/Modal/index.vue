@@ -281,11 +281,14 @@ const getFocusableElements = () => {
 const handleDialogKeydown = (event: KeyboardEvent) => {
   if (event.key !== 'Tab') return
   const focusable = getFocusableElements()
-  if (!focusable.length) return
+  if (!focusable.length) {
+    event.preventDefault()
+    return
+  }
   const first = focusable[0]!
   const last = focusable[focusable.length - 1]!
   if (event.shiftKey) {
-    if (document.activeElement === first || !dialogRef.value?.contains(document.activeElement)) {
+    if (document.activeElement === dialogRef.value || document.activeElement === first || !dialogRef.value?.contains(document.activeElement)) {
       event.preventDefault()
       last.focus()
     }
@@ -342,11 +345,13 @@ watch(open, (v) => {
       return
     }
     if (closeState.phase === 'running-hooks') return
+    removeMinimizedModal()
+    if (props.toolbar.minimize) appStore.modalMinimizers.add(handleMinimize)
     previouslyFocused = document.activeElement as HTMLElement | null
     hasOpened.value = true
     isMinimize.value = false
     modalZindex.value = ++appStore.modalZIndexCounter
-    appStore.modalStack.push(closeFn)
+    if (!appStore.modalStack.includes(closeFn)) appStore.modalStack.push(closeFn)
     nextTick(() => {
       if (dialogRef.value && !dialogRef.value.contains(document.activeElement)) {
         dialogRef.value.focus()
@@ -372,15 +377,17 @@ watch(open, (v) => {
       }).catch((error) => console.error(error))
       return
     }
+    appStore.modalMinimizers.delete(handleMinimize)
     const idx = appStore.modalStack.findIndex((fn) => fn === closeFn)
     if (idx !== -1) {
       appStore.modalStack.splice(idx, 1)
     }
     restoreFocus()
   }
-})
+}, { immediate: open.value })
 
 onUnmounted(() => {
+  appStore.modalMinimizers.delete(handleMinimize)
   const idx = appStore.modalStack.findIndex((fn) => fn === closeFn)
   if (idx !== -1) {
     appStore.modalStack.splice(idx, 1)

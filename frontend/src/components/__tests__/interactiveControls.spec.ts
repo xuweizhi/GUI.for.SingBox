@@ -5,6 +5,9 @@ import SplashView from '@/components/_common/SplashView.vue'
 import Button from '@/components/Button/index.vue'
 import Card from '@/components/Card/index.vue'
 import CheckBox from '@/components/CheckBox/index.vue'
+import Confirm from '@/components/Confirm/index.vue'
+import Picker from '@/components/Picker/index.vue'
+import Prompt from '@/components/Prompt/index.vue'
 import Dropdown from '@/components/Dropdown/index.vue'
 import { icons } from '@/components/Icon/icons'
 import Input from '@/components/Input/index.vue'
@@ -145,6 +148,34 @@ describe('interactive controls', () => {
     expect(wrapper.emitted('submit')?.[0]).toEqual([1000])
   })
 
+  it('commits lazy input only on blur and publishes an in-range number while typing', async () => {
+    const wrapper = mount(Input, {
+      props: { modelValue: 'old', modelModifiers: { lazy: true } },
+      global: { stubs: { Button: true, Icon: true, CodeEditor: true } },
+    })
+    const input = wrapper.get('input')
+    await input.setValue('new')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await input.trigger('blur')
+    expect(wrapper.emitted('update:modelValue')).toEqual([['new']])
+    await wrapper.setProps({ modelValue: 5, type: 'number', min: 1, max: 10, modelModifiers: {} })
+    await input.setValue('123')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([10])
+    wrapper.unmount()
+  })
+
+  it('reflects an external change after selecting the current option again', async () => {
+    const wrapper = mount(Select, {
+      props: { modelValue: 'a', options: [{ label: 'Alpha', value: 'a' }, { label: 'Beta', value: 'b' }] },
+      global: { components: { Button, Dropdown, Input }, stubs: { Empty: true, Icon: true, Teleport: true } },
+    })
+    await wrapper.get('[role="combobox"]').trigger('keydown', { key: 'Enter' })
+    await wrapper.get('[role="option"]').trigger('click')
+    await wrapper.setProps({ modelValue: 'b' })
+    expect(wrapper.get('[role="combobox"]').attributes('aria-label')).toBe('Beta')
+    wrapper.unmount()
+  })
+
   it('toggles password visibility on password Input', async () => {
     const wrapper = mount(Input, {
       props: { modelValue: 'secret', type: 'password' },
@@ -253,5 +284,44 @@ describe('interactive controls', () => {
     for (const name of ['restart', 'stop', 'log', 'settings'] as const) {
       expect(icons[name]).not.toContain('var(--primary-color)')
     }
+  })
+})
+
+describe('stacked dialogs', () => {
+  it('moves keyboard focus to the top dialog and handles Escape once', async () => {
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+    const options = { attachTo: document.body, global: { components: { Button, Input }, stubs: { MarkdownViewer: true, Icon: true, Empty: true } } }
+    const confirm = mount(Confirm, { ...options, props: { title: 'Confirm', message: 'Delete?' } })
+    const picker = mount(Picker, { ...options, props: { type: 'single', title: 'Choose', options: [{ label: 'A', value: 'a' }] } })
+    try {
+      expect(document.activeElement).toBe(picker.get('[role="dialog"]').element)
+      await picker.get('[role="dialog"]').trigger('keydown', { key: 'Tab', shiftKey: true })
+      expect(picker.element.contains(document.activeElement)).toBe(true)
+      await picker.get('[role="option"]').trigger('click')
+      await picker.get('[role="option"]').trigger('click')
+      expect(picker.get('[role="option"]').attributes('aria-selected')).toBe('true')
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      expect(picker.emitted('cancel')).toHaveLength(1)
+      expect(confirm.emitted('cancel')).toBeUndefined()
+    } finally {
+      picker.unmount()
+      confirm.unmount()
+      expect(document.activeElement).toBe(trigger)
+      trigger.remove()
+    }
+  })
+
+  it('keeps a prompt open when Enter commits an IME composition', async () => {
+    const prompt = mount(Prompt, {
+      props: { title: 'Name', props: {} },
+      global: { components: { Input, Button }, stubs: { Icon: true, CodeEditor: true } },
+    })
+    await prompt.get('input').trigger('keydown', { key: 'Enter', isComposing: true })
+    expect(prompt.emitted('submit')).toBeUndefined()
+    await prompt.get('input').trigger('keydown', { key: 'Enter' })
+    expect(prompt.emitted('submit')).toHaveLength(1)
+    prompt.unmount()
   })
 })

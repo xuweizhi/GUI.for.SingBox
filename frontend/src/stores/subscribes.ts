@@ -2,12 +2,18 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { parse } from 'yaml'
 
-import { ReadFile, WriteFile, Requests, GetSystemProxy } from '@/bridge'
 import { RefreshSubscriptionUsage } from '@/bridge/browser/go/bridge/App'
-import { DefaultSubscribeScript, SubscribesFilePath } from '@/constant/app'
+
+import { ReadFile, WriteFile, Requests, GetSystemProxy } from '@/bridge'
+import { DefaultSubscribeScript, SubscribesFilePath, NodeGroupsFilePath } from '@/constant/app'
 import { DefaultExcludeProtocols } from '@/constant/kernel'
 import { PluginTriggerEvent, RequestMethod, RequestProxyMode } from '@/enums/app'
-import { useAppSettingsStore, usePluginsStore, useProfilesStore } from '@/stores'
+import {
+  useAppSettingsStore,
+  usePluginsStore,
+  useProfilesStore,
+  useNodeGroupsStore,
+} from '@/stores'
 import {
   sampleID,
   isValidSubJson,
@@ -31,7 +37,11 @@ import {
   SubscriptionEncryptionHeader,
   deepClone,
 } from '@/utils'
-import { persistConfigFiles, withConfigMutation } from '@/utils/configPersistence'
+import {
+  persistConfigFiles,
+  withConfigMutation,
+  parseResourceList,
+} from '@/utils/configPersistence'
 import {
   extractSubscriptionConfig,
   validateSubscriptionEntries,
@@ -61,7 +71,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
 
   const setupSubscribes = async () => {
     const data = await ignoredError(ReadFile, SubscribesFilePath)
-    data && (subscribes.value = parse(data))
+    subscribes.value = parseResourceList(data)
 
     await migrateSubscribes(subscribes.value, saveSubscribes)
   }
@@ -73,7 +83,7 @@ export const useSubscribesStore = defineStore('subscribes', () => {
 
   const reloadFromDisk = (options: { emitChanges?: boolean } = {}) =>
     withConfigMutation(async () => {
-      const parsed = parse(await ReadFile(SubscribesFilePath))
+      const parsed = parseResourceList<App.Subscription>(await ReadFile(SubscribesFilePath))
       if (!Array.isArray(parsed)) throw new Error('Subscriptions file must contain an array')
       const ids = [
         ...new Set([...subscribes.value, ...parsed].map((subscription) => subscription.id)),
@@ -166,12 +176,12 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       return { added, removed }
     })
 
-  const addSubscribe = (s: App.Subscription) =>
+  const addSubscribe = (s: App.Subscription, attachToCurrentProfile = true) =>
     withConfigMutation(async () => {
       const profilesStore = useProfilesStore()
       const profiles = deepClone(profilesStore.profiles)
       const current = profiles.find((profile) => profile.id === profilesStore.currentProfile?.id)
-      const changed = addSubscribeToDefaultOutbounds(s, current)
+      const changed = attachToCurrentProfile && addSubscribeToDefaultOutbounds(s, current)
       const content = serialize([...subscribes.value, s])
       if (changed)
         await profilesStore.writeProfiles(profiles, [{ path: SubscribesFilePath, content }])
@@ -196,28 +206,80 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       profiles.forEach((profile) =>
         profile.outbounds.forEach((outbound) => {
           outbound.outbounds = outbound.outbounds.filter((item) => {
-            if (item.type !== 'Subscription' || item.id !== id) return true
+            if (item.type !== id && !(item.type === 'Subscription' && item.id === id)) return true
             changed.add(profile.id)
             return false
           })
         }),
       )
       const content = serialize(subscribes.value.filter((s) => s.id !== id))
-      if (changed.size)
-        await profilesStore.writeProfiles(profiles, [{ path: SubscribesFilePath, content }])
+      const groupsStore = useNodeGroupsStore()
+      const groupChanges: string[] = []
+      const groups = groupsStore.nodeGroups.map((group) => {
+        const members = group.members.filter((member) => member.subscription_id !== id)
+        const subscription_ids = group.subscription_ids.filter((value) => value !== id)
+        if (
+          members.length === group.members.length &&
+          subscription_ids.length === group.subscription_ids.length
+        )
+          return group
+        groupChanges.push(group.id)
+        return { ...group, members, subscription_ids }
+      })
+      if (changed.size || groupChanges.length)
+        await profilesStore.writeProfiles(profiles, [
+          { path: SubscribesFilePath, content },
+          ...(groupChanges.length
+            ? [{ path: NodeGroupsFilePath, content: stringifyNoFolding(groups) }]
+            : []),
+        ])
       else await WriteFile(SubscribesFilePath, content)
+      if (groupChanges.length) groupsStore.nodeGroups = groups
+      groupChanges.forEach((id) => eventBus.emit('nodeGroupChange', { id }))
       subscribes.value.splice(idx, 1)
       if (changed.size) publishProfiles(profiles)
       changed.forEach((id) => eventBus.emit('profileChange', { id }))
       eventBus.emit('subscriptionChange', { id })
     })
 
-  const editSubscribe = (id: string, s: App.Subscription) =>
+  const editSubscribe = (
+    id: string,
+    s: App.Subscription,
+    nodeChanges?: { content: string; assignments: { groupId: string; nodeId: string }[] },
+  ) =>
     withConfigMutation(async () => {
       const idx = subscribes.value.findIndex((v) => v.id === id)
-      if (idx === -1) return
+      if (idx === -1) throw new Error(`${id} Not Found`)
       const next = subscribes.value.map((value, index) => (index === idx ? s : value))
-      await WriteFile(SubscribesFilePath, serialize(next))
+      const content = serialize(next)
+      if (nodeChanges) {
+        const files = [
+          { path: s.path, content: nodeChanges.content },
+          { path: SubscribesFilePath, content },
+        ]
+        const store = useNodeGroupsStore()
+        const groups = deepClone(store.nodeGroups)
+        const changed = new Set<string>()
+        for (const { groupId, nodeId } of nodeChanges.assignments) {
+          const group = groups.find((item) => item.id === groupId)
+          if (group?.mode !== 'manual') throw new Error(`Manual node group not found: ${groupId}`)
+          const proxy = s.proxies.find((item) => item.id === nodeId)
+          if (
+            !proxy ||
+            group.members.some((item) => item.subscription_id === id && item.node_id === nodeId)
+          )
+            continue
+          group.members.push({ subscription_id: id, node_id: nodeId, last_known_tag: proxy.tag })
+          changed.add(groupId)
+        }
+        if (changed.size)
+          files.push({ path: NodeGroupsFilePath, content: stringifyNoFolding(groups) })
+        await persistConfigFiles(files)
+        if (changed.size) store.nodeGroups = groups
+        for (const groupId of changed) eventBus.emit('nodeGroupChange', { id: groupId })
+      } else {
+        await WriteFile(SubscribesFilePath, content)
+      }
       subscribes.value.splice(idx, 1, s)
       eventBus.emit('subscriptionChange', { id })
     })
@@ -295,29 +357,22 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       }
     }
 
-    if (isValidSubJson(body)) {
-      const extracted = extractSubscriptionConfig(JSON.parse(body))
-      proxies = extracted.outbounds
-      importedDns = extracted.importedDns
-    } else if (isValidSubYAML(body)) {
-      const extracted = extractSubscriptionConfig(parse(body))
-      proxies = extracted.outbounds
-      importedDns = extracted.importedDns
-    } else if (isValidBase64(body)) {
-      proxies = [{ base64: body }]
-    } else if (isSubscriptionShareLinkList(body)) {
-      // Treat line-based share links the same as base64 subscriptions.
-      proxies = [{ base64: body }]
-    } else if (s.type === 'Manual' || s.type === 'File') {
-      const parsed = JSON.parse(body)
+    const jsonSubscription = isValidSubJson(body)
+    if (jsonSubscription || isValidSubYAML(body)) {
+      const parsed = jsonSubscription ? JSON.parse(body) : parse(body)
       const extracted = extractSubscriptionConfig(parsed)
       proxies = extracted.outbounds
       importedDns = extracted.importedDns
       preserveCachedDns =
         Array.isArray(parsed) &&
         (s.type === 'Manual' ||
-          s.url === s.path ||
-          s.path === processedSubscriptionPath(s.id, s.url))
+          (s.type === 'File' &&
+            (s.url === s.path || s.path === processedSubscriptionPath(s.id, s.url))))
+    } else if (isValidBase64(body)) {
+      proxies = [{ base64: body }]
+    } else if (isSubscriptionShareLinkList(body)) {
+      // Treat line-based share links the same as base64 subscriptions.
+      proxies = [{ base64: body }]
     } else {
       throw 'Not a valid subscription data'
     }
@@ -338,10 +393,10 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     proxies = validateSubscriptionEntries(proxies)
 
     if (s.type !== 'Manual') {
-      const r1 = s.include && buildSmartRegExp(s.include)
-      const r2 = s.exclude && buildSmartRegExp(s.exclude)
-      const r3 = s.includeProtocol && buildSmartRegExp(s.includeProtocol)
-      const r4 = s.excludeProtocol && buildSmartRegExp(s.excludeProtocol)
+      const r1 = s.include?.trim() && buildSmartRegExp(s.include)
+      const r2 = s.exclude?.trim() && buildSmartRegExp(s.exclude)
+      const r3 = s.includeProtocol?.trim() && buildSmartRegExp(s.includeProtocol)
+      const r4 = s.excludeProtocol?.trim() && buildSmartRegExp(s.excludeProtocol)
 
       proxies = proxies.filter((v) => {
         const flag1 = r1 ? r1.test(v.tag) : true

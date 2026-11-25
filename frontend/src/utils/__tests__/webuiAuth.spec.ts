@@ -21,6 +21,12 @@ describe('webuiAuth utils', () => {
     expect(resolveRedirectTarget('%2Fsettings')).toBe('/settings')
   })
 
+  it('preserves decoded route queries and rejects recursive or external redirects', () => {
+    expect(resolveRedirectTarget('/profiles?q=50%25')).toBe('/profiles?q=50%25')
+    expect(resolveRedirectTarget('/login?redirect=/profiles')).toBe('/')
+    expect(resolveRedirectTarget('//other.test/')).toBe('/')
+  })
+
   it('detects unauthorized status codes', () => {
     expect(isUnauthorizedStatus(401)).toBe(true)
     expect(isUnauthorizedStatus(503)).toBe(false)

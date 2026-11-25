@@ -99,7 +99,7 @@ export const resolveProxyChain = (
   const visited = new Set<string>()
   let currentName = startName
 
-  while (currentName && chain.length <= Object.keys(proxies).length) {
+  while (currentName) {
     if (visited.has(currentName)) {
       return {
         chain,

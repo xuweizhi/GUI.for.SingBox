@@ -607,6 +607,47 @@ describe('subscription DNS, endpoints and chained strategies', () => {
     expect(renamed.get('new [b] [via upstream]')).toBe(first.get('node [b] [via upstream]'))
   })
 
+  it('filters individual members before reserving runtime tags or importing DNS', async () => {
+    const profile = createProfile()
+    const selected = strategy('nodes', [
+      { id: 'a-0', tag: 'shared', type: 'a' },
+      { id: 'a-1', tag: 'keep', type: 'a' },
+    ])
+    selected.include = 'keep'
+    profile.outbounds = [selected, strategy('other', [subMember('b')])]
+    subscriptions([
+      { id: 'a', nodes: [socks('shared'), socks('keep', '192.0.2.1')],
+        options: { preferOutboundDns: true, outboundDns: ['9.9.9.9'] } },
+      { id: 'b', nodes: [socks('shared')] },
+    ])
+    const config = await generateConfig(profile, configOptions)
+    expect(config.outbounds.find((node: Recordable) => node.tag === 'other').outbounds).toEqual(['shared'])
+    expect(config.dns.servers.some((server: Recordable) => server.tag.startsWith('sub:a:'))).toBe(false)
+  })
+
+  it('retains a source-editor route to a generated subscription leaf and the injected DNS resolver', async () => {
+    const profile = createProfile()
+    const target = strategy('choose', [subMember('s')])
+    target.role = 'proxy'
+    profile.outbounds = [target]
+    profile.route.rules = []
+    profile.route.rule_set = []
+    profile.dns.servers = []
+    profile.dns.rules = []
+    subscriptions([{ id: 's', nodes: [socks('leaf')] }])
+    const baseline = await generateConfig(profile, configOptions)
+    const edited = structuredClone(baseline)
+    edited.route.final = 'leaf'
+    edited.dns.final = 'System-DNS-Resolver'
+    edited.experimental.clash_api.external_ui_download_detour = 'leaf'
+    const saved = restoreProfile(edited, profile.name, { profile, baseline })
+    const next = await generateConfig(saved, configOptions)
+    expect(next.route.final).toBe('leaf')
+    expect(next.experimental.clash_api.external_ui_download_detour).toBe('leaf')
+    expect(next.dns.final).toBe('System-DNS-Resolver')
+    expect(saved.outbounds[0]!.role).toBe('proxy')
+  })
+
   it('isolates same-named subscription resolvers, rewrites bootstrap references and leaves website DNS unchanged', async () => {
     const profile = createProfile()
     profile.outbounds = [strategy('nodes', [subMember('a'), subMember('b')])]

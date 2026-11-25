@@ -145,8 +145,10 @@ func requestTransport(options RequestOptions) *http.Transport {
 		Insecure: options.Insecure,
 	}
 
-	if transport := requestTransportCache.load(key); transport != nil {
-		return transport
+	if !options.FreshConnection {
+		if transport := requestTransportCache.load(key); transport != nil {
+			return transport
+		}
 	}
 
 	transport := cloneDefaultTransport()
@@ -157,6 +159,11 @@ func requestTransport(options RequestOptions) *http.Transport {
 		}
 	}
 
+	if options.FreshConnection {
+		// Keep the new connection observable for the diagnostic sampler after the request.
+		transport.IdleConnTimeout = 5 * time.Second
+		return transport
+	}
 	return requestTransportCache.store(key, transport)
 }
 

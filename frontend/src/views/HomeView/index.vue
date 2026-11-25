@@ -111,13 +111,15 @@ const handleStopKernel = async () => {
 }
 
 const handleSwitchProfile = async (profileId: string) => {
-  if (appSettingsStore.app.kernel.profile === profileId) return
+  const previous = appSettingsStore.app.kernel.profile
+  if (previous === profileId || switchingProfileId.value || kernelApiStore.starting || kernelApiStore.stopping || kernelApiStore.restarting) return
   appSettingsStore.app.kernel.profile = profileId
   switchingProfileId.value = profileId
   try {
     await kernelApiStore.restartCore()
     message.success('common.success')
   } catch (error: any) {
+    appSettingsStore.app.kernel.profile = previous
     console.error(error)
     message.error(error.message || error)
   } finally {
@@ -129,7 +131,7 @@ const onTunSwitchChange = async (enable: boolean) => {
   try {
     await kernelApiStore.updateConfig('tun', { enable })
   } catch (error: any) {
-    kernelApiStore.config.tun.enable = !kernelApiStore.config.tun.enable
+    kernelApiStore.config.tun.enable = kernelApiStore.running && !enable
     console.error(error)
     message.error(error.message || error)
   }

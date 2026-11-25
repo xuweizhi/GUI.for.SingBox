@@ -11,7 +11,7 @@ import (
 	"syscall"
 )
 
-//go:embed all:frontend/dist/webui taskworker/worker.mjs frontend/src/vendor/proxy-utils.esm.mjs
+//go:embed all:frontend/dist/webui frontend/dist/taskworker/yaml.mjs taskworker/worker.mjs frontend/src/vendor/proxy-utils.esm.mjs
 var assets embed.FS
 
 func main() {

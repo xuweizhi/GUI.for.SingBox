@@ -43,6 +43,11 @@ const closeSingleConnection = async (record: Record<string, any>) => {
   if (!isActive.value) return
   try {
     await deleteConnection(record.id)
+    const row = dataSource.value.find((item) => item.id === record.id)
+    if (row) {
+      dataSource.value = dataSource.value.filter((item) => item.id !== record.id)
+      if (!disconnectedData.value.some((item) => item.id === record.id)) disconnectedData.value.push(row)
+    }
   } catch (error: any) {
     console.log(error)
     message.error(error)
@@ -85,7 +90,8 @@ const addRecordToRuleset = async (
       description: record.metadata.processPath,
     })
   }
-  const payloads = await picker.multi('rulesets.selectRuleType', options)
+  const payloads = await picker.multi('rulesets.selectRuleType', options).catch(() => [])
+  if (!payloads.length) return
   try {
     await addToRuleSet(ruleset, payloads)
     message.success('common.success')
@@ -224,15 +230,14 @@ const columnTitleMap = computed(() => {
   return map
 })
 
-const menu: App.Menu[] = [
+const menu = computed<App.Menu[]>(() => [
   {
     label: 'common.details',
     handler: openDetails,
   },
-  {
-    label: 'home.connections.close',
-    handler: closeSingleConnection,
-  },
+  ...(isActive.value
+    ? [{ label: 'home.connections.close', handler: closeSingleConnection }]
+    : []),
   ...(
     [
       ['home.connections.addToDirect', 'direct'],
@@ -243,7 +248,7 @@ const menu: App.Menu[] = [
     label,
     handler: (record: Record<string, any>) => addRecordToRuleset(ruleset, record),
   })),
-]
+])
 
 const details = ref('')
 const isActive = ref(true)
@@ -310,15 +315,18 @@ const unregisterConnectionsHandler = kernelApiStore.onConnections((data) => {
   dataSource.value.forEach((connection) => {
     // Record Disconnected Connections
     const exist = connections.some((v) => v.id === connection.id)
-    !exist && disconnectedData.value.push(connection)
+    if (!exist) {
+      disconnectedData.value.push(connection)
+      delete TrafficCache[connection.id]
+    }
   })
 
   dataSource.value = connections.map((connection) => {
     // Record Previous Traffic Information
     const result = { ...connection, up: 0, down: 0 }
     const cache = TrafficCache[connection.id]
-    result.up = cache?.up || connection.upload
-    result.down = cache?.down || connection.download
+    result.up = cache?.up ?? connection.upload
+    result.down = cache?.down ?? connection.download
     TrafficCache[connection.id] = {
       down: connection.download,
       up: connection.upload,

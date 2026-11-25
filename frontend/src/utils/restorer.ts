@@ -1,3 +1,4 @@
+import { SystemDnsResolverTag } from '@/constant/kernel'
 import * as Defaults from '@/constant/profile'
 import {
   Inbound,
@@ -41,28 +42,66 @@ const supportedRuleTypes = [
   RouteRuleType.ClashMode,
 ]
 
+// Fields edited separately from the matching criteria of an inline rule.
+const routeOptionFields = [
+  'override_address',
+  'override_port',
+  'network_strategy',
+  'fallback_delay',
+  'udp_disable_domain_unmapping',
+  'udp_connect',
+  'udp_timeout',
+  'tls_fragment',
+  'tls_fragment_fallback_delay',
+  'tls_record_fragment',
+  'tls_spoof',
+  'tls_spoof_method',
+]
+const dnsOptionFields = [
+  'strategy',
+  'rewrite_ttl',
+  'timeout',
+  'disable_optimistic_cache',
+  'remove_client_subnet',
+]
+const predefinedFields = ['rcode', 'answer', 'ns', 'extra']
+const routeFields: Record<string, string[]> = {
+  route: ['outbound'],
+  reject: ['method'],
+  sniff: ['sniffer'],
+  resolve: ['strategy', 'server'],
+  'route-options': routeOptionFields,
+}
+const dnsFields: Record<string, string[]> = {
+  route: ['server', 'strategy', 'disable_cache', 'client_subnet'],
+  reject: ['method'],
+  'route-options': [...dnsOptionFields, 'disable_cache', 'client_subnet'],
+  predefined: predefinedFields,
+}
+const actionJson = (raw: Recordable, fields: string[]) =>
+  JSON.stringify(
+    Object.fromEntries(fields.filter((key) => key in raw).map((key) => [key, raw[key]])),
+    null,
+    2,
+  )
+const matchJson = (raw: Recordable, fields: string[]) =>
+  JSON.stringify(
+    Object.fromEntries(
+      Object.entries(raw).filter(
+        ([key]) => key !== 'action' && key !== 'invert' && !fields.includes(key),
+      ),
+    ),
+    null,
+    2,
+  )
+
 // A simple form rule is safe only when it can represent every native field.
-// Preserve additional match/action fields in the inline payload instead of widening a rule.
 const simpleRuleType = (raw: Recordable, dns: boolean) => {
   const hits = supportedRuleTypes.filter((key) => key in raw)
   if (hits.length !== 1) return RouteRuleType.Inline
   const type = hits[0]!
   const action = raw.action || RuleAction.Route
-  const fields: Record<string, string[]> = dns
-    ? {
-        route: ['server', 'strategy', 'disable_cache', 'client_subnet'],
-        reject: ['method'],
-        'route-options': ['disable_cache', 'client_subnet'],
-        predefined: [],
-      }
-    : {
-        route: ['outbound'],
-        reject: ['method'],
-        sniff: ['sniffer'],
-        resolve: ['strategy', 'server'],
-        'route-options': [],
-        'hijack-dns': [],
-      }
+  const fields = dns ? dnsFields : routeFields
   const modeled = new Set(['action', 'invert', type, ...(fields[action] || [])])
   if (Object.keys(raw).some((key) => !modeled.has(key))) return RouteRuleType.Inline
   const values = Array.isArray(raw[type]) ? raw[type] : [raw[type]]
@@ -75,6 +114,42 @@ const simpleRuleType = (raw: Recordable, dns: boolean) => {
 const buildTagIdMapping = (prefix: string, arr?: Recordable[]): Recordable<string> => {
   if (!arr) return {}
   return arr.reduce((p, c, i) => ((p[c.tag] = prefix + i), p), {})
+}
+
+const asList = (value: string | string[]) => (Array.isArray(value) ? value : [value])
+
+const hasUnmodeledTargets = (config: Recordable, profile: App.Profile) => {
+  const outboundTags = new Set(
+    [
+      ...profile.outbounds,
+      ...(profile.native?.outbounds || []),
+      ...(profile.native?.endpoints || []),
+    ].map((entry) => entry.tag),
+  )
+  const dnsTags = new Set([
+    SystemDnsResolverTag,
+    ...profile.dns.servers.map((entry) => entry.tag),
+    ...(profile.native?.dnsServers || [])
+      .filter((entry) => !entry._gui_id)
+      .map((entry) => entry.tag),
+  ])
+  const resolver = config.route?.default_domain_resolver
+  const outboundRefs = [
+    config.route?.final,
+    config.experimental?.clash_api?.external_ui_download_detour,
+    ...(config.route?.rules || []).map((rule: Recordable) => rule.outbound),
+    ...(config.route?.rule_set || []).map((rule: Recordable) => rule.download_detour),
+  ]
+  const dnsRefs = [
+    config.dns?.final,
+    typeof resolver === 'string' ? resolver : resolver?.server,
+    ...(config.dns?.rules || []).map((rule: Recordable) => rule.server),
+    ...(config.route?.rules || []).map((rule: Recordable) => rule.server),
+  ]
+  return (
+    outboundRefs.some((tag) => tag && !outboundTags.has(tag)) ||
+    dnsRefs.some((tag) => tag && !dnsTags.has(tag))
+  )
 }
 
 type RestoreProfileOptions = {
@@ -96,6 +171,7 @@ export const restoreProfile = (
   const preserveSources =
     !!profile &&
     !!baseline &&
+    !hasUnmodeledTargets(config, profile) &&
     ['outbounds', 'endpoints'].every(
       (key) => JSON.stringify(config[key] || []) === JSON.stringify(baseline[key] || []),
     ) &&
@@ -117,6 +193,10 @@ export const restoreProfile = (
     })
   const RouteRuleSetIds = buildTagIdMapping('ruleset-', config.route?.rule_set)
   const DnsServersIds = buildTagIdMapping('dns-', config.dns?.servers)
+  for (const entry of config.dns?.servers || []) {
+    if (!entry.type || (preserveSources && entry.tag === SystemDnsResolverTag))
+      DnsServersIds[entry.tag] = entry.tag
+  }
   if (preserveSources)
     profile!.dns.servers.forEach((entry) => {
       DnsServersIds[entry.tag] = entry.id
@@ -129,6 +209,12 @@ export const restoreProfile = (
         nativeGraph ? [] : profile?.outbounds || [],
         nativeGraph ? [] : subscriptionIds || [],
       )
+  if (nativeGraph && profile) {
+    for (const group of restoredOutbounds) {
+      const original = profile.outbounds.find((entry) => entry.tag === group.tag)
+      if (original) group.role = getOutboundRole(original)
+    }
+  }
   const originalPrimaryTag = profile?.outbounds.find(
     (outbound) => outbound.id === profile.primary_proxy_outbound,
   )?.tag
@@ -228,6 +314,10 @@ export const restoreProfile = (
 const restoreExperimental = (raw: Recordable, OutboundsIds: Recordable): App.Experimental => {
   const template = Defaults.DefaultExperimental()
   const experimental = deepAssign(template, raw)
+  if (raw?.cache_file?.store_rdrc !== undefined && raw.cache_file.store_dns === undefined)
+    experimental.cache_file.store_dns = raw.cache_file.store_rdrc
+  delete experimental.cache_file.store_rdrc
+  delete experimental.cache_file.rdrc_timeout
   experimental.clash_api.external_ui_download_detour =
     OutboundsIds[raw?.clash_api?.external_ui_download_detour] || ''
   return experimental
@@ -250,12 +340,16 @@ const restoreInbounds = (inbounds: Recordable[], InboundsIds: Recordable): App.I
       const template = Defaults.DefaultInboundTun()
       inbound.tun = {
         interface_name: raw.interface_name ?? template.interface_name,
-        address: raw.address ?? template.address,
+        address: raw.address == null ? template.address : asList(raw.address),
         mtu: raw.mtu ?? template.mtu,
         auto_route: raw.auto_route ?? template.auto_route,
         strict_route: raw.strict_route ?? template.strict_route,
-        route_address: raw.route_address ?? template.route_address,
-        route_exclude_address: raw.route_exclude_address ?? template.route_exclude_address,
+        route_address:
+          raw.route_address == null ? template.route_address : asList(raw.route_address),
+        route_exclude_address:
+          raw.route_exclude_address == null
+            ? template.route_exclude_address
+            : asList(raw.route_exclude_address),
         endpoint_independent_nat: raw.endpoint_independent_nat ?? template.endpoint_independent_nat,
         stack: raw.stack ?? template.stack,
       }
@@ -283,7 +377,9 @@ const restoreInbounds = (inbounds: Recordable[], InboundsIds: Recordable): App.I
           tcp_multi_path: raw.tcp_multi_path ?? template.listen.tcp_multi_path,
           udp_fragment: raw.udp_fragment ?? template.listen.udp_fragment,
         },
-        users: raw.users?.map((user: any) => user.username + ':' + user.password) ?? template.users,
+        users:
+          raw.users?.map((user: any) => user.username + ':' + (user.password ?? '')) ??
+          template.users,
       }
     }
     return inbound
@@ -452,8 +548,6 @@ const restoreOutbounds = (
       if ('tolerance' in raw) {
         outbound.tolerance = raw.tolerance
       }
-    } else {
-      outbound.role = 'custom'
     }
     return outbound
   })
@@ -522,19 +616,7 @@ const restoreRouteRules = (
     rule.type = simpleRuleType(raw, false)
 
     if (rule.type === RouteRuleType.Inline) {
-      rule.payload = JSON.stringify(
-        {
-          ...raw,
-          action: undefined,
-          invert: undefined,
-          outbound: undefined,
-          sniffer: undefined,
-          strategy: undefined,
-          server: undefined,
-        },
-        null,
-        2,
-      )
+      rule.payload = matchJson(raw, routeFields[rule.action] || [])
     } else if (rule.type === RouteRuleType.Inbound) {
       rule.payload = InboundsIds[raw[rule.type]]
     } else if (rule.type === RouteRuleType.RuleSet) {
@@ -553,16 +635,7 @@ const restoreRouteRules = (
         rule.outbound = raw.method
       }
     } else if (RuleAction.RouteOptions === rule.action) {
-      rule.outbound = JSON.stringify(
-        {
-          ...raw,
-          action: undefined,
-          invert: undefined,
-          ...supportedRuleTypes.reduce((p, c) => ((p[c] = undefined), p), {} as Recordable),
-        },
-        null,
-        2,
-      )
+      rule.outbound = actionJson(raw, routeOptionFields)
     } else if (RuleAction.Sniff === rule.action) {
       if ('sniffer' in raw) {
         rule.sniffer = Array.isArray(raw.sniffer) ? raw.sniffer : [raw.sniffer]
@@ -641,7 +714,7 @@ const restoreDnsServers = (
       }
     } else if (DnsServer.Hosts === server.type) {
       if ('path' in raw) {
-        server.hosts_path = raw.path
+        server.hosts_path = asList(raw.path)
       }
       if ('predefined' in raw) {
         server.predefined = Object.entries<string[] | string>(raw.predefined).reduce(
@@ -678,19 +751,7 @@ const restoreDnsRules = (
     rule.type = simpleRuleType(raw, true)
 
     if (rule.type === RouteRuleType.Inline) {
-      rule.payload = JSON.stringify(
-        {
-          ...raw,
-          action: undefined,
-          invert: undefined,
-          client_subnet: undefined,
-          disable_cache: undefined,
-          strategy: undefined,
-          server: undefined,
-        },
-        null,
-        2,
-      )
+      rule.payload = matchJson(raw, dnsFields[rule.action] || [])
     } else if (rule.type === RouteRuleType.Inbound) {
       rule.payload = InboundsIds[raw[rule.type]]
     } else if (rule.type === RouteRuleType.RuleSet) {
@@ -714,19 +775,9 @@ const restoreDnsRules = (
         rule.server = raw.method
       }
     } else if (rule.action === RuleAction.RouteOptions || rule.action === RuleAction.Predefined) {
-      rule.server = JSON.stringify(
-        {
-          ...raw,
-          action: undefined,
-          invert: undefined,
-          disable_cache: undefined,
-          client_subnet: undefined,
-          strategy: undefined,
-          server: undefined,
-          ...supportedRuleTypes.reduce((p, c) => ((p[c] = undefined), p), {} as Recordable),
-        },
-        null,
-        2,
+      rule.server = actionJson(
+        raw,
+        rule.action === RuleAction.Predefined ? predefinedFields : dnsOptionFields,
       )
     }
     if (rule.action === RuleAction.Route || rule.action === RuleAction.RouteOptions) {

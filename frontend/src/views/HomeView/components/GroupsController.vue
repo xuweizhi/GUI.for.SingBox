@@ -12,7 +12,7 @@ import {
 import { useBool } from '@/hooks'
 import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
 import { ignoredError, sleep, handleUseProxy, message, buildSmartRegExp } from '@/utils'
-import { getDelayTestableNodeNames, isDelayTestableNode } from '@/views/HomeView/nodeController'
+import { getDelayTestableNodeNames, isDelayTestableNode, resolveProxyChain } from '@/views/HomeView/nodeController'
 import { nodeLatencyScheduler } from '@/views/HomeView/nodeLatencyScheduler'
 
 import type {
@@ -25,6 +25,7 @@ const expandedSet = ref<Set<string>>(new Set())
 const loadingSet = ref<Set<string>>(new Set())
 const resultCache = new Map<string, { result?: LatencyResult; owners: Set<symbol> }>()
 const handles = new Set<LatencyTaskHandle>()
+const progressToasts = new Set<() => void>()
 const destroyTimers = new Set<ReturnType<typeof setTimeout>>()
 let refreshQueue = Promise.resolve()
 let pendingRefreshes = 0
@@ -68,7 +69,7 @@ const groups = computed(() => {
             alive
           const keywords = filterKeywordsMap.value[group.name]
           const condition2 = keywords ? buildSmartRegExp(keywords, 'i').test(proxy) : true
-          return condition1 && condition2
+          return proxies[proxy] && condition1 && condition2
         })
         .map((proxy) => {
           const history = proxies[proxy]?.history || []
@@ -82,12 +83,7 @@ const groups = computed(() => {
           return a.delay - b.delay
         })
 
-      const chains = [group.now]
-      let tmp = proxies[group.now]
-      while (tmp) {
-        tmp.now && chains.push(tmp.now)
-        tmp = proxies[tmp.now]
-      }
+      const chains = resolveProxyChain(group.now, proxies).chain.filter((name) => proxies[name])
       return { ...group, all, chains, icon: iconMapping[group.name] }
     })
 })
@@ -194,6 +190,7 @@ const handleGroupDelay = (group: string) => {
     const owned = [group, ...names]
     const owner = Symbol(group)
     retainLoading(owned, owner)
+    let finished = false
     let completed = 0
     let success = 0
     let failure = 0
@@ -205,6 +202,7 @@ const handleGroupDelay = (group: string) => {
       t('home.nodes.testingProgress', [0, names.length, 0, 0]),
       99999,
       () => {
+        if (finished || disposed) return
         handle.cancel()
         message.warn('common.canceled')
       },
@@ -225,9 +223,12 @@ const handleGroupDelay = (group: string) => {
       },
     })
     handles.add(handle)
+    progressToasts.add(destroy)
+    void handle.done.then(() => { finished = true })
     void finishTask(handle, owned, owner).then((summary: LatencyTaskSummary) => {
       if (disposed) return
       if (summary.cancelled) {
+        progressToasts.delete(destroy)
         destroy()
         return
       }
@@ -240,6 +241,7 @@ const handleGroupDelay = (group: string) => {
         ]),
       )
       const timer = setTimeout(() => {
+        progressToasts.delete(destroy)
         destroyTimers.delete(timer)
         destroy()
       }, 3000)
@@ -262,7 +264,10 @@ const handleProxyDelay = (proxy: string) => {
     onResult: (result) => {
       if (disposed) return
       applyResult(result, owner)
-      if (!result.ok) message.error(`${result.message}: ${result.name}`)
+      if (!result.ok) {
+        const reason = result.message === 'home.nodes.unavailable' ? t(result.message) : result.message
+        message.error(`${reason}: ${result.name}`)
+      }
     },
   })
   handles.add(handle)
@@ -310,6 +315,8 @@ onScopeDispose(() => {
   disposed = true
   handles.forEach((handle) => handle.cancel())
   handles.clear()
+  progressToasts.forEach((destroy) => destroy())
+  progressToasts.clear()
   destroyTimers.forEach((timer) => clearTimeout(timer))
   destroyTimers.clear()
 })

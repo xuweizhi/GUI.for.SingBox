@@ -14,7 +14,8 @@ type RequestOptions = {
   timeout?: number
   responseType?: ResponseType
   beforeRequest?: () => void
-  onUnauthorized?: () => void | Promise<void>
+  sessionRevision?: () => number
+  onUnauthorized?: (revision?: number) => void | Promise<void>
 }
 
 export class Request {
@@ -23,7 +24,8 @@ export class Request {
   public timeout: number
   public responseType: string
   public beforeRequest: () => void
-  public onUnauthorized: () => void | Promise<void>
+  private sessionRevision?: () => number
+  public onUnauthorized: (revision?: number) => void | Promise<void>
 
   constructor(options: RequestOptions = {}) {
     this.base = options.base || ''
@@ -31,6 +33,7 @@ export class Request {
     this.timeout = options.timeout || 10000
     this.responseType = options.responseType || ResponseType.JSON
     this.beforeRequest = options.beforeRequest || (() => 0)
+    this.sessionRevision = options.sessionRevision
     this.onUnauthorized = options.onUnauthorized || (() => undefined)
   }
 
@@ -38,6 +41,7 @@ export class Request {
     url: string,
     options: { method: Method; body?: Record<string, any>; optional?: boolean },
   ) => {
+    const revision = this.sessionRevision?.()
     this.beforeRequest()
 
     const init: RequestInit = {
@@ -66,7 +70,7 @@ export class Request {
     const res = await fetch(url, init)
 
     if (res.status === 401 && res.headers.get('X-GFS-WebUI-Auth') === 'required') {
-      await this.onUnauthorized()
+      await this.onUnauthorized(revision)
       throw 'auth.invalidToken'
     }
 

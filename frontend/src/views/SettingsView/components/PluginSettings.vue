@@ -1,7 +1,8 @@
 <script lang="ts" setup>
-import { computed } from 'vue'
+import { computed, shallowReactive } from 'vue'
 
 import { useAppSettingsStore, usePluginsStore } from '@/stores'
+import { message } from '@/utils'
 import PluginConfigItem from '@/views/PluginsView/components/PluginConfigItem.vue'
 
 const appSettingsStore = useAppSettingsStore()
@@ -10,6 +11,17 @@ const pluginsStore = usePluginsStore()
 const plugins = computed(() =>
   pluginsStore.plugins.filter((plugin) => plugin.configuration.length > 0),
 )
+const drafts = shallowReactive<Record<string, Recordable>>({})
+const configure = async (plugin: App.Plugin, value: Recordable) => {
+  drafts[plugin.id] = value
+  try {
+    await pluginsStore.configurePlugin(plugin, value)
+  } catch (error) {
+    message.error(error)
+  } finally {
+    if (drafts[plugin.id] === value) delete drafts[plugin.id]
+  }
+}
 </script>
 
 <template>
@@ -27,16 +39,8 @@ const plugins = computed(() =>
       v-for="plugin in plugins"
       :key="plugin.id"
       :plugin="plugin"
-      :model-value="appSettingsStore.app.pluginSettings[plugin.id]"
-      @change="
-        (val: Recordable) => {
-          if (JSON.stringify(val) === '{}') {
-            delete appSettingsStore.app.pluginSettings[plugin.id]
-          } else {
-            appSettingsStore.app.pluginSettings[plugin.id] = val
-          }
-        }
-      "
+      :model-value="drafts[plugin.id] ?? appSettingsStore.app.pluginSettings[plugin.id]"
+      @change="(value: Recordable) => configure(plugin, value)"
     >
       <template #header="{ handleResetAll }">
         <div class="flex items-center px-8 py-12">

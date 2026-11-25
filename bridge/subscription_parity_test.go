@@ -298,3 +298,31 @@ func TestSameFileSubscriptionSeparatesPrefixedCache(t *testing.T) {
 		}
 	}
 }
+
+func TestRenamedSubscriptionNodeKeepsIdentityBeforeNameFallback(t *testing.T) {
+	old := []map[string]any{{"tag": "before", "type": "socks", "server": "a.example", "server_port": 1080}}
+	next := []map[string]any{
+		{"tag": "before", "type": "socks", "server": "b.example", "server_port": 1080},
+		{"tag": "after", "type": "socks", "server": "a.example", "server_port": 1080},
+	}
+	result := reconcileSubscriptionIDs([]subscriptionProxyConfig{{ID: "stable", Tag: "before"}}, old, next)
+	if result[0].ID == "stable" || result[1].ID != "stable" {
+		t.Fatalf("unexpected IDs: %v", result)
+	}
+}
+
+func TestClashDNSFormsAndEndpointReferences(t *testing.T) {
+	config, err := extractSubscription("proxies: []\ndns:\n proxy-server-nameserver: [system, 'dhcp://eth0', '1.1.1.1#DIRECT']")
+	if err != nil || config.DNS == nil || len(config.DNS.Servers) != 3 {
+		t.Fatalf("DNS: %+v, %v", config.DNS, err)
+	}
+	servers := config.DNS.Servers
+	if servers[0]["type"] != "local" || servers[1]["interface"] != "eth0" || servers[2]["server"] != "1.1.1.1" {
+		t.Fatal(servers)
+	}
+	config.DNS.Servers = []map[string]any{{"type": "tailscale", "endpoint": "ts"}}
+	prefixSubscriptionReferences([]map[string]any{{"tag": "ts"}}, config.DNS, "P-")
+	if config.DNS.Servers[0]["endpoint"] != "P-ts" {
+		t.Fatal(config.DNS.Servers)
+	}
+}

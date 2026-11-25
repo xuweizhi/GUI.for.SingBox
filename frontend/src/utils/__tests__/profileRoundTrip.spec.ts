@@ -92,6 +92,72 @@ const raw = () => ({
 })
 
 describe('native profile round-trip regressions', () => {
+  it('round-trips action options exactly once and keeps unmodeled match conditions editable', async () => {
+    const base = raw()
+    const profile = restoreProfile({
+      ...base,
+      route: {
+        ...base.route,
+        rules: [{ action: 'route-options', auth_user: 'alice', override_port: 443 }],
+      },
+      dns: { ...base.dns, rules: [{ action: 'predefined', query_type: 'A', rcode: 'NXDOMAIN' }] },
+    })
+    const route = profile.route.rules[0]!
+    const dns = profile.dns.rules[0]!
+    expect(JSON.parse(route.payload)).toEqual({ auth_user: 'alice' })
+    expect(JSON.parse(dns.payload)).toEqual({ query_type: 'A' })
+    route.outbound = '{"override_port":8443}'
+    dns.server = '{}'
+    const config = await gen(profile)
+    expect(config.route.rules[0]).toMatchObject({ auth_user: 'alice', override_port: 8443 })
+    expect(config.dns.rules[0]).not.toHaveProperty('rcode')
+  })
+
+  it('normalizes native list fields, passwordless users and DNS cache options', async () => {
+    const profile = restoreProfile({
+      ...raw(),
+      experimental: { cache_file: { store_rdrc: false } },
+      inbounds: [
+        { type: 'tun', tag: 'tun', address: '10.1.0.1/30', route_address: '10.0.0.0/8' },
+        { type: 'mixed', tag: 'in', users: [{ username: 'alice' }] },
+      ],
+      dns: { servers: [{ type: 'hosts', tag: 'hosts', path: '/etc/hosts' }] },
+    })
+    const config = await gen(profile)
+    expect(config.inbounds[0].address).toEqual(['10.1.0.1/30'])
+    expect(config.inbounds[0].route_address).toEqual(['10.0.0.0/8'])
+    expect(config.inbounds[1].users).toEqual([{ username: 'alice', password: '' }])
+    expect(config.dns.servers.find((s: Recordable) => s.tag === 'hosts').path).toEqual([
+      '/etc/hosts',
+    ])
+    expect(config.experimental.cache_file.store_dns).toBe(false)
+    expect(config.experimental.cache_file).not.toHaveProperty('store_rdrc')
+  })
+
+  it('retains a legacy DNS target in every modeled reference and a native download detour', async () => {
+    const base = raw()
+    const profile = restoreProfile({
+      ...base,
+      experimental: { clash_api: { external_ui_download_detour: 'direct' } },
+      dns: {
+        servers: [{ tag: 'old', address: '9.9.9.9' }],
+        final: 'old',
+        rules: [{ domain: 'example.org', server: 'old' }],
+      },
+      route: {
+        ...base.route,
+        default_domain_resolver: 'old',
+        rules: [{ action: 'resolve', server: 'old' }],
+      },
+    })
+    const config = await gen(profile)
+    expect(config.experimental.clash_api.external_ui_download_detour).toBe('direct')
+    expect(config.dns.final).toBe('old')
+    expect(config.dns.rules[0].server).toBe('old')
+    expect(config.route.rules[0].server).toBe('old')
+    expect(config.route.default_domain_resolver.server).toBe('old')
+  })
+
   it('preserves additional DNS conditions through the raw editor baseline flow', async () => {
     const profile = restoreProfile(raw())
     const baseline = await gen(profile)

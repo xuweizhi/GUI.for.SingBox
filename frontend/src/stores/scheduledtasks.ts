@@ -1,7 +1,6 @@
 import { Cron } from 'croner'
 import { defineStore } from 'pinia'
 import { ref, watch, onScopeDispose } from 'vue'
-import { parse } from 'yaml'
 
 import {
   EventsOn,
@@ -27,6 +26,7 @@ import {
   useProfilesStore,
 } from '@/stores'
 import { eventBus, ignoredError, stringifyNoFolding } from '@/utils'
+import { parseResourceList, withConfigMutation } from '@/utils/configPersistence'
 
 import type { ScheduledTaskWorkerLogRecord, ScheduledTaskWorkerStatus } from '@/bridge'
 
@@ -50,6 +50,7 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
 
   let offScheduledTaskLog: null | (() => void) = null
   const localRuns = new Map<string, Promise<ScheduledTaskLog | undefined>>()
+  let session = 0
   let initialized = false
   let disposed = false
   let ownershipQueue: Promise<void> = Promise.resolve()
@@ -91,6 +92,8 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
           .filter((item) => !item.disabled)
           .every((item) => isPureSubscription(item.id))
       }
+      case ScheduledTasksType.UpdateRuleset:
+      case ScheduledTasksType.UpdateAllRuleset:
       case ScheduledTasksType.UpdatePlugin:
       case ScheduledTasksType.UpdateAllPlugin:
         return appSettingsStore.app.requestProxyMode !== RequestProxyMode.Kernel
@@ -117,10 +120,6 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
     return canTaskRunInBackend(taskOrType)
   }
 
-  const refreshWorkerStatus = async () => {
-    workerStatus.value = await GetScheduledTaskWorkerStatus()
-  }
-
   const stopLocalCronJobs = () => {
     Object.keys(cronJobsMap).forEach((id) => {
       cronJobsMap[id]?.stop()
@@ -133,41 +132,50 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
     if (disposed) return
     scheduledtasks.value.forEach((task) => {
       if (!task.disabled && !isHandledByWorker(task)) {
-        const job: Cron = new Cron(task.cron, async () => {
-          const occurrence = nextRun
-          nextRun = job.nextRun()?.getTime()
-          if (!occurrence || localRuns.has(task.id)) return
-          try {
-            if (await ClaimLocalTask(task.id, task.cron, occurrence)) {
-              if (!disposed && cronJobsMap[task.id] === job)
-                await runScheduledTaskLocallyOnce(task.id)
+        try {
+          const job: Cron = new Cron(task.cron, async () => {
+            const occurrence = nextRun
+            nextRun = job.nextRun()?.getTime()
+            if (!occurrence || localRuns.has(task.id)) return
+            try {
+              if (await ClaimLocalTask(task.id, task.cron, occurrence)) {
+                if (!disposed && cronJobsMap[task.id] === job)
+                  await runScheduledTaskLocallyOnce(task.id)
+              }
+            } catch (error) {
+              console.warn('Scheduled task failed:', error)
             }
-          } catch (error) {
-            console.warn('Scheduled task failed:', error)
-          }
-        })
-        let nextRun = job.nextRun()?.getTime()
-        cronJobsMap[task.id] = job
+          })
+          let nextRun = job.nextRun()?.getTime()
+          cronJobsMap[task.id] = job
+        } catch (error) {
+          console.warn('Invalid schedule:', task.name, error)
+        }
       }
     })
   }
 
   const reconcileOwnership = (reloadWorker = true) => {
+    const activeSession = session
+    const isCurrent = () => !disposed && activeSession === session
     const reconcile = async () => {
-      if (disposed) return
+      if (!isCurrent()) return
       clearTimeout(ownershipRetry)
       ownershipRetry = undefined
       // Stop local timers before the backend can claim their tasks.
       stopLocalCronJobs()
       try {
         await Promise.allSettled(localRuns.values())
-        if (disposed) return
+        if (!isCurrent()) return
         if (reloadWorker) await ReloadScheduledTaskWorker()
-        await refreshWorkerStatus()
+        if (!isCurrent()) return
+        const status = await GetScheduledTaskWorkerStatus()
+        if (!isCurrent()) return
+        workerStatus.value = status
         refreshLocalCronJobs()
         ownershipRetryDelay = 1000
       } catch (error) {
-        if (!disposed) {
+        if (isCurrent()) {
           ownershipRetry = setTimeout(() => {
             void reconcileOwnership(reloadWorker).catch(() => undefined)
           }, ownershipRetryDelay)
@@ -215,15 +223,24 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
     }
   }
 
+  const retries = new Map<string, number>()
   const queueMetadataRefresh = (record: ScheduledTaskWorkerLogRecord, key: string) => {
+    const activeSession = session
     failedMetadataLogs.delete(key)
     refreshQueue = refreshQueue
       .then(async () => {
-        if (!disposed) await refreshTaskMetadata(record)
+        if (!disposed && activeSession === session) await refreshTaskMetadata(record)
+        retries.delete(key)
       })
       .catch((error) => {
         console.warn('Failed to refresh scheduled task metadata:', error)
-        if (disposed) return
+        if (disposed || activeSession !== session) return
+        const retry = (retries.get(key) || 0) + 1
+        if (retry > 3) {
+          retries.delete(key)
+          return
+        }
+        retries.set(key, retry)
         failedMetadataLogs.set(key, record)
         if (!metadataRetry)
           metadataRetry = setTimeout(() => {
@@ -275,8 +292,10 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
   }
 
   const hydrateWorkerLogs = async () => {
+    const activeSession = session
     const logsStore = useLogsStore()
     const workerLogs = (await ignoredError(GetScheduledTaskWorkerLogs)) ?? []
+    if (activeSession !== session) return
     const merged = new Map<string, ScheduledTaskWorkerLogRecord>()
     for (const record of [...workerLogs, ...logsStore.scheduledtasksLogs]) {
       const key = logKey(record)
@@ -289,11 +308,15 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
   }
 
   const setupScheduledTasks = async () => {
+    const activeSession = ++session
+    disposed = false
     const data = await ignoredError(ReadFile, ScheduledTasksFilePath)
-    data && (scheduledtasks.value = parse(data))
+    if (activeSession !== session) return
+    if (data !== undefined) scheduledtasks.value = parseResourceList(data)
 
     bindScheduledTaskLogEvent()
     await hydrateWorkerLogs()
+    if (activeSession !== session) return
     initialized = true
     await reconcileOwnership()
   }
@@ -302,6 +325,7 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
     const task = getScheduledTaskById(id)
     if (!task) return
 
+    const activeSession = session
     const previousLastTime = task.lastTime
     const startTime = Date.now()
     task.lastTime = startTime
@@ -309,6 +333,7 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
 
     try {
       const result = await getTaskFn(task)()
+      if (disposed || activeSession !== session) return
 
       const log = {
         id: task.id,
@@ -356,24 +381,41 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
   const runScheduledTaskLocallyOnce = (id: string) => {
     const running = localRuns.get(id)
     if (running) return running
-    const result = runScheduledTaskLocally(id).finally(() => localRuns.delete(id))
+    const result = runScheduledTaskLocally(id).finally(() => {
+      if (localRuns.get(id) === result) localRuns.delete(id)
+    })
     localRuns.set(id, result)
     return result
   }
 
   const withOutput = <T>(list: string[], fn: (id: string) => Promise<T>) => {
     return async () => {
-      const output: { ok: boolean; result: T }[] = []
+      const output: { ok: boolean; result: string }[] = []
+      const asText = (value: unknown): string => {
+        if (value === undefined) return 'Success'
+        if (typeof value === 'string') return value
+        try {
+          return JSON.stringify(value) ?? String(value)
+        } catch {
+          return String(value)
+        }
+      }
       for (const id of list) {
         try {
           const result = await fn(id)
           if (Array.isArray(result)) {
-            output.push(...result)
+            for (const item of result) {
+              output.push(
+                item && typeof item === 'object' && typeof item.ok === 'boolean' && 'result' in item
+                  ? { ok: item.ok, result: asText(item.result) }
+                  : { ok: true, result: asText(item) },
+              )
+            }
           } else {
-            output.push({ ok: true, result })
+            output.push({ ok: true, result: asText(result) })
           }
         } catch (error: any) {
-          output.push({ ok: false, result: error.message || error })
+          output.push({ ok: false, result: asText(error?.message || error) })
         }
       }
       return output
@@ -433,60 +475,40 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
     }
   }
 
-  const saveScheduledTasks = async (options: { reloadWorker?: boolean } = {}) => {
-    await WriteFile(ScheduledTasksFilePath, stringifyNoFolding(scheduledtasks.value))
-    if (options.reloadWorker !== false) {
+  const saveScheduledTasks = async () => {
+    await withConfigMutation(() =>
+      WriteFile(ScheduledTasksFilePath, stringifyNoFolding(scheduledtasks.value)),
+    )
+    await reconcileOwnership()
+  }
+
+  const changeTasks = async (
+    change: (tasks: App.ScheduledTask[]) => App.ScheduledTask[],
+    reloadWorker = true,
+  ) => {
+    await withConfigMutation(async () => {
+      const next = change(scheduledtasks.value)
+      await WriteFile(ScheduledTasksFilePath, stringifyNoFolding(next))
+      scheduledtasks.value = next
+    })
+    if (reloadWorker)
       await reconcileOwnership().catch((error) =>
         console.warn('Failed to refresh scheduled task ownership:', error),
       )
-    } else {
-      refreshLocalCronJobs()
-    }
+    else refreshLocalCronJobs()
   }
-
-  const addScheduledTask = async (s: App.ScheduledTask) => {
-    scheduledtasks.value.push(s)
-    try {
-      await saveScheduledTasks()
-    } catch (error) {
-      const idx = scheduledtasks.value.indexOf(s)
-      if (idx !== -1) {
-        scheduledtasks.value.splice(idx, 1)
-      }
-      refreshLocalCronJobs()
-      throw error
-    }
-  }
-
-  const deleteScheduledTask = async (id: string) => {
-    const idx = scheduledtasks.value.findIndex((v) => v.id === id)
-    if (idx === -1) return
-    const backup = scheduledtasks.value.splice(idx, 1)[0]!
-    try {
-      await saveScheduledTasks()
-    } catch (error) {
-      scheduledtasks.value.splice(idx, 0, backup)
-      refreshLocalCronJobs()
-      throw error
-    }
-  }
-
-  const editScheduledTask = async (
+  const addScheduledTask = (task: App.ScheduledTask) => changeTasks((tasks) => [...tasks, task])
+  const deleteScheduledTask = (id: string) =>
+    changeTasks((tasks) => tasks.filter((task) => task.id !== id))
+  const editScheduledTask = (
     id: string,
-    s: App.ScheduledTask,
+    value: App.ScheduledTask,
     options: { reloadWorker?: boolean } = {},
-  ) => {
-    const idx = scheduledtasks.value.findIndex((v) => v.id === id)
-    if (idx === -1) return
-    const backup = scheduledtasks.value.splice(idx, 1, s)[0]!
-    try {
-      await saveScheduledTasks(options)
-    } catch (error) {
-      scheduledtasks.value.splice(idx, 1, backup)
-      refreshLocalCronJobs()
-      throw error
-    }
-  }
+  ) =>
+    changeTasks(
+      (tasks) => tasks.map((task) => (task.id === id ? value : task)),
+      options.reloadWorker !== false,
+    )
 
   const clearScheduledTaskLogs = async () => {
     const logsStore = useLogsStore()
@@ -522,18 +544,32 @@ export const useScheduledTasksStore = defineStore('scheduledtasks', () => {
     },
   )
 
-  onScopeDispose(() => {
+  const stopSession = () => {
+    ++session
+    initialized = false
     disposed = true
     clearTimeout(ownershipRetry)
     clearTimeout(metadataRetry)
     stopLocalCronJobs()
     offScheduledTaskLog?.()
-  })
+    offScheduledTaskLog = null
+    ownershipQueue = Promise.resolve()
+    refreshQueue = Promise.resolve()
+    localRuns.clear()
+    failedMetadataLogs.clear()
+    retries.clear()
+    scheduledtasks.value = []
+    seenLogs.clear()
+    ownLogs.clear()
+    metadataRetry = undefined
+  }
+  onScopeDispose(stopSession)
 
   return {
     scheduledtasks,
     workerStatus,
     setupScheduledTasks,
+    stopSession,
     saveScheduledTasks,
     addScheduledTask,
     editScheduledTask,

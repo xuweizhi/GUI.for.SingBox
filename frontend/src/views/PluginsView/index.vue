@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n, I18nT } from 'vue-i18n'
 
 import { DraggableOptions, ViewOptions } from '@/constant/app'
@@ -100,17 +101,25 @@ const handleUpdatePluginHub = async () => {
   }
 }
 
+const updatingAll = ref(false)
 const handleUpdatePlugins = async () => {
+  if (updatingAll.value || pluginsStore.plugins.some((item) => item.updating)) return
+  updatingAll.value = true
   try {
-    await pluginsStore.updatePlugins()
+    const results = await pluginsStore.updatePlugins()
+    const failures = results.filter((item) => !item.ok)
+    if (failures.length) throw new Error(failures.map((item) => item.result).join('\n'))
     message.success('common.success')
   } catch (error: any) {
     console.error('handleUpdatePlugins: ', error)
     message.error(error)
+  } finally {
+    updatingAll.value = false
   }
 }
 
 const handleUpdatePlugin = async (s: App.Plugin) => {
+  if (updatingAll.value || s.updating) return
   try {
     await pluginsStore.updatePlugin(s.id)
     message.success('common.success')
@@ -251,7 +260,7 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
     >
       {{ t('plugins.checkForUpdates') }}
     </Button>
-    <Button :disabled="noUpdateNeeded" :type="noUpdateNeeded ? 'text' : 'link'" @click="handleUpdatePlugins">
+    <Button :disabled="noUpdateNeeded" :type="noUpdateNeeded ? 'text' : 'link'" :loading="updatingAll" @click="handleUpdatePlugins">
       {{ t('common.updateAll') }}
     </Button>
     <Button type="primary" icon="add" class="ml-16" @click="handleAddPlugin">
@@ -261,12 +270,12 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
 
   <Empty v-if="pluginsStore.plugins.length > 0 && filteredPlugins.length === 0" />
 
-  <div
+  <VueDraggable
     v-else-if="pluginsStore.plugins.length > 0"
-    v-draggable="[
-      pluginsStore.plugins,
-      { ...DraggableOptions, disabled: Boolean(keywords.trim()), onUpdate: onSortUpdate },
-    ]"
+    v-model="pluginsStore.plugins"
+    v-bind="DraggableOptions"
+    @update="onSortUpdate"
+    :disabled="Boolean(keywords.trim())"
     :class="'grid-list-' + appSettingsStore.app.pluginsView"
   >
     <Card
@@ -509,7 +518,7 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
         </template>
       </div>
     </Card>
-  </div>
+  </VueDraggable>
 </template>
 
 <style lang="less" scoped>

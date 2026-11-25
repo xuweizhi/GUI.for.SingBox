@@ -108,10 +108,13 @@ const buildProxyUrl = (endpoint: NetworkCheckProxyEndpoint | undefined) => {
   if (!endpoint) return ''
 
   const { schema, host, port, username, password } = endpoint
+  let localHost = host
+  if (!host || host === '0.0.0.0') localHost = '127.0.0.1'
+  if (host === '::' || host === '[::]') localHost = '::1'
   const auth = username
     ? `${encodeURIComponent(username)}${password ? `:${encodeURIComponent(password)}` : ''}@`
     : ''
-  return `${schema}://${auth}${formatProxyHost(host)}:${port}`
+  return `${schema}://${auth}${formatProxyHost(localHost)}:${port}`
 }
 
 const resolveGroupStatus = (items: NetworkCheckResultItem[]): ResultStatus => {
@@ -320,7 +323,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
       dnsItems.push(
         createSkippedItem('dns-query', 'netCheck.results.dnsQuery', 'netCheck.summary.ipTarget'),
       )
-    } else if (!deps.dnsQuery) {
+    } else if (!coreAvailable || !deps.dnsQuery) {
       dnsItems.push(
         createSkippedItem(
           'dns-query',
@@ -356,7 +359,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     }
     syncGroups()
 
-    if (!deps.getPrimaryOutboundState) {
+    if (!coreAvailable || !deps.getPrimaryOutboundState) {
       outboundItems.push(
         createSkippedItem(
           'primary-outbound',
@@ -375,6 +378,13 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
               'netCheck.summary.outboundUnavailable',
             ),
           )
+        } else if (outbound.mode === 'unavailable') {
+          outboundItems.push({
+            id: 'primary-outbound',
+            title: 'netCheck.results.outboundDelay',
+            status: 'failed',
+            summary: 'netCheck.summary.outboundUnavailable',
+          })
         } else {
           const chain = outbound.chain?.filter(Boolean).join(' -> ')
           outboundItems.push({

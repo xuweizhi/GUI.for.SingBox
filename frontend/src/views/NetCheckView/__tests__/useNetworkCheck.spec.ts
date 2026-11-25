@@ -94,6 +94,25 @@ describe('useNetworkCheck', () => {
     scope.stop()
   })
 
+  it('skips core-only diagnostics when the core is offline', async () => {
+    mocks.probeApiAvailability.mockRejectedValue(new Error('offline'))
+    const vm = useNetworkCheck(mocks)
+    await vm.run('example.com')
+    expect(mocks.tcpPing).toHaveBeenCalledOnce()
+    expect(mocks.dnsQuery).not.toHaveBeenCalled()
+    expect(mocks.getPrimaryOutboundState).not.toHaveBeenCalled()
+  })
+
+  it('tests the loopback address for wildcard binds and marks an unavailable outbound as failed', async () => {
+    mocks.getKernelProxyEndpoint.mockResolvedValue({ schema: 'http', host: '0.0.0.0', port: 7890 })
+    mocks.httpHead.mockResolvedValue({ status: 204 })
+    mocks.getPrimaryOutboundState.mockResolvedValue({ mode: 'unavailable' })
+    const vm = useNetworkCheck(mocks)
+    await vm.run('example.com')
+    expect(mocks.httpHead).toHaveBeenCalledWith('https://example.com/', {}, { Proxy: 'http://127.0.0.1:7890', Timeout: 15 })
+    expect(vm.groups.value[2]?.items[0]?.status).toBe('failed')
+  })
+
   it('skips DNS when the target is an IP literal', async () => {
     mocks.probeApiAvailability.mockResolvedValue({ version: 'ok' })
     mocks.getKernelProxyEndpoint.mockResolvedValue({

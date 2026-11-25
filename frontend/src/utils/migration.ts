@@ -6,6 +6,13 @@ export const migrateProfiles = async (profiles: App.Profile[], save: () => Promi
   let needSync = false
 
   profiles.forEach((profile) => {
+    const cache = profile.experimental?.cache_file
+    if (cache && cache.store_rdrc !== undefined) {
+      cache.store_dns ??= cache.store_rdrc
+      delete cache.store_rdrc
+      delete cache.rdrc_timeout
+      needSync = true
+    }
     profile.outbounds.forEach((outbound) => {
       if (typeof outbound.role === 'undefined') {
         outbound.role = getOutboundRole(outbound)

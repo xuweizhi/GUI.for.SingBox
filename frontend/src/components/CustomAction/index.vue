@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, h, isVNode, ref, resolveComponent, watch } from 'vue'
+import { computed, h, isVNode, ref, resolveComponent, reactive } from 'vue'
 
 interface Props {
   actions: (App.CustomAction | App.CustomActionFn)[]
@@ -7,13 +7,22 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const resolvedActionMap = ref(new Map<string, App.CustomAction>())
+const factories = new WeakMap<App.CustomActionFn, App.CustomAction>()
 const api: App.CustomActionApi = {
   h: (type: any, ...args: any[]) => h(resolveComponent(type), ...args),
   ref,
 }
 
-const computedActions = computed(() => Array.from(resolvedActionMap.value.values()))
+const computedActions = computed(() =>
+  props.actions.map((action) => {
+    if (typeof action !== 'function') return action
+    const existing = factories.get(action)
+    if (existing) return existing
+    const resolved = reactive(action(api))
+    factories.set(action, resolved)
+    return resolved
+  }),
+)
 
 const resolveDynamicField = <T>(field: T): T => (typeof field === 'function' ? field(api) : field)
 
@@ -21,30 +30,12 @@ const renderCustomActionSlot = (slot: App.CustomAction['componentSlots']) => {
   const resolved = resolveDynamicField(slot ?? {})
   return isVNode(resolved) ? resolved : h('div', resolved)
 }
-
-watch(
-  () => props.actions,
-  (actions) => {
-    const newMap = new Map<string, App.CustomAction>()
-    for (const action of actions) {
-      const id = action.id!
-      if (resolvedActionMap.value.has(id)) {
-        newMap.set(id, resolvedActionMap.value.get(id)!)
-      } else {
-        newMap.set(id, typeof action === 'function' ? action(api) : action)
-      }
-    }
-    resolvedActionMap.value = newMap
-  },
-  { immediate: true, deep: true },
-)
 </script>
 <template>
   <component
     :is="action.component"
-    v-for="action in computedActions"
-    :key="action.id"
-    v-memo="action.id"
+    v-for="(action, index) in computedActions"
+    :key="actions[index]?.id"
     v-bind="resolveDynamicField(action.componentProps)"
   >
     <template

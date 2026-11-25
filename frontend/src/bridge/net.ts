@@ -101,13 +101,21 @@ const transformRequest = async (
   body: Request['body'],
   options: Request['options'],
 ) => {
-  const transformedHeaders = { 'User-Agent': getUserAgent(), ...headers }
+  const transformedHeaders: Record<string, string> = { 'User-Agent': getUserAgent(), ...headers }
 
-  if (transformedHeaders['Content-Type']?.includes('application/json')) {
-    body && (body = JSON.stringify(body))
-  } else if (transformedHeaders['Content-Type']?.includes('application/x-www-form-urlencoded')) {
-    body && (body = new URLSearchParams(body).toString())
+  const contentType = Object.entries(transformedHeaders)
+    .find(([key]) => key.toLowerCase() === 'content-type')?.[1]
+    ?.toLowerCase()
+  if (body != null && typeof body !== 'string') {
+    if (contentType?.includes('application/x-www-form-urlencoded'))
+      body = new URLSearchParams(body).toString()
+    else {
+      if (!contentType && typeof body === 'object')
+        transformedHeaders['Content-Type'] = 'application/json'
+      body = JSON.stringify(body)
+    }
   }
+  body ??= ''
 
   const transformedReqOpts = await mergeRequestOptions(options)
   return [transformedHeaders, body, transformedReqOpts] as const
@@ -162,11 +170,9 @@ const requestWithProgress = (fnName: 'Download' | 'Upload') => {
       _headers,
       progressEvent,
       _options,
-    )
-
-    if (progressEvent) {
-      EventsOff(progressEvent)
-    }
+    ).finally(() => {
+      if (progressEvent) EventsOff(progressEvent)
+    })
 
     if (!flag) throw respBody
 
@@ -251,8 +257,20 @@ export const Requests = async <T = any>(options: RequestWithAutoTransform) => {
     reqHeaders,
     reqBody,
     finalReqOpts,
-  )
+  ).catch((error) => {
+    if (streamEvent) EventsOff(streamEvent)
+    throw error
+  })
 
+  // SSE completion is delivered on a separate connection and may follow the RPC response.
+  if (
+    streamEvent &&
+    (!flag ||
+      !String(respHeaders?.['Content-Type'] || '')
+        .toLowerCase()
+        .includes('text/event-stream'))
+  )
+    EventsOff(streamEvent)
   if (!flag) throw respBody
 
   const transformedHeaders = transformResponseHeaders(respHeaders)

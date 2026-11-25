@@ -271,7 +271,7 @@ func inspectBackup(stage string, p *backupPreview) error {
 				} `yaml:"rule_set"`
 			} `yaml:"route"`
 		}
-		if err = yaml.Unmarshal(b, &objects); err != nil || objects == nil {
+		if err = yaml.Unmarshal(b, &objects); err != nil {
 			return fmt.Errorf("%s must contain a resource list", name)
 		}
 		ids := map[string]bool{}

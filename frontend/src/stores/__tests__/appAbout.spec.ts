@@ -79,3 +79,34 @@ describe('app store About modal', () => {
     expect(openMock).toHaveBeenCalledTimes(2)
   })
 })
+
+it('rejects an unverified release and clears the previous download selection', async () => {
+  setActivePinia(createPinia())
+  const { HttpGet, Download } = await import('@/bridge')
+  const { useAppStore } = await import('@/stores/app')
+  const store = useAppStore()
+  const asset = {
+    name: 'GUI.for.SingBox-linux-.tar.gz',
+    browser_download_url: 'release',
+    uploader: { login: 'github-actions[bot]' },
+  }
+  const release = (digest: string) => ({ body: { tag_name: 'v2', assets: [{ ...asset, digest }] } })
+  vi.mocked(HttpGet).mockResolvedValueOnce(release('sha256:' + '1'.repeat(64)) as any)
+  await store.checkForUpdates()
+  expect(store.updatable).toBeTruthy()
+  vi.mocked(HttpGet).mockResolvedValueOnce(release('sha256:') as any)
+  await store.checkForUpdates()
+  await store.downloadApp()
+  expect(store.updatable).toBeFalsy()
+  expect(Download).not.toHaveBeenCalled()
+})
+
+it('clears locale loading when the language file cannot be loaded', async () => {
+  setActivePinia(createPinia())
+  const { loadLocale } = await import('@/lang')
+  vi.mocked(loadLocale).mockRejectedValueOnce(new Error('invalid locale'))
+  const { useAppStore } = await import('@/stores/app')
+  const store = useAppStore()
+  await expect(store.loadLocales(false)).rejects.toThrow('invalid locale')
+  expect(store.localesLoading).toBe(false)
+})

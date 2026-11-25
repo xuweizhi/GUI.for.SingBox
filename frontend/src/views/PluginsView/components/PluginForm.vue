@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, inject, computed, h } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n } from 'vue-i18n'
 
 import { PluginsTriggerOptions, DraggableOptions } from '@/constant/app'
@@ -66,18 +67,26 @@ const pluginsStore = usePluginsStore()
 const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
 
+const restored = ref(false)
 const handleRestore = () => {
   if (official.value) {
-    plugin.value = deepClone(official.value)
+    const { path, status, disabled } = plugin.value
+    plugin.value = { ...deepClone(official.value), path, status, disabled }
+    restored.value = true
     message.success('common.success')
   }
 }
 
+const invalidConfiguration = computed(() =>
+  plugin.value.configuration.some((field) => !field.component || !field.key.trim()),
+)
 const handleSave = async () => {
+  if (invalidConfiguration.value || loading.value) return
   loading.value = true
   try {
     if (props.id) {
-      await pluginsStore.editPlugin(props.id, plugin.value)
+      if (restored.value) await pluginsStore.updatePlugin(props.id, plugin.value)
+      else await pluginsStore.editPlugin(props.id, plugin.value)
     } else {
       await pluginsStore.addPlugin(plugin.value)
     }
@@ -181,6 +190,7 @@ const modalSlots = {
         type: 'primary',
         loading: loading.value,
         disabled:
+          invalidConfiguration.value ||
           !plugin.value.name ||
           !plugin.value.version ||
           !plugin.value.path ||
@@ -287,8 +297,10 @@ defineExpose({ modalSlots })
         />
       </div>
       <Divider>{{ t('plugin.configuration') }}</Divider>
-      <div
-        v-draggable="[plugin.configuration, { ...DraggableOptions, handle: '.drag' }]"
+      <VueDraggable
+        v-model="plugin.configuration"
+        v-bind="DraggableOptions"
+        handle=".drag"
         class="px-8 flex flex-col gap-8"
       >
         <template v-for="(conf, index) in plugin.configuration" :key="conf.id">
@@ -364,7 +376,7 @@ defineExpose({ modalSlots })
             </div>
           </Card>
         </template>
-      </div>
+      </VueDraggable>
 
       <div :class="plugin.configuration.length !== 0 ? 'mt-8' : ''" class="mx-8">
         <Button type="primary" icon="add" class="w-full" @click="handleAddParam" />

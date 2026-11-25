@@ -35,6 +35,8 @@ const (
 	rulesetsFilePath                 = "data/rulesets.yaml"
 	scheduledTaskWorkerScriptSrc     = "taskworker/worker.mjs"
 	scheduledTaskWorkerScriptDst     = "data/.cache/taskworker/worker.mjs"
+	scheduledTaskWorkerYamlSrc       = "frontend/dist/taskworker/yaml.mjs"
+	scheduledTaskWorkerYamlDst       = "data/.cache/taskworker/yaml.mjs"
 	scheduledTaskWorkerProxyUtilsSrc = "frontend/src/vendor/proxy-utils.esm.mjs"
 	scheduledTaskWorkerProxyUtilsDst = "data/.cache/taskworker/proxy-utils.esm.mjs"
 	scheduledTaskLogEventName        = "scheduledTaskLog"
@@ -924,6 +926,63 @@ func (w *scheduledTaskWorkerSupervisor) failProcess(cmd *exec.Cmd, cause error) 
 	}
 }
 
+// Delegate plugin network operations to the same transport and download validation used by the UI.
+func (w *scheduledTaskWorkerSupervisor) serveWorkerNetwork(cmd *exec.Cmd, msg scheduledTaskWorkerMessage) {
+	w.mu.Lock()
+	stdin := w.stdin
+	active := w.cmd == cmd && stdin != nil
+	w.mu.Unlock()
+	if !active {
+		return
+	}
+	var request struct {
+		Method, URL, Body, Path string
+		Headers                 map[string]string
+		Options                 RequestOptions
+		UseGlobalProxy          bool
+	}
+	err := json.Unmarshal(msg.Params, &request)
+	if err == nil && request.UseGlobalProxy {
+		var settings backendNetworkSettings
+		settings, err = loadBackendNetworkSettings()
+		if err == nil {
+			request.Options.Proxy, err = w.resolveGlobalRequestProxy(settings)
+		}
+	}
+	reply := scheduledTaskWorkerMessage{Type: "network-result", ID: msg.ID}
+	if err == nil {
+		var result HTTPResult
+		switch msg.Method {
+		case "download":
+			result = w.app.Download(request.Method, request.URL, request.Path, request.Headers, "", request.Options)
+		case "request":
+			result = w.app.Requests(request.Method, request.URL, request.Headers, request.Body, request.Options)
+		default:
+			err = errors.New("unsupported worker network operation")
+		}
+		if err == nil {
+			if !result.Flag {
+				err = fmt.Errorf("request failed (%d): %s", result.Status, result.Body)
+			} else {
+				reply.Result, err = json.Marshal(result)
+			}
+		}
+	}
+	if err != nil {
+		reply.Error = err.Error()
+	}
+	line, err := json.Marshal(reply)
+	if err != nil {
+		return
+	}
+	w.writeMu.Lock()
+	_, err = stdin.Write(append(line, '\n'))
+	w.writeMu.Unlock()
+	if err != nil {
+		w.failProcess(cmd, err)
+	}
+}
+
 func (w *scheduledTaskWorkerSupervisor) readLoop(stdout io.ReadCloser, cmd *exec.Cmd) {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), scheduledTaskWorkerMaxResponse)
@@ -934,6 +993,10 @@ func (w *scheduledTaskWorkerSupervisor) readLoop(stdout io.ReadCloser, cmd *exec
 		}
 		var message scheduledTaskWorkerMessage
 		if err := json.Unmarshal([]byte(line), &message); err != nil {
+			continue
+		}
+		if message.Type == "network" {
+			go w.serveWorkerNetwork(cmd, message)
 			continue
 		}
 		if message.Type != "response" {
@@ -1243,17 +1306,6 @@ func loadUserSettingsMap() (map[string]any, error) {
 	return settings, nil
 }
 
-func saveUserSettingsMap(settings map[string]any) error {
-	content, err := yaml.Marshal(settings)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(resolvePath("data"), os.ModePerm); err != nil {
-		return err
-	}
-	return atomicWriteFile(resolvePath("data/user.yaml"), content, 0o600)
-}
-
 func loadPluginSettingsMap() (map[string]any, error) {
 	settings, err := loadUserSettingsMap()
 	if err != nil {
@@ -1358,13 +1410,13 @@ func (w *scheduledTaskWorkerSupervisor) validateBackendTaskSupport(task schedule
 	switch task.Type {
 	case "update::subscription", "update::all::subscription", "update::all::subscription::sync-outbound-refs":
 		return w.validateSubscriptionTaskSupport(task)
-	case "update::plugin", "update::all::plugin":
+	case "update::plugin", "update::all::plugin", "update::ruleset", "update::all::ruleset":
 		settings, err := loadBackendNetworkSettings()
 		if err != nil {
 			return err
 		}
 		if settings.RequestProxyMode == "kernel" {
-			return errors.New("plugin updates are not supported by the backend executor when requestProxyMode is kernel")
+			return fmt.Errorf("%s is not supported by the backend executor when requestProxyMode is kernel", task.Type)
 		}
 		return nil
 	case "run::plugin":
@@ -1732,10 +1784,6 @@ func (w *scheduledTaskWorkerSupervisor) runAllPluginsTask() ([]scheduledTaskWork
 		})
 	}
 
-	if err := savePlugins(plugins); err != nil {
-		return nil, err
-	}
-
 	return output, nil
 }
 
@@ -1759,9 +1807,6 @@ func (w *scheduledTaskWorkerSupervisor) updatePluginByID(
 		if err := w.doUpdatePlugin(plugin, &plugins, settings); err != nil {
 			return "", fmt.Errorf("Failed to update plugin [%s]. Reason: %v", plugin.Name, err)
 		}
-		if err := savePlugins(plugins); err != nil {
-			return "", err
-		}
 		return fmt.Sprintf("Plugin [%s] updated successfully.", plugin.Name), nil
 	}
 
@@ -1774,6 +1819,7 @@ func (w *scheduledTaskWorkerSupervisor) doUpdatePlugin(
 	settings backendNetworkSettings,
 ) error {
 	nextPlugin := *plugin
+	majorChange := false
 
 	if strings.HasPrefix(plugin.ID, "plugin-") {
 		pluginHub, err := loadPluginHub()
@@ -1795,13 +1841,9 @@ func (w *scheduledTaskWorkerSupervisor) doUpdatePlugin(
 		nextMajor := pluginMajorVersion(hubPlugin.Version)
 		if currentMajor != "" && nextMajor != "" && currentMajor != nextMajor {
 			nextPlugin = *hubPlugin
-			if err := reconcilePluginUserSettings(plugin.ID, plugin.Configuration, nextPlugin.Configuration); err != nil {
-				return err
-			}
-			replacePluginInSlice(plugins, plugin.ID, nextPlugin)
-			*plugin = nextPlugin
+			nextPlugin.Path, nextPlugin.Disabled, nextPlugin.Status = plugin.Path, plugin.Disabled, plugin.Status
+			majorChange = true
 		} else if hubPlugin.Version != "" {
-			plugin.Version = hubPlugin.Version
 			nextPlugin.Version = hubPlugin.Version
 		}
 	}
@@ -1810,16 +1852,17 @@ func (w *scheduledTaskWorkerSupervisor) doUpdatePlugin(
 	switch nextPlugin.Type {
 	case "File":
 		content, err := os.ReadFile(resolvePath(nextPlugin.Path))
-		if err == nil {
-			code = string(content)
+		if err != nil {
+			return err
 		}
+		code = string(content)
 	case "Http":
 		proxy, err := w.resolveGlobalRequestProxy(settings)
 		if err != nil {
 			return err
 		}
 		result := w.app.Requests("GET", nextPlugin.URL, map[string]string{}, "", RequestOptions{
-			Proxy:   proxy,
+			Proxy: proxy, Redirect: true,
 			Timeout: 15,
 		})
 		if !result.Flag {
@@ -1833,14 +1876,25 @@ func (w *scheduledTaskWorkerSupervisor) doUpdatePlugin(
 		return fmt.Errorf("unsupported plugin type: %s", nextPlugin.Type)
 	}
 
+	files := []fileUpdate{}
 	if nextPlugin.Type != "File" {
-		if err := os.MkdirAll(filepath.Dir(resolvePath(nextPlugin.Path)), 0o700); err != nil {
+		files = append(files, fileUpdate{resolvePath(nextPlugin.Path), []byte(code)})
+	}
+	if majorChange {
+		settingsFile, err := reconciledPluginUserSettings(plugin.ID, nextPlugin.Configuration)
+		if err != nil {
 			return err
 		}
-		if err := atomicWriteFile(resolvePath(nextPlugin.Path), []byte(code), 0o600); err != nil {
-			return err
+		if settingsFile != nil {
+			files = append(files, *settingsFile)
 		}
 	}
+	next := append([]pluginConfig(nil), (*plugins)...)
+	replacePluginInSlice(&next, plugin.ID, nextPlugin)
+	if err := commitFileUpdates(files, func() error { return savePlugins(next) }); err != nil {
+		return err
+	}
+	*plugin = nextPlugin
 
 	return nil
 }
@@ -2319,24 +2373,23 @@ func replacePluginInSlice(plugins *[]pluginConfig, id string, next pluginConfig)
 	}
 }
 
-func reconcilePluginUserSettings(
+func reconciledPluginUserSettings(
 	pluginID string,
-	currentConfig []pluginConfigurationConfig,
 	nextConfig []pluginConfigurationConfig,
-) error {
+) (*fileUpdate, error) {
 	settings, err := loadUserSettingsMap()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	pluginSettings, ok := settings["pluginSettings"].(map[string]any)
 	if !ok || pluginSettings == nil {
-		return nil
+		return nil, nil
 	}
 
 	currentValues, ok := pluginSettings[pluginID].(map[string]any)
 	if !ok || currentValues == nil {
-		return nil
+		return nil, nil
 	}
 
 	nextValues := map[string]any{}
@@ -2351,10 +2404,21 @@ func reconcilePluginUserSettings(
 
 	pluginSettings[pluginID] = nextValues
 	settings["pluginSettings"] = pluginSettings
-	return saveUserSettingsMap(settings)
+	content, err := yaml.Marshal(settings)
+	return &fileUpdate{resolvePath("data/user.yaml"), content}, err
 }
 
 func sameConfigValueType(current any, next any) bool {
+	numeric := func(v any) bool {
+		switch v.(type) {
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+			return true
+		}
+		return false
+	}
+	if numeric(current) || numeric(next) {
+		return numeric(current) && numeric(next)
+	}
 	currentIsArray := isArrayLike(current)
 	nextIsArray := isArrayLike(next)
 	if currentIsArray || nextIsArray {
@@ -2445,8 +2509,19 @@ func (w *scheduledTaskWorkerSupervisor) updateRulesetByID(id string) (string, er
 }
 
 func (w *scheduledTaskWorkerSupervisor) doUpdateRuleset(ruleset *rulesetConfig) error {
+	options := RequestOptions{Redirect: true}
+	if ruleset.Type == "Http" {
+		settings, err := loadBackendNetworkSettings()
+		if err != nil {
+			return err
+		}
+		options.Proxy, err = w.resolveGlobalRequestProxy(settings)
+		if err != nil {
+			return err
+		}
+	}
 	if ruleset.Format == "source" {
-		body, changed, err := w.loadSourceRulesetBody(ruleset)
+		body, changed, err := w.loadSourceRulesetBody(ruleset, options)
 		if err != nil {
 			return err
 		}
@@ -2476,7 +2551,7 @@ func (w *scheduledTaskWorkerSupervisor) doUpdateRuleset(ruleset *rulesetConfig) 
 				return errors.New(result.Data)
 			}
 		} else if ruleset.Type == "Http" {
-			result := w.app.Download("GET", ruleset.URL, ruleset.Path, map[string]string{}, "", RequestOptions{Redirect: true})
+			result := w.app.Download("GET", ruleset.URL, ruleset.Path, map[string]string{}, "", options)
 			if !result.Flag {
 				return errors.New(result.Body)
 			}
@@ -2488,14 +2563,14 @@ func (w *scheduledTaskWorkerSupervisor) doUpdateRuleset(ruleset *rulesetConfig) 
 }
 
 func (w *scheduledTaskWorkerSupervisor) loadSourceRulesetBody(
-	ruleset *rulesetConfig,
+	ruleset *rulesetConfig, options RequestOptions,
 ) (body string, shouldWrite bool, err error) {
 	switch ruleset.Type {
 	case "File":
 		content, readErr := os.ReadFile(resolvePath(ruleset.URL))
 		return string(content), ruleset.URL != ruleset.Path, readErr
 	case "Http":
-		result := w.app.Requests("GET", ruleset.URL, map[string]string{}, "", RequestOptions{Redirect: true})
+		result := w.app.Requests("GET", ruleset.URL, map[string]string{}, "", options)
 		if !result.Flag {
 			return "", false, errors.New(result.Body)
 		}

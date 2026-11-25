@@ -1,8 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { parse } from 'yaml'
 
-import { HttpGet, ReadFile, RemoveFile, Requests, WriteFile } from '@/bridge'
+import { FileExists, HttpGet, ReadFile, RemoveFile, Requests, WriteFile } from '@/bridge'
 import { PluginHubFilePath, PluginsFilePath } from '@/constant/app'
 import { PluginTrigger, PluginTriggerEvent, RequestMethod } from '@/enums/app'
 import { useAppSettingsStore } from '@/stores'
@@ -18,27 +17,15 @@ import {
   readonly,
   base64Encode,
 } from '@/utils'
-import { persistConfigFiles, withConfigMutation } from '@/utils/configPersistence'
+import { persistConfigFiles, withConfigMutation, parseResourceList } from '@/utils/configPersistence'
 
 type PluginRuntimeCache = {
   plugin: App.Plugin
   code?: string
-  module?: {
-    url: string
-    moduleDefault?: Recordable
-    modulePromise: Promise<
-      {
-        default?: MaybePromise<
-          (Plugin: App.Plugin) => Partial<Record<PluginTriggerEvent, (...args: any[]) => any>>
-        >
-      } & {
-        [k in PluginTriggerEvent]: MaybePromise<(...args: any[]) => any>
-      }
-    >
-  }
+  module?: Promise<{ named: Recordable; defaults?: Recordable }>
 }
 
-const PluginsCache: Recordable<PluginRuntimeCache> = {}
+const PluginsCache: Recordable<PluginRuntimeCache> = Object.create(null)
 
 const PluginsTriggerMap: Partial<
   Record<
@@ -102,11 +89,19 @@ export const usePluginsStore = defineStore('plugins', () => {
   const pluginHub = ref<App.Plugin[]>([])
 
   const setupPlugins = async () => {
+    for (const id of Object.keys(PluginsCache)) releasePluginRuntimeCache(id)
+    for (const entry of Object.values(PluginsTriggerMap)) entry.observers = []
     const data = await ignoredError(ReadFile, PluginsFilePath)
-    data && (plugins.value = parse(data))
+    plugins.value = parseResourceList(data)
 
     const list = await ignoredError(ReadFile, PluginHubFilePath)
-    list && (pluginHub.value = JSON.parse(list))
+    pluginHub.value = []
+    if (list) {
+      try {
+        const cached = JSON.parse(list)
+        if (Array.isArray(cached)) pluginHub.value = cached
+      } catch (error) {console.warn('Invalid plugin hub cache:', error)}
+    }
 
     for (const plugin of plugins.value) {
       upsertPluginCache(plugin)
@@ -116,10 +111,11 @@ export const usePluginsStore = defineStore('plugins', () => {
 
   const upsertPluginCache = (plugin: App.Plugin, code?: string) => {
     const oldCache = PluginsCache[plugin.id]
-    PluginsCache[plugin.id] =
-      code === undefined
-        ? { ...oldCache, plugin: deepClone(plugin) }
-        : { plugin: deepClone(plugin), code }
+    if (oldCache && code === undefined && oldCache.plugin.path === plugin.path) {
+      oldCache.plugin = deepClone(plugin)
+    } else {
+      PluginsCache[plugin.id] = { plugin: deepClone(plugin), code }
+    }
     return PluginsCache[plugin.id]!
   }
 
@@ -189,15 +185,11 @@ export const usePluginsStore = defineStore('plugins', () => {
 
   const resetPluginModuleCache = (id: string) => {
     const cache = PluginsCache[id]
-    if (cache?.module) {
-      URL.revokeObjectURL(cache.module.url)
-      delete cache.module
-    }
+    if (cache) delete cache.module
   }
 
   const releasePluginRuntimeCache = (id: string) => {
     resetPluginModuleCache(id)
-    delete (globalThis as any).__GUI_FOR_CORES_PLUGIN_CONTEXT__?.[id]
     delete PluginsCache[id]
   }
 
@@ -215,22 +207,9 @@ export const usePluginsStore = defineStore('plugins', () => {
     })
   }
 
-  const loadPluginModule = async (id: string) => {
-    const cache = PluginsCache[id]
-    if (!cache) throw new Error(`${id} Not Found`)
-    if (cache.module) {
-      return cache.module.modulePromise
-    }
+  const initializePluginModule = async (id: string, cache: PluginRuntimeCache) => {
     if (cache.code === undefined) {
-      cache.code = normalizePluginCode(
-        cache.plugin,
-        await ReadFile(cache.plugin.path).catch((error) => {
-          if (cache.plugin.type === 'File') {
-            return ''
-          }
-          throw error
-        }),
-      )
+      cache.code = normalizePluginCode(cache.plugin, await ReadFile(cache.plugin.path))
     }
 
     const events = new Set<PluginTriggerEvent | string>([
@@ -258,9 +237,6 @@ export const usePluginsStore = defineStore('plugins', () => {
     })
 
     const eventsStr = [...events].join('|')
-    ;(globalThis as any).__GUI_FOR_CORES_PLUGIN_CONTEXT__ ||= {}
-    ;(globalThis as any).__GUI_FOR_CORES_PLUGIN_CONTEXT__[id] = getPluginMetadata(id)
-
     const code = cache.code
       .replace(new RegExp(`^const\\s+(${eventsStr})`, 'gm'), 'export const $1')
       .replace(new RegExp(`^function\\s+(${eventsStr})`, 'gm'), 'export function $1')
@@ -268,25 +244,34 @@ export const usePluginsStore = defineStore('plugins', () => {
 
     const sourceMapComment = createPluginSourceMapComment(cache.plugin, code, 1, 0)
     const source = [
-      `const Plugin = globalThis.__GUI_FOR_CORES_PLUGIN_CONTEXT__?.[${JSON.stringify(id)}]`,
+      `const Plugin = globalThis.__GUI_FOR_CORES_PLUGIN_CONTEXT__[import.meta.url]`,
       code,
       sourceMapComment,
     ].join('\n')
     const blob = new Blob([source], { type: 'text/javascript' })
     const url = URL.createObjectURL(blob)
-    const modulePromise = import(/* @vite-ignore */ url)
-      .then((module) => {
-        delete (globalThis as any).__GUI_FOR_CORES_PLUGIN_CONTEXT__?.[id]
-        return module
-      })
-      .catch((error) => {
-        delete (globalThis as any).__GUI_FOR_CORES_PLUGIN_CONTEXT__?.[id]
-        resetPluginModuleCache(id)
-        throw error
-      }) as Required<PluginRuntimeCache>['module']['modulePromise']
+    const contexts = ((globalThis as any).__GUI_FOR_CORES_PLUGIN_CONTEXT__ ??= Object.create(null))
+    const metadata = getPluginMetadata(id)
+    contexts[url] = metadata
+    try {
+      const named = await import(/* @vite-ignore */ url)
+      const defaults = typeof named.default === 'function' ? await named.default(metadata) : named.default
+      return { named, defaults }
+    } finally {
+      delete contexts[url]
+      URL.revokeObjectURL(url)
+    }
+  }
 
-    cache.module = { url, modulePromise }
-    return modulePromise
+  const loadPluginModule = (id: string, cache: PluginRuntimeCache) => {
+    if (!cache.module) {
+      const pending = initializePluginModule(id, cache).catch((error) => {
+        if (cache.module === pending) delete cache.module
+        throw error
+      })
+      cache.module = pending
+    }
+    return cache.module
   }
 
   const runPluginEvent = async (
@@ -303,16 +288,11 @@ export const usePluginsStore = defineStore('plugins', () => {
     }
 
     try {
-      const module = await loadPluginModule(id)
-      if (!cache.module?.moduleDefault) {
-        if (typeof module.default === 'function') {
-          cache.module!.moduleDefault = await module.default(getPluginMetadata(id))
-        } else {
-          cache.module!.moduleDefault = module.default
-        }
-      }
-      const defaultHandler = cache.module?.moduleDefault?.[event]
-      const moduleHandler = module[event]
+      const pending = loadPluginModule(id, cache)
+      const { defaults, named } = await pending
+      if (PluginsCache[id]?.module !== pending) throw new Error('Plugin was reloaded')
+      const defaultHandler = defaults?.[event]
+      const moduleHandler = named[event]
       if (typeof defaultHandler === 'function' && typeof moduleHandler === 'function') {
         console.warn(
           `[${cache.plugin.name}] ${event} is defined in both default export and named export. Using default export.`,
@@ -400,7 +380,7 @@ export const usePluginsStore = defineStore('plugins', () => {
 
         if (p === 'status') {
           plugin.status = newValue
-          updatePluginState(plugin.id, plugin)
+          void updatePluginState(plugin.id, plugin).catch(console.error)
           return true
         }
 
@@ -436,7 +416,6 @@ export const usePluginsStore = defineStore('plugins', () => {
     }
     await disposePluginInstance(plugin.id)
     upsertPluginCache(plugin, normalizePluginCode(plugin, code))
-    resetPluginModuleCache(plugin.id)
     if (reloadTrigger) {
       syncPluginObservers(plugin, !plugin.disabled)
     }
@@ -452,13 +431,7 @@ export const usePluginsStore = defineStore('plugins', () => {
   const savePlugins = () => withConfigMutation(() => persistPlugins(plugins.value))
 
   const addPlugin = async (plugin: App.Plugin) => {
-    await withConfigMutation(async () => {
-      await persistPlugins([...plugins.value, plugin])
-      plugins.value.push(plugin)
-      upsertPluginCache(plugin)
-      syncPluginObservers(plugin, !plugin.disabled)
-    })
-    await _doUpdatePlugin(plugin).catch(() => {})
+    await _doUpdatePlugin(plugin, undefined, true)
     await runPluginEvent(plugin.id, PluginTriggerEvent.OnInstall, [], {
       allowDisabled: true,
       allowUndefined: true,
@@ -466,6 +439,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     await savePlugins()
   }
 
+  const warnCleanup = (error: unknown) => console.warn('Plugin cleanup failed:', error)
   const deletePlugin = async (id: string) => {
     const idx = plugins.value.findIndex((v) => v.id === id)
     if (idx === -1) return
@@ -477,14 +451,14 @@ export const usePluginsStore = defineStore('plugins', () => {
       await runPluginEvent(id, PluginTriggerEvent.OnDisabled, [], {
         allowDisabled: true,
         allowUndefined: true,
-      })
+      }).catch(warnCleanup)
     }
 
-    await disposePluginInstance(id)
     await runPluginEvent(id, PluginTriggerEvent.OnUninstall, [], {
       allowDisabled: true,
       allowUndefined: true,
-    })
+    }).catch(warnCleanup)
+    await disposePluginInstance(id).catch(warnCleanup)
 
     await withConfigMutation(async () => {
       await persistPlugins(plugins.value.filter((item) => item.id !== id))
@@ -518,8 +492,8 @@ export const usePluginsStore = defineStore('plugins', () => {
       await runPluginEvent(id, PluginTriggerEvent.OnDisabled, [], {
         allowDisabled: true,
         allowUndefined: true,
-      })
-      await disposePluginInstance(id)
+      }).catch(warnCleanup)
+      await disposePluginInstance(id).catch(warnCleanup)
     }
 
     if (shouldResetModule && !shouldDisable) await disposePluginInstance(id)
@@ -551,20 +525,21 @@ export const usePluginsStore = defineStore('plugins', () => {
     withConfigMutation(async () => {
       const idx = plugins.value.findIndex((v) => v.id === id)
       if (idx === -1) return
-      const next = plugins.value.map((item, index) => (index === idx ? newPlugin : item))
+      const current = plugins.value[idx]!
+      const status = newPlugin.status
+      const next = plugins.value.map((item, index) => index === idx ? {...current, status} : item)
       await persistPlugins(next)
-      plugins.value.splice(idx, 1, newPlugin)
-      syncPluginObservers(newPlugin, !newPlugin.disabled)
-      if (PluginsCache[id]) upsertPluginCache(newPlugin)
+      current.status = status
+      if (PluginsCache[id]) PluginsCache[id]!.plugin.status = status
     })
 
-  const _doUpdatePlugin = async (plugin: App.Plugin) => {
+  const _doUpdatePlugin = async (plugin: App.Plugin, replacement?: App.Plugin, installing = false) => {
     // Fetch and normalize before publishing either the installed version or its source.
     const identity = (item: App.Plugin) =>
       JSON.stringify(omitArray([item], ['disabled', 'status', 'updating', 'loading', 'running']))
     const installedIdentity = identity(plugin)
-    let nextPlugin = deepClone(plugin)
-    if (plugin.id.startsWith('plugin-')) {
+    let nextPlugin = {...deepClone(replacement || plugin), id: plugin.id, path: plugin.path}
+    if (!replacement && plugin.id.startsWith('plugin-')) {
       const candidate = pluginHub.value.find((item) => item.id === plugin.id)
       if (!candidate) throw new Error('Plugin not found. Please update the Plugin-Hub.')
       const major = (version: string) => (version || '').replace(/^v/, '').split('.')[0]
@@ -582,8 +557,9 @@ export const usePluginsStore = defineStore('plugins', () => {
     }
 
     let code = ''
+    const createFile = installing && nextPlugin.type === 'File' && !(await FileExists(nextPlugin.path))
     if (nextPlugin.type === 'File') {
-      code = await ReadFile(nextPlugin.path)
+      if (!createFile) code = await ReadFile(nextPlugin.path)
     } else if (nextPlugin.type === 'Http') {
       const { status, body } = await HttpGet<string>(nextPlugin.url)
       if (status !== 200)
@@ -595,8 +571,10 @@ export const usePluginsStore = defineStore('plugins', () => {
 
     await withConfigMutation(async () => {
       const index = plugins.value.findIndex((item) => item.id === plugin.id)
-      const current = plugins.value[index]
-      if (!current || identity(current) !== installedIdentity)
+      const installed = plugins.value[index]
+      if (installing && installed) throw new Error('Plugin already installed')
+      const current = installing ? plugin : installed
+      if (!current || (!installing && identity(current) !== installedIdentity))
         throw new Error('Plugin changed during update; retry the update')
       // User state may change while downloading. Configuration overrides stay in app settings;
       // new schema defaults are merged by getPluginMetadata without discarding user values.
@@ -608,18 +586,18 @@ export const usePluginsStore = defineStore('plugins', () => {
         loading: current.loading,
         running: current.running,
       }
-      const next = plugins.value.map((item, i) => (i === index ? nextPlugin : item))
+      const next = installing ? [...plugins.value,nextPlugin] : plugins.value.map((item, i) => (i === index ? nextPlugin : item))
       await persistConfigFiles([
-        ...(nextPlugin.type === 'File' ? [] : [{ path: nextPlugin.path, content: code }]),
+        ...(nextPlugin.type === 'File' && !createFile ? [] : [{ path: nextPlugin.path, content: code }]),
         {
           path: PluginsFilePath,
           content: stringifyNoFolding(omitArray(next, ['updating', 'loading', 'running'])),
         },
       ])
-      plugins.value.splice(index, 1, nextPlugin)
+      if (installing) plugins.value.push(nextPlugin)
+      else plugins.value.splice(index, 1, nextPlugin)
       upsertPluginCache(nextPlugin, code)
       syncPluginObservers(nextPlugin, !nextPlugin.disabled)
-      resetPluginModuleCache(nextPlugin.id)
     })
   }
 
@@ -631,13 +609,13 @@ export const usePluginsStore = defineStore('plugins', () => {
       )
     }
     return withConfigMutation(async () => {
-      const parsed = parse(await ReadFile(PluginsFilePath)) as App.Plugin[]
+      const parsed = parseResourceList<App.Plugin>(await ReadFile(PluginsFilePath)) as App.Plugin[]
       if (!Array.isArray(parsed)) throw new Error('Plugins file must contain an array')
-      // Read every source before changing live metadata so a failed refresh remains retryable.
+      // A missing source must not prevent managing the other installed plugins.
       const sources = await Promise.all(
         parsed.map(async (plugin) => ({
           plugin,
-          code: normalizePluginCode(plugin, await ReadFile(plugin.path)),
+          code: await ReadFile(plugin.path).then(code => normalizePluginCode(plugin,code)).catch(error => {console.warn('Failed to read plugin source:',plugin.path,error); return undefined}),
         })),
       )
       for (const plugin of plugins.value) {
@@ -652,12 +630,12 @@ export const usePluginsStore = defineStore('plugins', () => {
     })
   }
 
-  const updatePlugin = async (id: string) => {
+  const updatePlugin = async (id: string, replacement?: App.Plugin) => {
     const plugin = plugins.value.find((v) => v.id === id)
     if (!plugin) throw id + ' Not Found'
     try {
       plugin.updating = true
-      await _doUpdatePlugin(plugin)
+      await _doUpdatePlugin(plugin, replacement)
       return `Plugin [${plugin.name}] updated successfully.`
     } finally {
       plugin.updating = false
@@ -705,30 +683,20 @@ export const usePluginsStore = defineStore('plugins', () => {
   }
   const updatePluginHub = async () => {
     pluginHubLoading.value = true
-    const promises = appSettingsStore.app.plugins.sources.flatMap((source) => {
-      if (!source.enable) return []
-      return Requests<string>({
-        url: source.url,
-        method: RequestMethod.Get,
-        autoTransformBody: false,
-      })
-    })
-    const results = await Promise.allSettled(promises)
-
-    pluginHub.value = results.reduce((acc, result) => {
-      if (result.status === 'fulfilled') {
-        try {
-          const plugins = JSON.parse(result.value.body) as App.Plugin[]
-          acc.push(...plugins)
-        } catch (error) {
-          console.error('Failed to parse plugin list from source. Reason: ', error)
-        }
-      }
-      return acc
-    }, [] as App.Plugin[])
-
-    await WriteFile(PluginHubFilePath, JSON.stringify(pluginHub.value))
-    pluginHubLoading.value = false
+    try {
+      const sources = appSettingsStore.app.plugins.sources.filter(source => source.enable)
+      const results = await Promise.allSettled(sources.map(async source => {
+        const {body} = await Requests<string>({url: source.url, method: RequestMethod.Get, autoTransformBody: false})
+        const entries = JSON.parse(body)
+        if (!Array.isArray(entries)) throw new Error('Plugin source must contain a list')
+        return entries as App.Plugin[]
+      }))
+      const successful = results.filter(result => result.status === 'fulfilled')
+      if (sources.length && !successful.length) throw new Error('Failed to update plugin hub sources')
+      const next = successful.flatMap(result => result.value)
+      await WriteFile(PluginHubFilePath, JSON.stringify(next))
+      pluginHub.value = next
+    } finally {pluginHubLoading.value = false}
   }
 
   const getPluginById = (id: string) => plugins.value.find((v) => v.id === id)
@@ -821,6 +789,44 @@ export const usePluginsStore = defineStore('plugins', () => {
     return params
   }
 
+  const configurationChanges = new Map<string, Promise<void>>()
+  const configurePlugin = (plugin: App.Plugin, overrides: Recordable) => {
+    const { id } = plugin
+    const next = deepClone(overrides)
+    const previous = configurationChanges.get(id) || Promise.resolve()
+    const task = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const current = getPluginById(id)
+        if (!current) throw new Error(id + ' Not Found')
+        const defaults = Object.fromEntries(
+          current.configuration.map(({ key, value }) => [key, value]),
+        )
+        if (!current.disabled) {
+          ensurePluginRuntimeCache(current)
+          const result = await runPluginEvent(
+            id,
+            PluginTriggerEvent.OnConfigure,
+            [
+              deepClone({ ...defaults, ...next }),
+              deepClone({ ...defaults, ...appSettingsStore.app.pluginSettings[id] }),
+            ],
+            { allowUndefined: true },
+          )
+          if (isNumber(result) && result !== current.status) {
+            await updatePluginState(id, { ...current, status: result })
+          }
+        }
+        if (Object.keys(next).length) appSettingsStore.app.pluginSettings[id] = next
+        else delete appSettingsStore.app.pluginSettings[id]
+      })
+      .finally(() => {
+        if (configurationChanges.get(id) === task) configurationChanges.delete(id)
+      })
+    configurationChanges.set(id, task)
+    return task
+  }
+
   const manualTrigger = async (id: string, event: PluginTriggerEvent, ...args: any[]) => {
     const plugin = getPluginById(id)
     if (!plugin) throw id + ' Not Found'
@@ -833,8 +839,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     args = deepClone(args)
     const exitCode = await runPluginEvent(id, event, args)
     if (isNumber(exitCode) && exitCode !== plugin.status) {
-      plugin.status = exitCode
-      editPlugin(id, plugin)
+      await updatePluginState(id, {...plugin, status: exitCode})
     }
     return exitCode
   }
@@ -862,6 +867,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     onCoreStoppedTrigger: () => noParamsTrigger(PluginTrigger.OnCoreStopped),
     onBeforeCoreStopTrigger: () => noParamsTrigger(PluginTrigger.OnBeforeCoreStop, true),
     onBeforeCoreStartTrigger,
+    configurePlugin,
     manualTrigger,
     getPluginCodefromCache,
     getPluginMetadata,

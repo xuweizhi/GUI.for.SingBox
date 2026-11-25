@@ -16,16 +16,9 @@ const emit = defineEmits(['change', 'update:modelValue'])
 
 const model = ref(deepClone(props.modelValue ?? {}))
 
-let internalUpdate = false
-
 watch(
   () => props.modelValue,
-  (val) => {
-    if (!internalUpdate) {
-      model.value = val
-    }
-    internalUpdate = false
-  },
+  (val) => { model.value = deepClone(val ?? {}) },
   { deep: true },
 )
 
@@ -40,7 +33,6 @@ const emitUpdate = () => {
   const val = deepClone(model.value)
   emit('update:modelValue', val)
   emit('change', val)
-  internalUpdate = true
 }
 
 const onChange = (key: string, originalValue: any, value: any) => {
@@ -95,7 +87,7 @@ defineExpose({ reset: handleResetAll })
         :autofocus="false"
         editable
         lang="yaml"
-        @change="(val: any) => onChange(conf.key, conf.value, val)"
+        @update:model-value="(val: any) => onChange(conf.key, conf.value, val)"
       />
     </Card>
   </div>

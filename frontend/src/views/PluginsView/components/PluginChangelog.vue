@@ -3,7 +3,7 @@ import { ref } from 'vue'
 
 import { HttpGet, ReadFile } from '@/bridge'
 import { usePluginsStore } from '@/stores'
-import { ignoredError } from '@/utils'
+import { message } from '@/utils'
 
 interface Props {
   id: string
@@ -11,22 +11,22 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const code = ref('')
+const files = ref<{ original: string; updated: string }>()
 
 const pluginsStore = usePluginsStore()
 
 const fetchAndUpdatePluginCode = async () => {
   const p = pluginsStore.getPluginById(props.id)
-  if (p) {
-    const _code = pluginsStore.getPluginCodefromCache(p.id)
-    if (_code) {
-      code.value = _code
-    } else {
-      const content = (await ignoredError(ReadFile, p.path)) || ''
-      code.value = content
-    }
-    const { body } = await HttpGet(p.url)
-    code.value = body
+  if (!p) return
+  try {
+    const [original, { body, status }] = await Promise.all([
+      pluginsStore.getPluginCodefromCache(p.id) ?? ReadFile(p.path),
+      HttpGet<string>(p.url),
+    ])
+    if (status !== 200) throw new Error(`HTTP ${status}`)
+    files.value = { original, updated: body }
+  } catch (error) {
+    message.error(error)
   }
 }
 
@@ -34,5 +34,5 @@ fetchAndUpdatePluginCode()
 </script>
 
 <template>
-  <CodeEditor v-model="code" lang="javascript" mode="diff" />
+  <CodeEditor v-if="files" :model-value="files.updated" :original="files.original" lang="javascript" mode="diff" />
 </template>

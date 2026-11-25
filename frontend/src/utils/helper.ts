@@ -1,10 +1,8 @@
 import { deleteConnection, getConnections, useProxy } from '@/api/kernel'
-import { ReadFile, RestartApp, WindowReloadApp, WriteFile } from '@/bridge'
+import { RestartApp, WindowReloadApp } from '@/bridge'
 import { CoreWorkingDirectory } from '@/constant/kernel'
 import { RequestProxyMode } from '@/enums/app'
-import { RulesetFormat } from '@/enums/kernel'
 import i18n from '@/lang'
-import { rememberNode } from '@/utils/nodePreferences'
 import {
   useAppSettingsStore,
   useAppStore,
@@ -13,7 +11,8 @@ import {
   usePluginsStore,
   useRulesetsStore,
 } from '@/stores'
-import { formatProxyHost, ignoredError, normalizeRequestProxy, message, confirm } from '@/utils'
+import { formatProxyHost, normalizeRequestProxy, message, confirm } from '@/utils'
+import { rememberNode } from '@/utils/nodePreferences'
 
 export const GetRequestProxy = async (mode?: App.RequestProxyMode, customProxy?: string) => {
   const appSettings = useAppSettingsStore()
@@ -38,7 +37,7 @@ export const GetRequestProxy = async (mode?: App.RequestProxyMode, customProxy?:
   }
 
   if (requestProxyMode === RequestProxyMode.Custom) {
-    return normalizeRequestProxy(customProxy ?? appSettings.app.customProxy)
+    return normalizeRequestProxy(customProxy?.trim() || appSettings.app.customProxy)
   }
 
   // Let the backend resolve the environment for each destination, including
@@ -59,21 +58,17 @@ export const handleUseProxy = async (
   options: { refresh?: boolean } = {},
 ) => {
   if (group.type !== 'Selector' || group.now === proxy.name) return
-  const promises: Promise<null>[] = []
   const appSettings = useAppSettingsStore()
   const kernelApiStore = useKernelApiStore()
-  if (appSettings.app.kernel.autoClose) {
-    const { connections } = await getConnections()
-    promises.push(
-      ...(connections || [])
-        .filter((v) => v.chains.includes(group.name))
-        .map((v) => deleteConnection(v.id)),
-    )
-  }
+  const connections = appSettings.app.kernel.autoClose ? (await getConnections()).connections : []
   const key = kernelApiStore.getNodePreferenceKey(proxy.name)
   await useProxy(encodeURIComponent(group.name), proxy.name)
   appSettings.app.nodePreferences.recent = rememberNode(appSettings.app.nodePreferences.recent, key)
-  await Promise.all(promises)
+  await Promise.all(
+    (connections || [])
+      .filter((connection) => connection.chains.includes(group.name))
+      .map((connection) => deleteConnection(connection.id)),
+  )
   if (options.refresh !== false) {
     await kernelApiStore.refreshProviderProxies()
   }
@@ -84,7 +79,8 @@ export const handleChangeMode = async (mode: 'direct' | 'global' | 'rule') => {
 
   if (mode === kernelApiStore.config.mode) return
 
-  kernelApiStore.updateConfig('mode', mode)
+  await kernelApiStore.updateConfig('mode', mode)
+  if (!useAppSettingsStore().app.kernel.autoClose) return
 
   const { connections } = await getConnections()
   const promises = (connections || []).map((v) => deleteConnection(v.id))
@@ -94,47 +90,7 @@ export const handleChangeMode = async (mode: 'direct' | 'global' | 'rule') => {
 export const addToRuleSet = async (
   id: 'direct' | 'reject' | 'proxy',
   payloads: Record<string, any>[],
-) => {
-  const path = `data/rulesets/${id}.json`
-
-  const rulesetsStoe = useRulesetsStore()
-  let ruleset = rulesetsStoe.getRulesetById(id)
-  if (!ruleset) {
-    ruleset = {
-      id,
-      name: id,
-      updateTime: 0,
-      type: 'Manual',
-      format: RulesetFormat.Source,
-      url: '',
-      path,
-      count: 0,
-      disabled: false,
-    }
-    await rulesetsStoe.addRuleset(ruleset)
-  }
-
-  const content = (await ignoredError(ReadFile, path)) || '{ "version": 1, "rules": [] }'
-  const { rules = [] } = JSON.parse(content)
-  rules[0] = rules[0] || {}
-  payloads.forEach((payload) => {
-    if (payload.domain) {
-      rules[0].domain = [...new Set((rules[0].domain || []).concat(payload.domain))]
-    } else if (payload.ip_cidr) {
-      rules[0].ip_cidr = [...new Set((rules[0].ip_cidr || []).concat(payload.ip_cidr))]
-    } else if (payload.process_path) {
-      rules[0].process_path = [
-        ...new Set((rules[0].process_path || []).concat(payload.process_path)),
-      ]
-    } else if (payload.domain_suffix) {
-      rules[0].domain_suffix = [
-        ...new Set((rules[0].domain_suffix || []).concat(payload.domain_suffix)),
-      ]
-    }
-  })
-  await WriteFile(path, JSON.stringify({ version: 1, rules }, null, 2))
-  await rulesetsStoe.updateRuleset(id)
-}
+) => useRulesetsStore().appendRules(id, payloads)
 
 export const reloadApp = async () => {
   const { t } = i18n.global
@@ -150,7 +106,7 @@ export const reloadApp = async () => {
     timedout = true
     appStore.isAppReloading = false
     destroy()
-    confirm('Warning', t('titlebar.reloadTimeout')).then(WindowReloadApp)
+    confirm('Warning', t('titlebar.reloadTimeout')).then(WindowReloadApp, () => {})
   }, 10_000)
 
   try {
@@ -161,7 +117,7 @@ export const reloadApp = async () => {
     }
   } catch (err: any) {
     clearTimeout(timeoutId)
-    confirm('Error', t('titlebar.reloadError', { reason: err })).then(WindowReloadApp)
+    confirm('Error', t('titlebar.reloadError', { reason: err })).then(WindowReloadApp, () => {})
   }
 
   appStore.isAppReloading = false

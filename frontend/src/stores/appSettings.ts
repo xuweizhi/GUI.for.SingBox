@@ -206,6 +206,8 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     ],
   })
 
+  const defaultSettings = deepClone(app.value)
+
   const saveAppSettings = debounce((config: string) => {
     const save = pendingSave.then(async () => {
       if (latestUserSettings === config) return
@@ -232,7 +234,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
         shouldPersist = true
       }
     }
-    const settings = mergeSettingsDefaults(deepClone(app.value), parsedSettings)
+    const settings = mergeSettingsDefaults(deepClone(defaultSettings), parsedSettings)
 
     await appStore.loadLocales(false, false)
 
@@ -278,7 +280,8 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
         })
       } catch (error) {
         // Another page can finish the same first-run initialization while this one loads.
-        if ((await ReadFile(UserFilePath).catch(() => undefined)) !== normalizedSettings) throw error
+        if ((await ReadFile(UserFilePath).catch(() => undefined)) !== normalizedSettings)
+          throw error
       }
     }
     latestUserSettings = normalizedSettings
@@ -315,7 +318,10 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     fontSize(fontSize: number) {
       const size = normalizeFontSize(fontSize)
       document.documentElement.style.setProperty('--font-size-base', `${size}px`)
-      document.documentElement.style.setProperty('--font-scale', (size / DefaultFontSize).toFixed(4))
+      document.documentElement.style.setProperty(
+        '--font-scale',
+        (size / DefaultFontSize).toFixed(4),
+      )
     },
     customFontPresets(presets: App.CustomFontPreset[]) {
       syncCustomFontStylesheets(presets ?? [])

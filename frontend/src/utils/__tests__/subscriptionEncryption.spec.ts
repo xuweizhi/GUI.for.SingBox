@@ -58,6 +58,10 @@ describe('subscription encryption', () => {
 
     await expect(decryptEncryptedSubscription(password, encrypted)).resolves.toBe(plaintext)
 
+    await expect(decryptEncryptedSubscription('wrong', encrypted)).resolves.toBeNull()
+    const truncated = Buffer.from(encrypted, 'base64').subarray(0, -1).toString('base64')
+    await expect(decryptEncryptedSubscription(password, truncated)).resolves.toBeNull()
+
     vi.stubGlobal('crypto', webcrypto)
   })
 
