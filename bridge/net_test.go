@@ -50,3 +50,27 @@ func TestDownloadDoesNotOverwriteTargetOnHTTPFailure(t *testing.T) {
 		t.Fatalf("target was overwritten with failed response: %q", string(content))
 	}
 }
+
+func TestUploadReturnsRealStatusOnEarlyHTTPError(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() { Env.BasePath = previousBasePath })
+
+	payloadPath := filepath.Join(Env.BasePath, "large.bin")
+	if err := os.WriteFile(payloadPath, make([]byte, 512*1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "payload rejected", http.StatusRequestEntityTooLarge)
+	}))
+	defer server.Close()
+
+	res := (&App{}).Upload(http.MethodPost, server.URL, payloadPath, nil, "", RequestOptions{
+		FileField: "file",
+		Timeout:   5,
+	})
+	if res.Flag || res.Status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 error result, got %+v", res)
+	}
+}

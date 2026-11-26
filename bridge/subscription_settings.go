@@ -14,6 +14,17 @@ type subscriptionSettingChange struct {
 	After  any `json:"after"`
 }
 
+func subscriptionSettingMissingDefault(field string) (any, bool) {
+	switch field {
+	case "preferOutboundDns":
+		return false, true
+	case "outboundDns":
+		return []string{}, true
+	default:
+		return nil, false
+	}
+}
+
 // Apply only fields edited in the form, keeping node caches, usage and other sessions' edits.
 func updateSubscriptionSettings(id string, changes map[string]subscriptionSettingChange) error {
 	values := make(map[string]any, len(changes))
@@ -57,7 +68,8 @@ func updateSubscriptionSettings(id string, changes map[string]subscriptionSettin
 		}
 		changed := false
 		for field, change := range changes {
-			current, err := json.Marshal(sub[field])
+			currentVal := sub[field]
+			current, err := json.Marshal(currentVal)
 			if err != nil {
 				return err
 			}
@@ -67,7 +79,19 @@ func updateSubscriptionSettings(id string, changes map[string]subscriptionSettin
 			}
 			before, _ := json.Marshal(change.Before)
 			if !bytes.Equal(current, before) {
-				return fmt.Errorf("subscription setting %s changed since the editor opened. Reload the page and retry", field)
+				defaultVal, hasDefault := subscriptionSettingMissingDefault(field)
+				if currentVal != nil || !hasDefault {
+					return fmt.Errorf("subscription setting %s changed since the editor opened. Reload the page and retry", field)
+				}
+				defaultJSON, _ := json.Marshal(defaultVal)
+				if bytes.Equal(defaultJSON, after) {
+					sub[field] = change.After
+					changed = true
+					continue
+				}
+				if !bytes.Equal(defaultJSON, before) {
+					return fmt.Errorf("subscription setting %s changed since the editor opened. Reload the page and retry", field)
+				}
 			}
 			sub[field] = change.After
 			changed = true

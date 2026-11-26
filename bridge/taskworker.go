@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"bufio"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/md5"
@@ -97,8 +98,8 @@ type subscriptionProxyConfig struct {
 }
 
 type subscriptionConfig struct {
-	PreferOutboundDns bool                      `json:"preferOutboundDns,omitempty" yaml:"preferOutboundDns,omitempty"`
-	OutboundDns       []string                  `json:"outboundDns,omitempty" yaml:"outboundDns,omitempty"`
+	PreferOutboundDns bool                      `json:"preferOutboundDns" yaml:"preferOutboundDns"`
+	OutboundDns       []string                  `json:"outboundDns" yaml:"outboundDns"`
 	ImportedDns       *subscriptionDNSConfig    `json:"importedDns,omitempty" yaml:"importedDns,omitempty"`
 	Extra             map[string]any            `json:"-" yaml:",inline"`
 	ID                string                    `json:"id" yaml:"id"`
@@ -244,6 +245,7 @@ type scheduledTaskWorkerSupervisor struct {
 	mu              sync.Mutex
 	cmd             *exec.Cmd
 	stdin           io.WriteCloser
+	procCancel      context.CancelFunc
 	pending         map[string]chan scheduledTaskWorkerResponse
 	supportedTypes  map[string]struct{}
 	nodePath        string
@@ -318,7 +320,10 @@ func (a *App) RecordScheduledTaskLog(payload string) FlagResult {
 		return FlagResult{false, err.Error()}
 	}
 	if record.ID != "" {
-		if err := updateScheduledTaskLastTime(record.ID, record.StartTime); err != nil {
+		dataMutationMu.Lock()
+		err := updateScheduledTaskLastTime(record.ID, record.StartTime)
+		dataMutationMu.Unlock()
+		if err != nil {
 			return FlagResult{false, err.Error()}
 		}
 	}
@@ -590,9 +595,14 @@ func (w *scheduledTaskWorkerSupervisor) ensureStarted() error {
 		return err
 	}
 
+	procCtx, procCancel := context.WithCancel(context.Background())
+	pipeWG := &sync.WaitGroup{}
+	netWG := &sync.WaitGroup{}
+
 	w.mu.Lock()
 	w.cmd = cmd
 	w.stdin = stdin
+	w.procCancel = procCancel
 	w.pending = map[string]chan scheduledTaskWorkerResponse{}
 	w.nodePath = nodePath
 	w.available = false
@@ -600,9 +610,16 @@ func (w *scheduledTaskWorkerSupervisor) ensureStarted() error {
 	w.processDone = done
 	w.mu.Unlock()
 
-	go w.readLoop(stdout, cmd)
-	go w.readStderr(stderr)
-	go w.waitLoop(cmd, done)
+	pipeWG.Add(2)
+	go func() {
+		defer pipeWG.Done()
+		w.readLoop(stdout, cmd, procCtx, netWG)
+	}()
+	go func() {
+		defer pipeWG.Done()
+		w.readStderr(stderr)
+	}()
+	go w.waitLoop(cmd, pipeWG, netWG, done)
 
 	initPayload := map[string]any{
 		"basePath": Env.BasePath,
@@ -905,13 +922,17 @@ func (w *scheduledTaskWorkerSupervisor) failProcess(cmd *exec.Cmd, cause error) 
 		w.mu.Unlock()
 		return
 	}
-	pending, stdin := w.pending, w.stdin
+	pending, stdin, cancel := w.pending, w.stdin, w.procCancel
 	w.cmd = nil
 	w.stdin = nil
+	w.procCancel = nil
 	w.available = false
 	w.supportedTypes = map[string]struct{}{}
 	w.pending = map[string]chan scheduledTaskWorkerResponse{}
 	w.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
@@ -927,7 +948,10 @@ func (w *scheduledTaskWorkerSupervisor) failProcess(cmd *exec.Cmd, cause error) 
 }
 
 // Delegate plugin network operations to the same transport and download validation used by the UI.
-func (w *scheduledTaskWorkerSupervisor) serveWorkerNetwork(cmd *exec.Cmd, msg scheduledTaskWorkerMessage) {
+func (w *scheduledTaskWorkerSupervisor) serveWorkerNetwork(cmd *exec.Cmd, ctx context.Context, msg scheduledTaskWorkerMessage) {
+	if ctx.Err() != nil {
+		return
+	}
 	w.mu.Lock()
 	stdin := w.stdin
 	active := w.cmd == cmd && stdin != nil
@@ -954,9 +978,9 @@ func (w *scheduledTaskWorkerSupervisor) serveWorkerNetwork(cmd *exec.Cmd, msg sc
 		var result HTTPResult
 		switch msg.Method {
 		case "download":
-			result = w.app.Download(request.Method, request.URL, request.Path, request.Headers, "", request.Options)
+			result = w.app.downloadWithContext(ctx, request.Method, request.URL, request.Path, request.Headers, "", request.Options)
 		case "request":
-			result = w.app.Requests(request.Method, request.URL, request.Headers, request.Body, request.Options)
+			result = w.app.requestsWithContext(ctx, request.Method, request.URL, request.Headers, request.Body, request.Options)
 		default:
 			err = errors.New("unsupported worker network operation")
 		}
@@ -967,6 +991,9 @@ func (w *scheduledTaskWorkerSupervisor) serveWorkerNetwork(cmd *exec.Cmd, msg sc
 				reply.Result, err = json.Marshal(result)
 			}
 		}
+	}
+	if ctx.Err() != nil {
+		return
 	}
 	if err != nil {
 		reply.Error = err.Error()
@@ -983,7 +1010,7 @@ func (w *scheduledTaskWorkerSupervisor) serveWorkerNetwork(cmd *exec.Cmd, msg sc
 	}
 }
 
-func (w *scheduledTaskWorkerSupervisor) readLoop(stdout io.ReadCloser, cmd *exec.Cmd) {
+func (w *scheduledTaskWorkerSupervisor) readLoop(stdout io.ReadCloser, cmd *exec.Cmd, ctx context.Context, netWG *sync.WaitGroup) {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), scheduledTaskWorkerMaxResponse)
 	for scanner.Scan() {
@@ -996,7 +1023,11 @@ func (w *scheduledTaskWorkerSupervisor) readLoop(stdout io.ReadCloser, cmd *exec
 			continue
 		}
 		if message.Type == "network" {
-			go w.serveWorkerNetwork(cmd, message)
+			netWG.Add(1)
+			go func(msg scheduledTaskWorkerMessage) {
+				defer netWG.Done()
+				w.serveWorkerNetwork(cmd, ctx, msg)
+			}(message)
 			continue
 		}
 		if message.Type != "response" {
@@ -1034,14 +1065,16 @@ func (w *scheduledTaskWorkerSupervisor) readStderr(stderr io.ReadCloser) {
 	}
 }
 
-func (w *scheduledTaskWorkerSupervisor) waitLoop(cmd *exec.Cmd, done chan struct{}) {
+func (w *scheduledTaskWorkerSupervisor) waitLoop(cmd *exec.Cmd, pipeWG *sync.WaitGroup, netWG *sync.WaitGroup, done chan struct{}) {
 	defer close(done)
+	pipeWG.Wait()
 	err := cmd.Wait()
 	cause := errors.New("scheduled task worker exited")
 	if err != nil {
 		cause = fmt.Errorf("scheduled task worker exited: %w", err)
 	}
 	w.failProcess(cmd, cause)
+	netWG.Wait()
 }
 
 func findNodeBinary() (string, error) {

@@ -234,3 +234,80 @@ func TestConcurrentProfileRevisionsAllowOneWriter(t *testing.T) {
 		t.Fatalf("accepted %d writers", success)
 	}
 }
+
+func TestCopyFileSameFileDoesNotTruncate(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() { Env.BasePath = previousBasePath })
+
+	target := filepath.Join(Env.BasePath, "sample.txt")
+	if err := os.WriteFile(target, []byte("important-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := &App{}
+	if res := app.CopyFile("sample.txt", "sample.txt"); !res.Flag {
+		t.Fatalf("CopyFile same path failed: %s", res.Data)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "important-data" {
+		t.Fatalf("same-file CopyFile corrupted data: %q", string(got))
+	}
+}
+
+func TestUnzipTarGZFileSkipsNonRegularEntries(t *testing.T) {
+	previousBasePath := Env.BasePath
+	Env.BasePath = t.TempDir()
+	t.Cleanup(func() { Env.BasePath = previousBasePath })
+
+	archivePath := filepath.Join(Env.BasePath, "mixed.tar.gz")
+	file, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gzip.NewWriter(file)
+	tw := tar.NewWriter(gw)
+	if err := tw.WriteHeader(&tar.Header{
+		Name:     "link-entry",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "/etc/passwd",
+		Mode:     0o777,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("safe-content")
+	if err := tw.WriteHeader(&tar.Header{
+		Name:     "regular.txt",
+		Typeflag: tar.TypeReg,
+		Mode:     0o644,
+		Size:     int64(len(body)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	res := (&App{}).UnzipTarGZFile("mixed.tar.gz", "out")
+	if !res.Flag {
+		t.Fatalf("UnzipTarGZFile failed: %s", res.Data)
+	}
+	if _, err := os.Lstat(filepath.Join(Env.BasePath, "out", "link-entry")); !os.IsNotExist(err) {
+		t.Fatalf("expected symlink entry to be skipped, got err=%v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(Env.BasePath, "out", "regular.txt"))
+	if err != nil || string(got) != "safe-content" {
+		t.Fatalf("regular file missing or corrupted: %q %v", string(got), err)
+	}
+}

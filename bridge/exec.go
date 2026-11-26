@@ -99,6 +99,7 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 	var stdout io.ReadCloser
 	var err error
 	var logFile *os.File
+	var initialLogOffset int64
 
 	switch {
 	case options.LogFile != "":
@@ -120,6 +121,9 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 		if err := logFile.Chmod(0o600); err != nil {
 			logFile.Close()
 			return FlagResult{false, err.Error()}
+		}
+		if info, statErr := logFile.Stat(); statErr == nil {
+			initialLogOffset = info.Size()
 		}
 		defer logFile.Close()
 
@@ -165,7 +169,7 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 
 	if outEvent != "" {
 		if logPath != "" {
-			go tailAndEmitLogFile(a, logPath, outEvent, options, done, outputDone)
+			go tailAndEmitLogFileFromOffset(a, logPath, initialLogOffset, outEvent, options, done, outputDone)
 		} else {
 			go scanAndEmitOutput(a, stdout, outEvent, options, outputDone)
 		}
@@ -174,9 +178,16 @@ func (a *App) ExecBackground(path string, args []string, outEvent string, endEve
 	}
 
 	go func() {
-		err := cmd.Wait()
-		close(done)
-		<-outputDone
+		var err error
+		if stdout != nil {
+			<-outputDone
+			err = cmd.Wait()
+			close(done)
+		} else {
+			err = cmd.Wait()
+			close(done)
+			<-outputDone
+		}
 
 		if pidPath != "" {
 			coreStartMu.Lock()
@@ -310,6 +321,7 @@ func (a *App) KillProcess(pid int, timeout int) FlagResult {
 	if err != nil {
 		return FlagResult{false, err.Error()}
 	}
+	defer process.Release()
 
 	if err := SendExitSignal(process); err != nil {
 		log.Printf("SendExitSignal Err: %s", err.Error())
@@ -432,9 +444,13 @@ func scanAndEmitOutput(a *App, reader io.Reader, outEvent string, options ExecOp
 }
 
 func tailAndEmitLogFile(a *App, path string, outEvent string, options ExecOptions, done <-chan struct{}, outputDone chan<- struct{}) {
+	tailAndEmitLogFileFromOffset(a, path, 0, outEvent, options, done, outputDone)
+}
+
+func tailAndEmitLogFileFromOffset(a *App, path string, initialOffset int64, outEvent string, options ExecOptions, done <-chan struct{}, outputDone chan<- struct{}) {
 	defer close(outputDone)
 
-	offset := int64(0)
+	offset := initialOffset
 	pending := ""
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()

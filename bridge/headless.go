@@ -100,7 +100,7 @@ func RunHeadless(ctx context.Context, assets embed.FS, app *App, options Headles
 	mux.Handle(webUIEmitEndpoint, sameOriginOnly(auth.wrap(http.HandlerFunc(app.handleClientEmit))))
 	mux.Handle(webUISSEEndpoint, auth.wrap(http.HandlerFunc(app.handleEventStream)))
 	mux.Handle(webUICoreWSEndpoint, auth.wrap(http.HandlerFunc(app.handleCoreWebSocketProxy)))
-	mux.Handle(webUICoreEndpoint, auth.wrap(http.HandlerFunc(app.handleCoreProxy)))
+	mux.Handle(webUICoreEndpoint, sameOriginOnly(auth.wrap(http.HandlerFunc(app.handleCoreProxy))))
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveHeadlessAssets(webuiFS, w, r)
 	}))
@@ -193,8 +193,10 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	backupRPCMu.RLock()
-	defer backupRPCMu.RUnlock()
+	if rpcRequiresBackupLock(req.Method) {
+		backupRPCMu.RLock()
+		defer backupRPCMu.RUnlock()
+	}
 	result, err := a.dispatchRPCCall(req)
 	if err != nil {
 		if errors.Is(err, errUnknownRPCMethod) {
@@ -209,6 +211,39 @@ func (a *App) handleRPCCall(w http.ResponseWriter, r *http.Request) {
 }
 
 var errUnknownRPCMethod = errors.New("unknown RPC method")
+
+func rpcRequiresBackupLock(method string) bool {
+	switch method {
+	case "AbsolutePath",
+		"CoreStartTime",
+		"Exec",
+		"ExecBackground",
+		"FindListeningProcess",
+		"FindOwnedCore",
+		"GetEnv",
+		"GetInterfaces",
+		"GetSystemProxy",
+		"GetSystemProxyBypass",
+		"IsStartup",
+		"KillProcess",
+		"ListServer",
+		"ProbeDNS",
+		"ProcessInfo",
+		"ProcessMemory",
+		"Requests",
+		"RestartApp",
+		"StartServer",
+		"StopOwnedCore",
+		"StopServer",
+		"TcpPing",
+		"TcpRequest",
+		"UdpRequest",
+		"Upload":
+		return false
+	default:
+		return true
+	}
+}
 
 func (a *App) dispatchRPCCall(req rpcRequest) (any, error) {
 	switch req.Method {
@@ -642,6 +677,9 @@ func (a *App) handleCoreProxy(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	for key, values := range resp.Header {
+		if strings.HasPrefix(strings.ToLower(key), "access-control-") {
+			continue
+		}
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
@@ -687,12 +725,16 @@ func (a *App) handleCoreWebSocketProxy(w http.ResponseWriter, r *http.Request) {
 	<-errCh
 }
 
+func (a *headlessAuth) tokenMatches(candidate string) bool {
+	return subtle.ConstantTimeCompare([]byte(candidate), []byte(a.token)) == 1
+}
+
 func (a *headlessAuth) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !a.authorize(w, r) {
 			return
 		}
-		if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) == a.token {
+		if a.tokenMatches(strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))) {
 			r.Header.Del("Authorization")
 		}
 		next.ServeHTTP(w, r)
@@ -701,10 +743,10 @@ func (a *headlessAuth) wrap(next http.Handler) http.Handler {
 
 func (a *headlessAuth) authorize(w http.ResponseWriter, r *http.Request) bool {
 	matched := false
-	if cookie, err := r.Cookie(webUITokenCookie); err == nil && cookie.Value == a.token {
+	if cookie, err := r.Cookie(webUITokenCookie); err == nil && a.tokenMatches(cookie.Value) {
 		matched = true
 	}
-	if !matched && strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) == a.token {
+	if !matched && a.tokenMatches(strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))) {
 		matched = true
 	}
 

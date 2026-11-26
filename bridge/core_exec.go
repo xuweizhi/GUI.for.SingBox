@@ -369,6 +369,12 @@ func processMatchesCore(pid int32, expectedPath string, expectedArgs []string) b
 
 func watchExistingCoreExit(a *App, pid int, endEvent string, pidPath string) {
 	owned := a.coreProcess
+	expectedCreateTime := a.coreStartTime
+	if expectedCreateTime == 0 {
+		if proc, err := process.NewProcess(int32(pid)); err == nil {
+			expectedCreateTime, _ = proc.CreateTime()
+		}
+	}
 	go func() {
 		processHandle, err := os.FindProcess(pid)
 		if err != nil {
@@ -377,7 +383,7 @@ func watchExistingCoreExit(a *App, pid int, endEvent string, pidPath string) {
 		}
 
 		defer processHandle.Release()
-		if err := waitForProcessExit(processHandle); err != nil {
+		if err := waitForProcessExit(processHandle, expectedCreateTime); err != nil {
 			a.EventsEmit(endEvent, err.Error())
 			return
 		}
@@ -394,7 +400,7 @@ func watchExistingCoreExit(a *App, pid int, endEvent string, pidPath string) {
 	}()
 }
 
-func waitForProcessExit(processHandle *os.Process) error {
+func waitForProcessExit(processHandle *os.Process, expectedCreateTime int64) error {
 	interval := 10 * time.Millisecond
 	maxInterval := 1 * time.Second
 
@@ -405,6 +411,16 @@ func waitForProcessExit(processHandle *os.Process) error {
 		}
 		if !alive {
 			return nil
+		}
+		if expectedCreateTime > 0 {
+			proc, err := process.NewProcess(int32(processHandle.Pid))
+			if err != nil {
+				return nil
+			}
+			started, err := proc.CreateTime()
+			if err != nil || started != expectedCreateTime {
+				return nil
+			}
 		}
 
 		time.Sleep(interval)

@@ -177,7 +177,7 @@ func (g *probeGraph) addServer(tag string, runtime bool) (string, error) {
 		}
 		server["tag"] = name
 		switch textField(server, "type") {
-		case "local", "hosts":
+		case "local", "hosts", "dhcp":
 			if !runtime && tag == g.request.Tag {
 				return errors.New("diagnostics.notNetworkDns")
 			}

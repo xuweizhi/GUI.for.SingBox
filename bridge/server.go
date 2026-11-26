@@ -22,7 +22,7 @@ var requestCounter atomic.Uint64
 var serverMap sync.Map
 
 type serverEntry struct {
-	server *http.Server
+	server atomic.Pointer[http.Server]
 }
 
 type ResponseData struct {
@@ -31,32 +31,73 @@ type ResponseData struct {
 	Body    string
 }
 
+func validateCustomServerRoute(route string) string {
+	if !strings.HasPrefix(route, "/") {
+		return "route must start with /"
+	}
+	if route == "/" {
+		return "route cannot override root /"
+	}
+	return ""
+}
+
 func (a *App) StartServer(address string, serverID string, options ServerOptions) FlagResult {
 	log.Printf("StartServer: %s %s %v", address, serverID, options)
+
+	hasStatic := options.StaticPath != "" && options.StaticRoute != ""
+	hasUpload := options.UploadPath != "" && options.UploadRoute != ""
+	if hasStatic {
+		if msg := validateCustomServerRoute(options.StaticRoute); msg != "" {
+			return FlagResult{false, "Invalid static route: " + msg}
+		}
+	}
+	if hasUpload {
+		if msg := validateCustomServerRoute(options.UploadRoute); msg != "" {
+			return FlagResult{false, "Invalid upload route: " + msg}
+		}
+	}
+	if hasStatic && hasUpload && options.StaticRoute == options.UploadRoute {
+		return FlagResult{false, "Static route and upload route must not be identical"}
+	}
 
 	entry := &serverEntry{}
 	if _, exists := serverMap.LoadOrStore(serverID, entry); exists {
 		return FlagResult{false, "server already exists"}
 	}
 	started := false
+	var listener net.Listener
 	defer func() {
 		if !started {
-			serverMap.Delete(serverID)
+			if listener != nil {
+				_ = listener.Close()
+			}
+			serverMap.CompareAndDelete(serverID, entry)
 		}
 	}()
 
 	mux := http.NewServeMux()
+	registerRoute := func(pattern string, handler http.HandlerFunc) (errMsg string) {
+		defer func() {
+			if r := recover(); r != nil {
+				errMsg = "Invalid route pattern " + pattern
+			}
+		}()
+		mux.HandleFunc(pattern, handler)
+		return ""
+	}
 
-	if options.StaticPath != "" && options.StaticRoute != "" {
+	if hasStatic {
 		static := resolvePath(options.StaticPath)
 		fs := http.StripPrefix(options.StaticRoute, http.FileServer(http.Dir(static)))
 
-		mux.HandleFunc(options.StaticRoute, func(w http.ResponseWriter, r *http.Request) {
+		if errMsg := registerRoute(options.StaticRoute, func(w http.ResponseWriter, r *http.Request) {
 			handleFileDownload(w, r, fs, options.StaticHeaders)
-		})
+		}); errMsg != "" {
+			return FlagResult{false, errMsg}
+		}
 	}
 
-	if options.UploadPath != "" && options.UploadRoute != "" {
+	if hasUpload {
 		uploadPath := resolvePath(options.UploadPath)
 		if err := os.MkdirAll(uploadPath, os.ModePerm); err != nil {
 			return FlagResult{false, "Failed to create upload directory: " + err.Error()}
@@ -67,12 +108,17 @@ func (a *App) StartServer(address string, serverID string, options ServerOptions
 			maxUploadSize = 50 * 1024 * 1024 // 50MB
 		}
 
-		mux.HandleFunc(options.UploadRoute, func(w http.ResponseWriter, r *http.Request) {
+		if errMsg := registerRoute(options.UploadRoute, func(w http.ResponseWriter, r *http.Request) {
 			handleFileUpload(w, r, uploadPath, maxUploadSize, options.UploadHeaders)
-		})
+		}); errMsg != "" {
+			return FlagResult{false, errMsg}
+		}
 	}
 
-	var listener net.Listener
+	if errMsg := registerRoute("/", handleHttpRequest(a, serverID)); errMsg != "" {
+		return FlagResult{false, errMsg}
+	}
+
 	if options.Cert != "" && options.Key != "" {
 		cert, err := tls.LoadX509KeyPair(resolvePath(options.Cert), resolvePath(options.Key))
 		if err != nil {
@@ -92,8 +138,6 @@ func (a *App) StartServer(address string, serverID string, options ServerOptions
 		listener = ln
 	}
 
-	mux.HandleFunc("/", handleHttpRequest(a, serverID))
-
 	server := &http.Server{
 		Addr:              address,
 		Handler:           mux,
@@ -101,12 +145,12 @@ func (a *App) StartServer(address string, serverID string, options ServerOptions
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    1 << 20,
 	}
-	entry.server = server
+	entry.server.Store(server)
 
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Printf("Server error on %s: %v", address, err)
-			serverMap.Delete(serverID)
+			serverMap.CompareAndDelete(serverID, entry)
 		}
 	}()
 
@@ -123,16 +167,20 @@ func (a *App) StopServer(id string) FlagResult {
 	}
 
 	entry, ok := val.(*serverEntry)
-	if !ok || entry.server == nil {
+	if !ok {
+		return FlagResult{false, "invalid server type"}
+	}
+	server := entry.server.Load()
+	if server == nil {
 		return FlagResult{false, "invalid server type"}
 	}
 
-	err := entry.server.Close()
+	err := server.Close()
 	if err != nil {
 		return FlagResult{false, err.Error()}
 	}
 
-	serverMap.Delete(id)
+	serverMap.CompareAndDelete(id, entry)
 
 	return FlagResult{true, "Success"}
 }
@@ -145,7 +193,7 @@ func (a *App) ListServer() FlagResult {
 	serverMap.Range(func(key, value any) bool {
 		serverID, ok := key.(string)
 		entry, entryOK := value.(*serverEntry)
-		if ok && entryOK && entry.server != nil {
+		if ok && entryOK && entry.server.Load() != nil {
 			servers = append(servers, serverID)
 		}
 		return true

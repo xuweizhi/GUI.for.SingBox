@@ -269,3 +269,22 @@ func TestBackupHTTPRestoresTemporaryInstance(t *testing.T) {
 		t.Fatal("destination token overwritten")
 	}
 }
+
+func TestBackupSkipsTransientTempFiles(t *testing.T) {
+	root := t.TempDir()
+	backupFixture(t, root, map[string]string{
+		"profiles.yaml":                         "- id: p1\n  outbounds: []\n  dns: {rules: []}\n  route: {rules: []}\n",
+		"subscribes/sub.json":                   `[{"tag":"HK","type":"socks"}]`,
+		"subscribes/.sub.json.download-12345":   "partial",
+		"rulesets/.rs.srs.tmp-67890":            "partial",
+		"rulesets/rs.json":                      `{"version":3,"rules":[]}`,
+	})
+	archive := backupTestArchive(t, root)
+	preview, err := stageBackup(archive, t.TempDir())
+	if err != nil {
+		t.Fatalf("writeBackup/stageBackup failed with transient temp files present: %v", err)
+	}
+	if preview.Files != 3 {
+		t.Fatalf("expected 3 non-temp files in backup, got %d (%+v)", preview.Files, preview)
+	}
+}

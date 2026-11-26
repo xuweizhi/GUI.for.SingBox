@@ -19,9 +19,13 @@ import (
 )
 
 func (a *App) Requests(method string, url string, headers map[string]string, body string, options RequestOptions) HTTPResult {
+	return a.requestsWithContext(context.Background(), method, url, headers, body, options)
+}
+
+func (a *App) requestsWithContext(parentCtx context.Context, method string, url string, headers map[string]string, body string, options RequestOptions) HTTPResult {
 	log.Printf("Requests: %s %s", method, sanitizedURLForLog(url))
 
-	client, ctx, cancel := withRequestOptionsClient(options)
+	client, ctx, cancel := withRequestOptionsClientContext(parentCtx, options)
 	defer cancel()
 
 	var headerTimeout *time.Timer
@@ -42,7 +46,7 @@ func (a *App) Requests(method string, url string, headers map[string]string, bod
 
 	if options.CancelId != "" {
 		a.EventsOn(options.CancelId, func(data ...any) {
-			log.Printf("Requests Canceled: %v %v", method, url)
+			log.Printf("Requests Canceled: %v %v", method, sanitizedURLForLog(url))
 			cancel()
 		})
 		defer a.EventsOff(options.CancelId)
@@ -257,9 +261,13 @@ func (a *App) UdpRequest(address string, payload string, options NetOptions) Fla
 }
 
 func (a *App) Download(method string, url string, path string, headers map[string]string, event string, options RequestOptions) HTTPResult {
+	return a.downloadWithContext(context.Background(), method, url, path, headers, event, options)
+}
+
+func (a *App) downloadWithContext(parentCtx context.Context, method string, url string, path string, headers map[string]string, event string, options RequestOptions) HTTPResult {
 	log.Printf("Download: %s %s -> %s", method, sanitizedURLForLog(url), path)
 
-	client, ctx, cancel := withRequestOptionsClient(options)
+	client, ctx, cancel := withRequestOptionsClientContext(parentCtx, options)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
@@ -271,7 +279,7 @@ func (a *App) Download(method string, url string, path string, headers map[strin
 
 	if options.CancelId != "" {
 		a.EventsOn(options.CancelId, func(data ...any) {
-			log.Printf("Download Canceled: %v %v", url, path)
+			log.Printf("Download Canceled: %v %v", sanitizedURLForLog(url), path)
 			cancel()
 		})
 		defer a.EventsOff(options.CancelId)
@@ -374,7 +382,7 @@ func (a *App) Upload(method string, url string, path string, headers map[string]
 
 	if options.CancelId != "" {
 		a.EventsOn(options.CancelId, func(data ...any) {
-			log.Printf("Upload Canceled: %v %v", url, path)
+			log.Printf("Upload Canceled: %v %v", sanitizedURLForLog(url), path)
 			cancel()
 		})
 		defer a.EventsOff(options.CancelId)
@@ -398,6 +406,16 @@ func (a *App) Upload(method string, url string, path string, headers map[string]
 	}
 	defer resp.Body.Close()
 
+	if !isSuccessfulHTTPStatus(resp.StatusCode) {
+		_ = bodyReader.CloseWithError(fmt.Errorf("upload failed: %s", resp.Status))
+		<-copyErr
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return HTTPResult{false, resp.StatusCode, resp.Header, err.Error()}
+		}
+		return HTTPResult{false, resp.StatusCode, resp.Header, string(b)}
+	}
+
 	if err := <-copyErr; err != nil {
 		return HTTPResult{false, 500, nil, err.Error()}
 	}
@@ -405,9 +423,6 @@ func (a *App) Upload(method string, url string, path string, headers map[string]
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return HTTPResult{false, 500, nil, err.Error()}
-	}
-	if !isSuccessfulHTTPStatus(resp.StatusCode) {
-		return HTTPResult{false, resp.StatusCode, resp.Header, string(b)}
 	}
 
 	return HTTPResult{true, resp.StatusCode, resp.Header, string(b)}
@@ -455,6 +470,10 @@ func wrapWithProgress(r io.Reader, size int64, event string, a *App) io.Reader {
 }
 
 func withRequestOptionsClient(options RequestOptions) (*http.Client, context.Context, context.CancelFunc) {
+	return withRequestOptionsClientContext(context.Background(), options)
+}
+
+func withRequestOptionsClientContext(parentCtx context.Context, options RequestOptions) (*http.Client, context.Context, context.CancelFunc) {
 	client := &http.Client{
 		Timeout:   requestTimeout(options.Timeout),
 		Transport: requestTransport(options),
@@ -466,7 +485,10 @@ func withRequestOptionsClient(options RequestOptions) (*http.Client, context.Con
 		},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parentCtx)
 
 	return client, ctx, cancel
 }

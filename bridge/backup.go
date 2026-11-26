@@ -65,6 +65,16 @@ func managedBackupPath(name string) bool {
 	return slices.Contains(backupDirs, dir)
 }
 
+func isTransientBackupTempFile(base string) bool {
+	if !strings.HasPrefix(base, ".") {
+		return false
+	}
+	return strings.Contains(base, ".tmp-") ||
+		strings.Contains(base, ".download-") ||
+		strings.HasPrefix(base, ".new-") ||
+		strings.HasSuffix(base, ".bak")
+}
+
 func backupRoots() []string { return append(slices.Clone(backupFiles), backupDirs...) }
 
 func writeBackup(root string, out io.Writer) error {
@@ -83,6 +93,9 @@ func writeBackup(root string, out io.Writer) error {
 				return err
 			}
 			if d.IsDir() {
+				return nil
+			}
+			if isTransientBackupTempFile(d.Name()) {
 				return nil
 			}
 			name, err := filepath.Rel(root, file)

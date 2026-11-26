@@ -56,6 +56,41 @@ func TestDNSProbeDependencies(t *testing.T) {
 	}
 }
 
+func TestDNSProbeAllowsDHCPDependency(t *testing.T) {
+	req := dnsProbeRequest{
+		Domain:    "test.example",
+		QueryType: "A",
+		Path:      "direct",
+		Tag:       "doh",
+		Servers: []dnsObject{
+			{"tag": "dhcp-dns", "type": "dhcp"},
+			{"tag": "doh", "type": "https", "server": "dns.example", "domain_resolver": "dhcp-dns"},
+		},
+	}
+	config, err := makeDNSProbeConfig(req, probeRuntime{}, "test")
+	if err != nil {
+		t.Fatalf("expected dhcp resolver dependency to be accepted: %v", err)
+	}
+	servers := config["dns"].(dnsObject)["servers"].([]dnsObject)
+	var hasDHCP, hasDoH bool
+	for _, s := range servers {
+		if s["tag"] == "draft:dhcp-dns" && s["type"] == "dhcp" {
+			hasDHCP = true
+		}
+		if s["tag"] == "draft:doh" && s["domain_resolver"] == "draft:dhcp-dns" {
+			hasDoH = true
+		}
+	}
+	if !hasDHCP || !hasDoH {
+		t.Fatalf("expected dhcp dependency and doh server, got %#v", servers)
+	}
+
+	req.Tag = "dhcp-dns"
+	if _, err := makeDNSProbeConfig(req, probeRuntime{}, "test"); err == nil {
+		t.Fatal("expected dhcp target itself to be rejected as non-network DNS")
+	}
+}
+
 // Both DNS servers answer the same name differently. The proxy handler speaks
 // SOCKS5 and answers the DNS exchange itself, so a direct fallback fails the test.
 func TestDNSProbeWithInstalledCore(t *testing.T) {

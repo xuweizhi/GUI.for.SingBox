@@ -237,22 +237,44 @@ func (a *App) CopyFile(src string, dst string) FlagResult {
 	}
 	defer srcFile.Close()
 
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return FlagResult{false, err.Error()}
+	}
+	if dstInfo, err := os.Stat(dstPath); err == nil && os.SameFile(srcInfo, dstInfo) {
+		return FlagResult{true, "Success"}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
 		return FlagResult{false, err.Error()}
 	}
 
-	dstFile, err := os.Create(dstPath)
+	dstFile, err := os.CreateTemp(filepath.Dir(dstPath), "."+filepath.Base(dstPath)+".tmp-*")
 	if err != nil {
 		return FlagResult{false, err.Error()}
 	}
+	tempPath := dstFile.Name()
+	defer func() {
+		if tempPath != "" {
+			_ = os.Remove(tempPath)
+		}
+	}()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		dstFile.Close()
+		_ = dstFile.Close()
+		return FlagResult{false, err.Error()}
+	}
+	if err := dstFile.Chmod(srcInfo.Mode().Perm()); err != nil {
+		_ = dstFile.Close()
 		return FlagResult{false, err.Error()}
 	}
 	if err := dstFile.Close(); err != nil {
 		return FlagResult{false, err.Error()}
 	}
+	if err := os.Rename(tempPath, dstPath); err != nil {
+		return FlagResult{false, err.Error()}
+	}
+	tempPath = ""
 
 	return FlagResult{true, "Success"}
 }
@@ -403,6 +425,9 @@ func (a *App) UnzipTarGZFile(path string, output string) FlagResult {
 			if err := os.MkdirAll(filePath, os.ModePerm); err != nil {
 				failures = append(failures, archiveExtractError(header.Name, err))
 			}
+			continue
+		}
+		if header.Typeflag != tar.TypeReg && header.Typeflag != 0 {
 			continue
 		}
 

@@ -82,6 +82,7 @@ func SendExitSignal(p *os.Process) error {
 	if ret, _, err := procSetConsoleCtrlHandler.Call(0, 1); ret == 0 {
 		return err
 	}
+	defer procSetConsoleCtrlHandler.Call(0, 0)
 
 	if ret, _, err := procGenerateConsoleCtrlEvent.Call(windows.CTRL_BREAK_EVENT, uintptr(p.Pid)); ret == 0 {
 		return err

@@ -41,3 +41,25 @@ func TestUpdateSubscriptionSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateSubscriptionSettingsHandlesMissingDefaultFields(t *testing.T) {
+	backendFixtureBase(t)
+	// Simulate YAML written without preferOutboundDns / outboundDns keys
+	const original = "- id: a\n  url: https://example.test/sub\n  requestTimeout: 15\n"
+	backendFixtureWrite(t, subscribesFilePath, original)
+
+	changes := map[string]subscriptionSettingChange{
+		"preferOutboundDns": {Before: false, After: true},
+		"outboundDns":       {Before: []any{}, After: []any{"1.1.1.1"}},
+	}
+	if err := updateSubscriptionSettings("a", changes); err != nil {
+		t.Fatalf("expected missing defaults to match false/[]: %v", err)
+	}
+	var records []subscriptionConfig
+	if err := yaml.Unmarshal([]byte(backendFixtureRead(t, subscribesFilePath)), &records); err != nil {
+		t.Fatal(err)
+	}
+	if !records[0].PreferOutboundDns || len(records[0].OutboundDns) != 1 || records[0].OutboundDns[0] != "1.1.1.1" {
+		t.Fatalf("unexpected saved record: %+v", records[0])
+	}
+}

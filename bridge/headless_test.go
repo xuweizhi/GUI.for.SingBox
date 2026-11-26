@@ -334,3 +334,72 @@ func TestAssetCacheRequiresFingerprint(t *testing.T) {
 		}
 	}
 }
+
+func TestCoreProxyEnforcesSameOriginAndStripsCORSHeaders(t *testing.T) {
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer controller.Close()
+
+	auth := &headlessAuth{token: "webui-secret"}
+	handler := sameOriginOnly(auth.wrap(http.HandlerFunc(NewApp().handleCoreProxy)))
+	host := strings.TrimPrefix(controller.URL, "http://")
+
+	// Cross-origin request must be rejected with 403 even with a valid session cookie
+	crossReq := httptest.NewRequest(http.MethodGet, webUICoreEndpoint+host+"/configs", nil)
+	crossReq.Host = "127.0.0.1:18080"
+	crossReq.Header.Set("Origin", "https://evil.example")
+	crossReq.Header.Set("Sec-Fetch-Site", "cross-site")
+	crossReq.AddCookie(&http.Cookie{Name: webUITokenCookie, Value: auth.token})
+	crossRec := httptest.NewRecorder()
+	handler.ServeHTTP(crossRec, crossReq)
+	if crossRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for cross-origin core proxy request, got %d", crossRec.Code)
+	}
+
+	// Same-origin request succeeds and strips upstream Access-Control-* headers
+	sameReq := httptest.NewRequest(http.MethodGet, webUICoreEndpoint+host+"/configs", nil)
+	sameReq.Host = "127.0.0.1:18080"
+	sameReq.Header.Set("Origin", "http://127.0.0.1:18080")
+	sameReq.AddCookie(&http.Cookie{Name: webUITokenCookie, Value: auth.token})
+	sameRec := httptest.NewRecorder()
+	handler.ServeHTTP(sameRec, sameReq)
+	if sameRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for same-origin core proxy request, got %d", sameRec.Code)
+	}
+	if sameRec.Header().Get("Access-Control-Allow-Origin") != "" || sameRec.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("expected upstream CORS headers to be stripped, got %v", sameRec.Header())
+	}
+}
+
+func TestStartServerValidatesRoutesWithoutPanicking(t *testing.T) {
+	app := NewApp()
+	res := app.StartServer("127.0.0.1:0", "srv-invalid-root", ServerOptions{
+		StaticPath:  t.TempDir(),
+		StaticRoute: "/",
+	})
+	if res.Flag {
+		_ = app.StopServer("srv-invalid-root")
+		t.Fatal("expected StaticRoute '/' to be rejected")
+	}
+
+	res = app.StartServer("127.0.0.1:0", "srv-dup-route", ServerOptions{
+		StaticPath:  t.TempDir(),
+		StaticRoute: "/files/",
+		UploadPath:  t.TempDir(),
+		UploadRoute: "/files/",
+	})
+	if res.Flag {
+		_ = app.StopServer("srv-dup-route")
+		t.Fatal("expected duplicate static/upload routes to be rejected")
+	}
+	if _, exists := serverMap.Load("srv-invalid-root"); exists {
+		t.Fatal("failed server remained in serverMap")
+	}
+	if _, exists := serverMap.Load("srv-dup-route"); exists {
+		t.Fatal("failed duplicate-route server remained in serverMap")
+	}
+}
