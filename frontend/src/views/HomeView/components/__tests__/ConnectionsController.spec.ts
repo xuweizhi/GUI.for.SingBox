@@ -15,6 +15,12 @@ vi.mock('@/api/kernel', () => ({ deleteConnection: mocks.close }))
 vi.mock('@/stores', () => ({
   useAppStore: () => ({ menuShow: false, menuPosition: {}, menuList: [] }),
   useAppSettingsStore: () => ({ app: { connections: { visibility: {}, order: [] } } }),
+  useProfilesStore: () => ({
+    currentProfile: undefined,
+    addQuickRuleToProfile: vi.fn(),
+    addNodeGroupRuleToProfile: vi.fn(),
+  }),
+  useNodeGroupsStore: () => ({ nodeGroups: [] }),
   useKernelApiStore: () => ({
     onConnections: (handler: typeof mocks.receive) => {
       mocks.receive = handler
@@ -27,6 +33,7 @@ vi.mock('@/stores', () => ({
 vi.mock('@/utils', () => ({
   confirm: vi.fn().mockResolvedValue(true),
   message: { error: mocks.error },
+  quickRulePayloadToEntry: vi.fn(),
 }))
 vi.mock('@/constant/app', () => ({ DraggableOptions: {} }))
 vi.mock('@/constant/kernel', () => ({ DefaultConnections: () => ({}) }))

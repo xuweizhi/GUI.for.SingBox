@@ -5,7 +5,15 @@ import { useI18n } from 'vue-i18n'
 import { DefaultNodeGroup } from '@/constant/nodeGroup'
 import { useFormDraft } from '@/hooks/useFormDraft'
 import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
-import { confirm, deepClone, message, nodeGroupNodeKey, resolveNodeGroup } from '@/utils'
+import {
+  confirm,
+  deepClone,
+  message,
+  nodeGroupNodeKey,
+  resolveNodeGroup,
+  resolveNodeGroupPreProxyChain,
+  wouldCreateNodeGroupCycle,
+} from '@/utils'
 
 import Button from '@/components/Button/index.vue'
 
@@ -29,6 +37,27 @@ const modeOptions = [
   { label: 'nodeGroups.manual', value: 'manual' },
   { label: 'nodeGroups.filter', value: 'filter' },
 ]
+const preProxyBehaviorOptions = [
+  { label: 'nodeGroups.outletManual', value: 'manual' },
+  { label: 'nodeGroups.outletAuto', value: 'auto' },
+]
+const preProxyGroupOptions = computed(() => [
+  { label: t('nodeGroups.noPreProxy'), value: '' },
+  ...nodeGroupsStore.nodeGroups
+    .filter(
+      (candidate) =>
+        candidate.id !== group.value.id &&
+        !wouldCreateNodeGroupCycle(group.value.id, candidate.id, nodeGroupsStore.nodeGroups),
+    )
+    .map((candidate) => ({ label: candidate.name, value: candidate.id })),
+])
+const preProxyChain = computed(() => {
+  if (!group.value.pre_proxy_group_id) return undefined
+  const simulated = props.id
+    ? nodeGroupsStore.nodeGroups.map((item) => (item.id === props.id ? group.value : item))
+    : [...nodeGroupsStore.nodeGroups, group.value]
+  return resolveNodeGroupPreProxyChain(group.value.id, simulated)
+})
 const sourceOptions = [
   { label: 'nodeGroups.allSources', value: 'all' },
   { label: 'nodeGroups.selectedSources', value: 'selected' },
@@ -146,7 +175,7 @@ const handleSave = async () => {
     }
     const invalidFilter = resolution.value.issues.find((issue) => issue.type === 'invalid-filter')
     if (invalidFilter) {
-      return invalid('include', t('nodeGroups.issues.invalid-filter'))
+      return invalid(invalidFilter.field, t('nodeGroups.issues.invalid-filter'))
     }
   }
   loading.value = true
@@ -190,6 +219,26 @@ defineExpose({ modalSlots })
       <div class="form-item">
         {{ t('nodeGroups.icon') }}
         <Input v-model="group.icon" clearable placeholder="https://" />
+      </div>
+      <div class="form-item">
+        {{ t('nodeGroups.preProxy') }}
+        <div class="w-full">
+          <Select
+            v-model="group.pre_proxy_group_id"
+            :options="preProxyGroupOptions"
+            clearable
+            data-testid="node-group-pre-proxy"
+          />
+          <span class="field-hint text-12 opacity-70">{{ t('nodeGroups.preProxyHint') }}</span>
+        </div>
+      </div>
+      <div v-if="group.pre_proxy_group_id" class="form-item">
+        {{ t('nodeGroups.preProxyBehavior') }}
+        <Radio
+          v-model="group.pre_proxy_behavior"
+          :options="preProxyBehaviorOptions"
+          data-testid="node-group-pre-proxy-behavior"
+        />
       </div>
       <div class="form-item">
         {{ t('nodeGroups.mode') }}
@@ -290,9 +339,14 @@ defineExpose({ modalSlots })
             }}</small>
           </div>
         </div>
-        <div class="form-item">
+        <div class="form-item" :data-invalid="errorField === 'exclude'">
           {{ t('nodeGroups.exclude') }}
-          <Input v-model="group.exclude" placeholder="Expire|Traffic" />
+          <div class="w-full">
+            <Input v-model="group.exclude" placeholder="Expire|Traffic" class="w-full" />
+            <small v-if="errorField === 'exclude'" class="field-error" role="alert">{{
+              errorMessage
+            }}</small>
+          </div>
         </div>
         <div class="form-item">
           {{ t('nodeGroups.maxNodes') }}
@@ -301,6 +355,32 @@ defineExpose({ modalSlots })
       </template>
     </section>
     <aside class="group-preview surface-panel p-12">
+      <template v-if="preProxyChain">
+        <Divider>{{ t('nodeGroups.preProxyChain') }}</Divider>
+        <div class="flex flex-wrap items-center gap-4 text-12 mb-8" data-testid="node-group-chain-preview">
+          <Tag size="small">{{ t('nodeGroups.preProxyChainFlow') }}</Tag>
+          <template v-for="hop in preProxyChain.hops" :key="hop.id">
+            <span class="text-muted">→</span>
+            <Tag :color="hop.id === group.id ? 'blue' : 'purple'" size="small">
+              {{ hop.name
+              }}{{
+                hop.behavior
+                  ? ` (${t(hop.behavior === 'auto' ? 'nodeGroups.outletAuto' : 'nodeGroups.outletManual')})`
+                  : ''
+              }}
+            </Tag>
+          </template>
+        </div>
+        <div v-if="preProxyChain.error" class="text-12 mb-8" style="color: var(--color-danger)">
+          {{
+            t(
+              preProxyChain.error === 'cycle'
+                ? 'nodeGroups.issues.pre-proxy-cycle'
+                : 'nodeGroups.issues.missing-pre-proxy',
+            )
+          }}
+        </div>
+      </template>
       <Divider>{{ t('nodeGroups.resolved') }} · {{ resolution.nodes.length }}</Divider>
       <div class="flex flex-wrap gap-6">
         <div v-for="node in resolution.nodes" :key="node.key" class="min-w-0 max-w-full">

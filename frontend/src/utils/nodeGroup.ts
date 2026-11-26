@@ -37,7 +37,146 @@ export interface NodeGroupDependency {
   profileName: string
   outboundId: string
   outboundName: string
+  viaGroupName?: string
 }
+
+export interface NodeGroupGraphIssue {
+  type: 'missing-pre-proxy' | 'pre-proxy-cycle'
+  groupId: string
+  targetId?: string
+  chain: string[]
+}
+
+export interface NodeGroupPreProxyHop {
+  id: string
+  name: string
+  behavior?: App.NodeGroupOutletBehavior
+}
+
+export interface NodeGroupPreProxyChain {
+  /** Transport order from entry upstream to target node group. */
+  hops: NodeGroupPreProxyHop[]
+  error?: 'missing' | 'cycle'
+  missingId?: string
+}
+
+export const collectNodeGroupReachableIds = (
+  rootIds: Iterable<string>,
+  nodeGroups: Pick<App.NodeGroup, 'id' | 'pre_proxy_group_id'>[],
+): Set<string> => {
+  const byId = new Map(nodeGroups.map((group) => [group.id, group]))
+  const visited = new Set<string>()
+  const queue = [...rootIds]
+  while (queue.length) {
+    const current = queue.shift()!
+    if (!current || visited.has(current)) continue
+    visited.add(current)
+    const next = byId.get(current)?.pre_proxy_group_id
+    if (next && !visited.has(next)) queue.push(next)
+  }
+  return visited
+}
+
+export const findNodeGroupGraphIssues = (
+  nodeGroups: Pick<App.NodeGroup, 'id' | 'pre_proxy_group_id'>[],
+): NodeGroupGraphIssue[] => {
+  const issues: NodeGroupGraphIssue[] = []
+  const byId = new Map(nodeGroups.map((group) => [group.id, group]))
+
+  nodeGroups.forEach((group) => {
+    if (group.pre_proxy_group_id && !byId.has(group.pre_proxy_group_id)) {
+      issues.push({
+        type: 'missing-pre-proxy',
+        groupId: group.id,
+        targetId: group.pre_proxy_group_id,
+        chain: [group.id, group.pre_proxy_group_id],
+      })
+    }
+  })
+
+  const visited = new Set<string>()
+  const active = new Set<string>()
+  const stack: string[] = []
+  const seenCycles = new Set<string>()
+
+  const visit = (id: string) => {
+    if (active.has(id)) {
+      const start = stack.indexOf(id)
+      const chain = [...stack.slice(start), id]
+      const key = [...new Set(chain)].sort().join('|')
+      if (!seenCycles.has(key)) {
+        seenCycles.add(key)
+        issues.push({ type: 'pre-proxy-cycle', groupId: id, chain })
+      }
+      return
+    }
+    if (visited.has(id)) return
+
+    visited.add(id)
+    active.add(id)
+    stack.push(id)
+    const next = byId.get(id)?.pre_proxy_group_id
+    if (next && byId.has(next)) visit(next)
+    stack.pop()
+    active.delete(id)
+  }
+
+  nodeGroups.forEach((group) => visit(group.id))
+  return issues
+}
+
+export const wouldCreateNodeGroupCycle = (
+  groupId: string,
+  candidatePreProxyId: string,
+  nodeGroups: Pick<App.NodeGroup, 'id' | 'pre_proxy_group_id'>[],
+): boolean => {
+  if (!candidatePreProxyId) return false
+  if (candidatePreProxyId === groupId) return true
+  const byId = new Map(nodeGroups.map((group) => [group.id, group]))
+  const visited = new Set<string>([groupId])
+  let current: string | undefined = candidatePreProxyId
+  while (current) {
+    if (visited.has(current)) return true
+    visited.add(current)
+    current = byId.get(current)?.pre_proxy_group_id
+  }
+  return false
+}
+
+export const resolveNodeGroupPreProxyChain = (
+  groupId: string,
+  nodeGroups: Pick<App.NodeGroup, 'id' | 'name' | 'pre_proxy_group_id' | 'pre_proxy_behavior'>[],
+): NodeGroupPreProxyChain => {
+  const byId = new Map(nodeGroups.map((group) => [group.id, group]))
+  const hops: NodeGroupPreProxyHop[] = []
+  const visited = new Set<string>()
+  let currentId: string | undefined = groupId
+  let behaviorForCurrent: App.NodeGroupOutletBehavior | undefined
+
+  while (currentId) {
+    if (visited.has(currentId)) {
+      return { hops, error: 'cycle' }
+    }
+    visited.add(currentId)
+    const current = byId.get(currentId)
+    if (!current) {
+      return { hops, error: 'missing', missingId: currentId }
+    }
+    hops.unshift({
+      id: current.id,
+      name: current.name || current.id,
+      ...(behaviorForCurrent ? { behavior: behaviorForCurrent } : {}),
+    })
+    behaviorForCurrent = current.pre_proxy_behavior === 'auto' ? 'auto' : 'manual'
+    currentId = current.pre_proxy_group_id || undefined
+  }
+  return { hops }
+}
+
+export const getNodeGroupPreProxyDependents = (
+  groupId: string,
+  nodeGroups: App.NodeGroup[],
+): App.NodeGroup[] => nodeGroups.filter((group) => group.pre_proxy_group_id === groupId)
 
 export const nodeGroupNodeKey = (subscriptionId: string, nodeId: string) =>
   `${subscriptionId}\u0000${nodeId}`
@@ -223,25 +362,46 @@ export const resolveNodeGroup = (
 export const getNodeGroupDependencies = (
   groupId: string,
   profiles: App.Profile[],
-): NodeGroupDependency[] =>
-  profiles.flatMap((profile) =>
-    profile.outbounds.flatMap((outbound) =>
-      outbound.outbounds.some((member) => member.type === 'NodeGroup' && member.id === groupId)
-        ? [
+  nodeGroups: Pick<App.NodeGroup, 'id' | 'name' | 'pre_proxy_group_id'>[] = [],
+): NodeGroupDependency[] => {
+  const byId = new Map(nodeGroups.map((group) => [group.id, group]))
+  return profiles.flatMap((profile) =>
+    profile.outbounds.flatMap((outbound) => {
+      if (outbound.outbounds.some((member) => member.type === 'NodeGroup' && member.id === groupId)) {
+        return [
+          {
+            profileId: profile.id,
+            profileName: profile.name,
+            outboundId: outbound.id,
+            outboundName: outbound.tag,
+          },
+        ]
+      }
+      if (!nodeGroups.length || outbound.pre_proxy_override) return []
+      for (const member of outbound.outbounds) {
+        if (member.type !== 'NodeGroup') continue
+        const reachable = collectNodeGroupReachableIds([member.id], nodeGroups)
+        if (reachable.has(groupId)) {
+          return [
             {
               profileId: profile.id,
               profileName: profile.name,
               outboundId: outbound.id,
               outboundName: outbound.tag,
+              viaGroupName: byId.get(member.id)?.name || member.tag || member.id,
             },
           ]
-        : [],
-    ),
+        }
+      }
+      return []
+    }),
   )
+}
 
 export const removeNodeGroupReferences = (groupId: string, profiles: App.Profile[]) => {
   let removed = 0
   profiles.forEach((profile) => {
+    const emptiedGeneratedIds = new Set<string>()
     profile.outbounds.forEach((outbound) => {
       const next = outbound.outbounds.filter((member) => {
         const match = member.type === 'NodeGroup' && member.id === groupId
@@ -249,7 +409,33 @@ export const removeNodeGroupReferences = (groupId: string, profiles: App.Profile
         return !match
       })
       if (next.length !== outbound.outbounds.length) outbound.outbounds = next
+      if (outbound.source_node_group === groupId) {
+        delete outbound.source_node_group
+        delete outbound.source_node_group_role
+        if (outbound.outbounds.length === 0) emptiedGeneratedIds.add(outbound.id)
+      }
     })
+    if (emptiedGeneratedIds.size) {
+      profile.outbounds = profile.outbounds.filter(
+        (outbound) => !emptiedGeneratedIds.has(outbound.id),
+      )
+      profile.outbounds.forEach((outbound) => {
+        if (outbound.pre_proxy && emptiedGeneratedIds.has(outbound.pre_proxy)) {
+          outbound.pre_proxy = ''
+        }
+        outbound.outbounds = outbound.outbounds.filter(
+          (member) => !(member.type === 'Built-in' && emptiedGeneratedIds.has(member.id)),
+        )
+      })
+      if (profile.route?.rules) {
+        profile.route.rules = profile.route.rules.filter(
+          (rule) => !(rule.action === 'route' && emptiedGeneratedIds.has(rule.outbound)),
+        )
+      }
+      if (profile.route && emptiedGeneratedIds.has(profile.route.final)) {
+        profile.route.final = ''
+      }
+    }
   })
   return removed
 }
@@ -260,16 +446,26 @@ export const profileUsesSubscription = (
   profile: Pick<App.Profile, 'outbounds'>,
   subscriptionId: string,
   nodeGroups: App.NodeGroup[],
-) =>
-  profile.outbounds.some((outbound) =>
+) => {
+  const byId = new Map(nodeGroups.map((group) => [group.id, group]))
+  const groupUsesSubscription = (group: App.NodeGroup) => {
+    if (group.mode === 'manual')
+      return group.members.some((node) => node.subscription_id === subscriptionId)
+    return group.source_scope === 'all' || group.subscription_ids.includes(subscriptionId)
+  }
+  return profile.outbounds.some((outbound) =>
     outbound.outbounds.some((member) => {
       if (member.type === 'Subscription') return member.id === subscriptionId
       if (member.type === subscriptionId) return true
       if (member.type !== 'NodeGroup') return false
-      const group = nodeGroups.find((candidate) => candidate.id === member.id)
-      if (!group) return false
-      if (group.mode === 'manual')
-        return group.members.some((node) => node.subscription_id === subscriptionId)
-      return group.source_scope === 'all' || group.subscription_ids.includes(subscriptionId)
+      const ids = outbound.pre_proxy_override
+        ? new Set([member.id])
+        : collectNodeGroupReachableIds([member.id], nodeGroups)
+      for (const id of ids) {
+        const group = byId.get(id)
+        if (group && groupUsesSubscription(group)) return true
+      }
+      return false
     }),
   )
+}

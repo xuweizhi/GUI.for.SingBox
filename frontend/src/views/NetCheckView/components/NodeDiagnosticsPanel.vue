@@ -25,13 +25,14 @@ const renderText = (value?: string) => {
 const nodeFilter = ref('')
 const operationError = ref('')
 const readonlyNotice = computed(() => {
-  if (props.controller.readonlyMode?.value) return t('home.nodes.directReadonly')
+  if (props.controller.mode?.value === 'direct') return t('home.nodes.directReadonly')
   if (
     props.controller.selectedGroup.value &&
     props.controller.selectedGroup.value.type !== 'Selector'
   ) {
     return t('home.nodes.urlTestReadonly')
   }
+  if (props.controller.readonlyMode?.value) return t('home.nodes.directReadonly')
   return ''
 })
 const batchPercent = computed(() => {

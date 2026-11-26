@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 
 import { RuleAction, RuleType } from '@/enums/kernel'
-import { useNodeGroupsStore, useProfilesStore } from '@/stores'
+import { useAppSettingsStore, useNodeGroupsStore, useProfilesStore } from '@/stores'
 import {
   previewCode,
   confirm,
@@ -43,18 +43,43 @@ import InboundsConfig from './InboundsConfig.vue'
 import MixinAndScript from './MixinAndScriptConfig.vue'
 import OutboundsConfig from './OutboundsConfig.vue'
 import RouteConfig from './RouteConfig.vue'
+import SimpleProfileEditor from './SimpleProfileEditor.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
+const appSettingsStore = useAppSettingsStore()
 const outboundEditor = useTemplateRef('outboundEditor')
+const hasExplicitStep = Boolean(route.query.step || route.query.outbound)
+const editorMode = ref<'simple' | 'advanced'>(
+  hasExplicitStep
+    ? 'advanced'
+    : !props.id
+      ? 'simple'
+      : appSettingsStore.app.profileEditorMode || 'simple',
+)
+const setEditorMode = (mode: 'simple' | 'advanced') => {
+  editorMode.value = mode
+  appSettingsStore.app.profileEditorMode = mode
+}
+const openAdvancedStep = (step: number) => {
+  setEditorMode('advanced')
+  selectStep(step)
+}
 const editOutbound = async (id: string) => {
+  editorMode.value = 'advanced'
   currentStep.value = Step.Outbounds
   await nextTick()
   outboundEditor.value?.editById(id)
 }
 onMounted(() => {
-  if (typeof route.query.outbound === 'string') void editOutbound(route.query.outbound)
+  if (typeof route.query.outbound === 'string') {
+    const targetId = route.query.outbound
+    const nextQuery = { ...route.query }
+    delete nextQuery.outbound
+    void router.replace({ query: nextQuery }).catch(() => undefined)
+    void editOutbound(targetId)
+  }
 })
 const profilesStore = useProfilesStore()
 const nodeGroupsStore = useNodeGroupsStore()
@@ -177,7 +202,10 @@ const jumpToFirstIssue = () => {
     return
   }
   const idx = validationReport.value.stepIssues.findIndex((count) => count > 0)
-  if (idx !== -1) selectStep(idx + 1)
+  if (idx !== -1) {
+    setEditorMode('advanced')
+    selectStep(idx + 1)
+  }
 }
 const counts = computed(() => [
   null,
@@ -195,13 +223,13 @@ const handleSave = async () => {
     return
   }
   if (graphIssues.value.some((issue) => issue.type === 'reserved-tag')) {
-    selectStep(Step.Outbounds)
+    openAdvancedStep(Step.Outbounds)
     message.error(t('kernel.outbounds.reservedTag'))
     return
   }
   const cycle = graphIssues.value.find((issue) => issue.type === 'cycle')
   if (cycle) {
-    selectStep(Step.Outbounds)
+    openAdvancedStep(Step.Outbounds)
     message.error(
       t('kernel.outbounds.cycle', [
         getOutboundChainLabels(cycle.chain, profile.value.outbounds).join(' → '),
@@ -211,7 +239,7 @@ const handleSave = async () => {
   }
   const missingNodeGroup = graphIssues.value.find((issue) => issue.type === 'missing-node-group')
   if (missingNodeGroup) {
-    selectStep(Step.Outbounds)
+    openAdvancedStep(Step.Outbounds)
     message.error(t('kernel.outbounds.missingNodeGroup', [missingNodeGroup.targetId]))
     return
   }
@@ -276,7 +304,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 
 <template>
   <Empty v-if="missing" description="workspace.missingProfile" />
-  <section v-else class="profile-workspace">
+  <section v-else class="profile-workspace" :class="{ 'is-simple': editorMode === 'simple' }">
     <header class="profile-header flex flex-wrap items-center gap-8">
       <RouterLink to="/profiles">← {{ t('router.profiles') }}</RouterLink>
       <Input
@@ -286,6 +314,16 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
         :placeholder="t('profile.name')"
         class="flex-1 min-w-128"
       />
+      <Radio
+        :model-value="editorMode"
+        :options="[
+          { label: 'profileSimple.modeSimple', value: 'simple' },
+          { label: 'profileSimple.modeAdvanced', value: 'advanced' },
+        ]"
+        size="small"
+        data-testid="profile-editor-mode"
+        @change="(value: string) => setEditorMode(value as 'simple' | 'advanced')"
+      />
       <Button icon="preview" @click="handlePreview">{{ t('common.preview') }}</Button>
       <Button @click="router.push('/profiles')">{{ t('common.cancel') }}</Button>
       <Button type="primary" :loading="loading" @click="handleSave">{{ t('common.save') }}</Button>
@@ -293,7 +331,11 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
         >{{ t('profile.name') }} · {{ t('workspace.required') }}</small
       >
     </header>
-    <nav class="profile-stepper" :aria-label="t('router.profiles')">
+    <nav
+      v-if="editorMode === 'advanced'"
+      class="profile-stepper"
+      :aria-label="t('router.profiles')"
+    >
       <Button
         v-for="(item, index) in stepItems"
         :key="item.title"
@@ -326,43 +368,52 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
       >
     </nav>
     <main class="profile-content">
-      <div v-show="currentStep === Step.General">
-        <GeneralConfig v-model="generalConfig" :outbound-options="outboundOptions" />
-      </div>
-      <div v-show="currentStep === Step.Inbounds">
-        <InboundsConfig v-model="profile.inbounds" />
-      </div>
-      <div v-show="currentStep === Step.Outbounds">
-        <OutboundsConfig
-          ref="outboundEditor"
-          v-model="profile.outbounds"
-          :native="profile.native"
-        />
-      </div>
-      <div v-show="currentStep === Step.Route">
-        <RouteConfig
-          v-model="profile.route"
-          v-model:outbounds="profile.outbounds"
-          v-model:primary-proxy-outbound="primaryProxy"
-          :inbound-options="inboundOptions"
-          :outbound-options="outboundOptions"
-          :server-options="serverOptions"
-          :dns="profile.dns"
-          @edit-outbound="editOutbound"
-        />
-      </div>
-      <div v-show="currentStep === Step.Dns">
-        <DnsConfig
-          v-model="profile.dns"
-          :profile="profile"
-          :inbound-options="inboundOptions"
-          :outbound-options="outboundOptions"
-          :rule-set="profile.route.rule_set"
-        />
-      </div>
-      <div v-show="currentStep === Step.MixinScript">
-        <MixinAndScript v-model="mixinAndScriptConfig" />
-      </div>
+      <SimpleProfileEditor
+        v-if="editorMode === 'simple'"
+        v-model="profile"
+        @open-advanced-step="openAdvancedStep"
+      />
+      <template v-else>
+        <div v-show="currentStep === Step.General">
+          <GeneralConfig v-model="generalConfig" :outbound-options="outboundOptions" />
+        </div>
+        <div v-show="currentStep === Step.Inbounds">
+          <InboundsConfig v-model="profile.inbounds" />
+        </div>
+        <div v-show="currentStep === Step.Outbounds">
+          <OutboundsConfig
+            ref="outboundEditor"
+            v-model="profile.outbounds"
+            :native="profile.native"
+          />
+        </div>
+        <div v-show="currentStep === Step.Route">
+          <RouteConfig
+            v-model="profile.route"
+            v-model:outbounds="profile.outbounds"
+            v-model:primary-proxy-outbound="primaryProxy"
+            :inbound-options="inboundOptions"
+            :outbound-options="outboundOptions"
+            :server-options="serverOptions"
+            :dns="profile.dns"
+            :inbounds="profile.inbounds"
+            :experimental="profile.experimental"
+            @edit-outbound="editOutbound"
+          />
+        </div>
+        <div v-show="currentStep === Step.Dns">
+          <DnsConfig
+            v-model="profile.dns"
+            :profile="profile"
+            :inbound-options="inboundOptions"
+            :outbound-options="outboundOptions"
+            :rule-set="profile.route.rule_set"
+          />
+        </div>
+        <div v-show="currentStep === Step.MixinScript">
+          <MixinAndScript v-model="mixinAndScriptConfig" />
+        </div>
+      </template>
     </main>
   </section>
 </template>
@@ -373,6 +424,9 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
   gap: 16px;
   height: 100%;
   min-height: 0;
+}
+.profile-workspace.is-simple {
+  grid-template-columns: minmax(0, 1fr);
 }
 .profile-header {
   grid-column: 1/-1;

@@ -11,6 +11,7 @@ import {
   RulesTypeOptions,
 } from '@/constant/kernel'
 import { DefaultRouteRule } from '@/constant/profile'
+import { CommonServiceRulesetPresets, type ServiceRulesetPreset } from '@/constant/profilePresets'
 import {
   RuleActionReject,
   RuleAction,
@@ -21,8 +22,18 @@ import {
   Strategy,
 } from '@/enums/kernel'
 import { useBool } from '@/hooks'
-import { useNodeGroupsStore } from '@/stores'
-import { deepClone, ensureNodeGroupOutlet, isValidJson, message, type NodeGroupOutletBehavior } from '@/utils'
+import { useNodeGroupsStore, useRulesetsStore } from '@/stores'
+import {
+  deepClone,
+  detectManagedRuleKey,
+  ensureNodeGroupOutlet,
+  ensureProfileRuleset,
+  getOutboundRole,
+  isValidJson,
+  message,
+  type NodeGroupOutletBehavior,
+  type NodeGroupOutletPreProxyOption,
+} from '@/utils'
 
 interface Props {
   inboundOptions: { label: string; value: string }[]
@@ -30,9 +41,12 @@ interface Props {
   serverOptions: { label: string; value: string }[]
   ruleSet: App.ProfileRuleSet[]
   outbounds: App.Outbound[]
+  inbounds?: App.Inbound[]
+  showCleanup?: boolean
 }
 
 const props = defineProps<Props>()
+const emit = defineEmits<{ cleanupUnused: [] }>()
 
 const model = defineModel<App.Rule[]>({ required: true })
 
@@ -41,13 +55,55 @@ const fields = ref<App.Rule>(DefaultRouteRule())
 
 const { t } = useI18n()
 const nodeGroupsStore = useNodeGroupsStore()
+const rulesetsStore = useRulesetsStore()
+const hideSystemRules = ref(false)
+const rulesetQuery = ref('')
 const targetType = ref('outbound')
 const outletNodeGroup = ref('')
 const outletBehavior = ref<NodeGroupOutletBehavior>('manual')
+const outletPreProxyMode = ref<'inherit' | 'none' | 'replace-group' | 'stack-group'>('inherit')
+const outletPreProxyGroup = ref('')
+const outletPreProxyBehavior = ref<NodeGroupOutletBehavior>('manual')
+const outletCustomPreProxyOutboundId = ref('')
+const pendingRulesets = ref<App.ProfileRuleSet[]>([])
 const nodeGroupOptions = computed(() =>
   nodeGroupsStore.nodeGroups.map((group) => ({ label: group.name, value: group.id })),
 )
+const selectedOutletGroup = computed(() =>
+  outletNodeGroup.value ? nodeGroupsStore.getNodeGroupById(outletNodeGroup.value) : undefined,
+)
+const selectedOutletDefaultPreProxy = computed(() =>
+  selectedOutletGroup.value?.pre_proxy_group_id
+    ? nodeGroupsStore.getNodeGroupById(selectedOutletGroup.value.pre_proxy_group_id)
+    : undefined,
+)
+const preProxyGroupOptions = computed(() =>
+  nodeGroupsStore.nodeGroups
+    .filter((group) => group.id !== outletNodeGroup.value)
+    .map((group) => ({ label: group.name, value: group.id })),
+)
+const outletPreProxyModeOptions = computed(() => {
+  const defaultName = selectedOutletDefaultPreProxy.value?.name
+  return [
+    {
+      label: defaultName
+        ? t('nodeGroups.preProxyInheritWith', [defaultName])
+        : t('nodeGroups.preProxyInheritNone'),
+      value: 'inherit',
+    },
+    ...(defaultName ? [{ label: t('nodeGroups.preProxyNoneOverride'), value: 'none' }] : []),
+    { label: t('nodeGroups.preProxyReplaceGroup'), value: 'replace-group' },
+    ...(defaultName ? [{ label: t('nodeGroups.preProxyStackGroup'), value: 'stack-group' }] : []),
+  ]
+})
 const [showEditModal] = useBool(false)
+
+const resetOutletPreProxy = () => {
+  outletPreProxyMode.value = 'inherit'
+  outletPreProxyGroup.value = ''
+  outletPreProxyBehavior.value = 'manual'
+  outletCustomPreProxyOutboundId.value = ''
+}
 
 const handleAdd = () => {
   ruleId = -1
@@ -55,6 +111,9 @@ const handleAdd = () => {
   targetType.value = 'outbound'
   outletNodeGroup.value = ''
   outletBehavior.value = 'manual'
+  rulesetQuery.value = ''
+  pendingRulesets.value = []
+  resetOutletPreProxy()
   showEditModal.value = true
 }
 
@@ -79,6 +138,18 @@ const handleAddInsertionPoint = () => {
   })
 }
 
+const commitPendingRulesets = (
+  target: App.Profile['route']['rule_set'],
+  candidates: App.Profile['route']['rule_set'],
+  selectedIds: Set<string>,
+) => {
+  for (const candidate of candidates) {
+    if (selectedIds.has(candidate.id) && !target.some((item) => item.id === candidate.id)) {
+      target.push(candidate)
+    }
+  }
+}
+
 const handleAddEnd = () => {
   if (fields.value.type !== RuleType.InsertionPoint) {
     if (!fields.value.payload.trim()) {
@@ -101,6 +172,11 @@ const handleAddEnd = () => {
   if (fields.value.action === RuleAction.Route && targetType.value === 'group') {
     if (!applyNodeGroupOutlet()) return false
   }
+  if (fields.value.type === RuleType.RuleSet && pendingRulesets.value.length) {
+    const selectedIds = new Set(fields.value.payload.split(',').filter(Boolean))
+    commitPendingRulesets(props.ruleSet, pendingRulesets.value, selectedIds)
+    pendingRulesets.value = []
+  }
   if (ruleId !== -1) {
     model.value[ruleId] = fields.value
   } else {
@@ -116,10 +192,27 @@ const handleAddEnd = () => {
 const handleEdit = (index: number) => {
   ruleId = index
   fields.value = deepClone(model.value[index]!)
+  rulesetQuery.value = ''
+  pendingRulesets.value = []
   const generated = props.outbounds.find((outbound) => outbound.id === fields.value.outbound)
   targetType.value = generated?.source_node_group ? 'group' : 'outbound'
   outletNodeGroup.value = generated?.source_node_group || ''
   outletBehavior.value = generated?.type === 'urltest' ? 'auto' : 'manual'
+  resetOutletPreProxy()
+  if (generated?.source_node_group) {
+    if (generated.pre_proxy) {
+      const upstream = props.outbounds.find((outbound) => outbound.id === generated.pre_proxy)
+      if (upstream?.source_node_group) {
+        outletPreProxyMode.value = generated.pre_proxy_override ? 'replace-group' : 'stack-group'
+        outletPreProxyGroup.value = upstream.source_node_group
+        outletPreProxyBehavior.value = upstream.type === 'urltest' ? 'auto' : 'manual'
+      } else {
+        outletCustomPreProxyOutboundId.value = generated.id
+      }
+    } else if (generated.pre_proxy_override) {
+      outletPreProxyMode.value = 'none'
+    }
+  }
   showEditModal.value = true
 }
 
@@ -129,14 +222,45 @@ const applyNodeGroupOutlet = () => {
     message.error(t('kernel.outbounds.missingNodeGroup', [outletNodeGroup.value]))
     return false
   }
+  if (
+    outletCustomPreProxyOutboundId.value &&
+    outletPreProxyMode.value === 'inherit' &&
+    fields.value.outbound === outletCustomPreProxyOutboundId.value
+  ) {
+    return true
+  }
   const label = t(
     outletBehavior.value === 'auto' ? 'nodeGroups.outletAuto' : 'nodeGroups.outletManual',
   )
+  let preProxy: NodeGroupOutletPreProxyOption = { mode: 'inherit' }
+  if (outletPreProxyMode.value === 'none') {
+    preProxy = { mode: 'none' }
+  } else if (
+    outletPreProxyMode.value === 'replace-group' ||
+    outletPreProxyMode.value === 'stack-group'
+  ) {
+    const preGroup = nodeGroupsStore.getNodeGroupById(outletPreProxyGroup.value)
+    if (!preGroup) {
+      message.error(t('kernel.outbounds.missingNodeGroup', [outletPreProxyGroup.value]))
+      return false
+    }
+    preProxy = {
+      mode: outletPreProxyMode.value,
+      group: preGroup,
+      behavior: outletPreProxyBehavior.value,
+      behaviorLabel: t(
+        outletPreProxyBehavior.value === 'auto'
+          ? 'nodeGroups.outletAuto'
+          : 'nodeGroups.outletManual',
+      ),
+    }
+  }
   fields.value.outbound = ensureNodeGroupOutlet(
     props.outbounds,
     group,
     outletBehavior.value,
     label,
+    { role: 'outlet', preProxy },
   ).id
   return true
 }
@@ -152,6 +276,8 @@ const updateRuleAction = () => {
   const { action } = fields.value
   targetType.value = 'outbound'
   outletNodeGroup.value = ''
+  outletBehavior.value = 'manual'
+  resetOutletPreProxy()
   fields.value.sniffer = []
   fields.value.server = ''
   fields.value.strategy = Strategy.Default
@@ -239,10 +365,170 @@ const formatRuleParts = (rule: App.Rule) => {
   return { type, payload: displayPayload, action, target, invert }
 }
 
+const isSystemRule = (rule: App.Rule) =>
+  Boolean(
+    detectManagedRuleKey(rule, {
+      inbounds: props.inbounds || [],
+      outbounds: props.outbounds,
+      route: { rules: model.value, rule_set: props.ruleSet } as App.Route,
+    }),
+  )
+
+const systemRulesCount = computed(() => model.value.filter((rule) => isSystemRule(rule)).length)
+
+const directDownloadDetour = computed(
+  () => props.outbounds.find((o) => getOutboundRole(o) === 'direct')?.id || '',
+)
+
+const allAvailableProfileRulesets = computed(() => [...props.ruleSet, ...pendingRulesets.value])
+
+const filteredProfileRulesets = computed(() => {
+  const q = rulesetQuery.value.trim().toLowerCase()
+  if (!q) return allAvailableProfileRulesets.value
+  return allAvailableProfileRulesets.value.filter(
+    (rs) => rs.tag.toLowerCase().includes(q) || rs.type.toLowerCase().includes(q),
+  )
+})
+
+const filteredPresetRulesets = computed(() => {
+  const q = rulesetQuery.value.trim().toLowerCase()
+  const existingUrls = new Set(
+    allAvailableProfileRulesets.value
+      .filter((rs) => rs.type === RulesetType.Remote)
+      .map((rs) => rs.url),
+  )
+  return CommonServiceRulesetPresets.filter((preset) => {
+    if (existingUrls.has(preset.url)) return false
+    if (!q) return true
+    return (
+      preset.tag.toLowerCase().includes(q) ||
+      t(preset.labelKey).toLowerCase().includes(q) ||
+      preset.category.toLowerCase().includes(q)
+    )
+  })
+})
+
+const filteredLocalRulesets = computed(() => {
+  const q = rulesetQuery.value.trim().toLowerCase()
+  const existingLocalIds = new Set(
+    allAvailableProfileRulesets.value
+      .filter((rs) => rs.type === RulesetType.Local)
+      .map((rs) => rs.path),
+  )
+  return rulesetsStore.rulesets.filter((rs) => {
+    if (existingLocalIds.has(rs.id)) return false
+    if (!q) return true
+    return rs.name.toLowerCase().includes(q) || rs.path.toLowerCase().includes(q)
+  })
+})
+
+const HUB_DISPLAY_LIMIT = 24
+const hubLoading = ref(false)
+const getHubRulesetUrl = (item: App.RulesetHub['list'][number]) => {
+  const base =
+    item.type === 'geosite' ? rulesetsStore.rulesetHub?.geosite : rulesetsStore.rulesetHub?.geoip
+  return base ? `${base}${item.name}.srs` : ''
+}
+const allFilteredHubRulesets = computed(() => {
+  const list = rulesetsStore.rulesetHub?.list || []
+  if (!list.length) return []
+  const q = rulesetQuery.value.trim().toLowerCase()
+  const existingUrls = new Set([
+    ...allAvailableProfileRulesets.value
+      .filter((rs) => rs.type === RulesetType.Remote)
+      .map((rs) => rs.url),
+    ...CommonServiceRulesetPresets.map((preset) => preset.url),
+  ])
+  return list.filter((item) => {
+    const url = getHubRulesetUrl(item)
+    if (!url || existingUrls.has(url)) return false
+    if (!q) return true
+    return item.name.toLowerCase().includes(q) || item.type.toLowerCase().includes(q)
+  })
+})
+const visibleHubRulesets = computed(() => allFilteredHubRulesets.value.slice(0, HUB_DISPLAY_LIMIT))
+const hasHubLoader = computed(() => typeof rulesetsStore.updateRulesetHub === 'function')
+const handleLoadRulesetHub = async () => {
+  if (hubLoading.value || !hasHubLoader.value) return
+  hubLoading.value = true
+  try {
+    await rulesetsStore.updateRulesetHub()
+  } catch (error: any) {
+    message.error(error?.message || error)
+  } finally {
+    hubLoading.value = false
+  }
+}
+
+const stageProfileRuleset = (
+  spec:
+    | { kind: 'local'; id: string; tag: string; format: App.RuleSet['format'] }
+    | {
+        kind: 'remote'
+        url: string
+        tag: string
+        format: App.RuleSet['format']
+        downloadDetour?: string
+      },
+) => {
+  const existing =
+    spec.kind === 'local'
+      ? allAvailableProfileRulesets.value.find(
+          (item) => item.type === RulesetType.Local && item.path === spec.id,
+        )
+      : allAvailableProfileRulesets.value.find(
+          (item) => item.type === RulesetType.Remote && item.url === spec.url,
+        )
+  if (existing) return existing
+  const snapshot = [...props.ruleSet, ...pendingRulesets.value]
+  const created = ensureProfileRuleset(snapshot, spec)
+  pendingRulesets.value.push(created)
+  return created
+}
+
+const handleUseHubRuleset = (item: App.RulesetHub['list'][number]) => {
+  const url = getHubRulesetUrl(item)
+  if (!url) return
+  handleUse(
+    stageProfileRuleset({
+      kind: 'remote',
+      url,
+      tag: `${item.type}-${item.name}`,
+      format: RulesetFormat.Binary,
+      downloadDetour: directDownloadDetour.value,
+    }),
+  )
+}
+
+const handleUsePresetRuleset = (preset: ServiceRulesetPreset) => {
+  handleUse(
+    stageProfileRuleset({
+      kind: 'remote',
+      url: preset.url,
+      tag: preset.tag,
+      format: preset.format,
+      downloadDetour: directDownloadDetour.value,
+    }),
+  )
+}
+
+const handleUseLocalRuleset = (ruleset: App.RuleSet) => {
+  handleUse(
+    stageProfileRuleset({
+      kind: 'local',
+      id: ruleset.id,
+      tag: ruleset.name,
+      format: ruleset.format,
+    }),
+  )
+}
+
 const isRulesetSelected = (id: string) => fields.value.payload.split(',').includes(id)
 const resetTarget = () => {
   fields.value.outbound = ''
   outletNodeGroup.value = ''
+  outletBehavior.value = 'manual'
+  resetOutletPreProxy()
 }
 </script>
 
@@ -255,10 +541,19 @@ const resetTarget = () => {
     </template>
   </Empty>
 
-  <div v-else class="flex justify-end mb-8">
-    <Button icon="add" type="primary" size="small" @click="handleAdd">
-      {{ t('common.add') }}
-    </Button>
+  <div v-else class="flex flex-wrap items-center justify-between gap-8 mb-8">
+    <div v-if="systemRulesCount > 0" class="flex items-center gap-6 text-12 text-muted">
+      <Switch v-model="hideSystemRules" size="small" />
+      <span>{{ t('profileSimple.hideSystemRules', [systemRulesCount]) }}</span>
+    </div>
+    <div class="ml-auto flex items-center gap-6">
+      <Button v-if="showCleanup" size="small" type="text" @click="emit('cleanupUnused')">
+        {{ t('profileSimple.cleanupUnused') }}
+      </Button>
+      <Button icon="add" type="primary" size="small" @click="handleAdd">
+        {{ t('common.add') }}
+      </Button>
+    </div>
   </div>
 
   <Divider v-if="isInsertionPointMissing">
@@ -268,7 +563,13 @@ const resetTarget = () => {
   </Divider>
 
   <div v-draggable="[model, DraggableOptions]">
-    <Card v-for="(rule, index) in model" :key="rule.id" flush class="mb-6">
+    <Card
+      v-for="(rule, index) in model"
+      v-show="!hideSystemRules || !isSystemRule(rule)"
+      :key="rule.id"
+      flush
+      class="mb-6"
+    >
       <div v-if="rule.type === RuleType.InsertionPoint" class="text-center font-bold">
         <Divider class="cursor-move">
           <Button icon="add" type="text" size="small" @click="handleAdd">
@@ -411,23 +712,62 @@ const resetTarget = () => {
             @change="outletNodeGroup = ''"
           />
         </div>
-        <div v-else class="form-item">
-          {{ t('router.nodeGroups') }}
-          <div class="flex flex-wrap items-center gap-8">
-            <Select
-              v-model="outletNodeGroup"
-              :options="nodeGroupOptions"
-              clearable
-              @change="fields.outbound = ''"
-            />
-            <Radio
-              v-model="outletBehavior"
-              :options="[
-                { label: 'nodeGroups.outletManual', value: 'manual' },
-                { label: 'nodeGroups.outletAuto', value: 'auto' },
-              ]"
-              @change="fields.outbound = ''"
-            />
+        <div v-else class="flex flex-col gap-8">
+          <div class="form-item">
+            {{ t('router.nodeGroups') }}
+            <div class="flex flex-wrap items-center gap-8">
+              <Select
+                v-model="outletNodeGroup"
+                :options="nodeGroupOptions"
+                clearable
+                @change="
+                  () => {
+                    fields.outbound = ''
+                    resetOutletPreProxy()
+                  }
+                "
+              />
+              <Radio
+                v-model="outletBehavior"
+                :options="[
+                  { label: 'nodeGroups.outletManual', value: 'manual' },
+                  { label: 'nodeGroups.outletAuto', value: 'auto' },
+                ]"
+                @change="fields.outbound = ''"
+              />
+            </div>
+          </div>
+          <div v-if="outletNodeGroup && preProxyGroupOptions.length" class="form-item">
+            {{ t('nodeGroups.preProxyOutletMode') }}
+            <div class="flex flex-col gap-8 w-full">
+              <Select
+                v-model="outletPreProxyMode"
+                :options="outletPreProxyModeOptions"
+                @change="fields.outbound = ''"
+              />
+              <div
+                v-if="
+                  outletPreProxyMode === 'replace-group' || outletPreProxyMode === 'stack-group'
+                "
+                class="flex flex-wrap items-center gap-8"
+              >
+                <Select
+                  v-model="outletPreProxyGroup"
+                  :options="preProxyGroupOptions"
+                  clearable
+                  :placeholder="t('nodeGroups.preProxy')"
+                  @change="fields.outbound = ''"
+                />
+                <Radio
+                  v-model="outletPreProxyBehavior"
+                  :options="[
+                    { label: 'nodeGroups.outletManual', value: 'manual' },
+                    { label: 'nodeGroups.outletAuto', value: 'auto' },
+                  ]"
+                  @change="fields.outbound = ''"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </template>
@@ -474,11 +814,19 @@ const resetTarget = () => {
     </Card>
     <template v-if="fields.type === RuleType.RuleSet">
       <Divider>{{ t('kernel.route.tab.rule_set') }}</Divider>
-      <Empty v-if="ruleSet.length === 0" :description="t('kernel.route.rule_set.empty')" />
-      <div v-else class="responsive-card-grid">
+      <div class="mb-8">
+        <Input
+          v-model="rulesetQuery"
+          size="small"
+          clearable
+          :placeholder="t('profileSimple.searchRulesets')"
+          class="w-full"
+        />
+      </div>
+      <div v-if="filteredProfileRulesets.length" class="responsive-card-grid mb-12">
         <Card
-          v-for="ruleset in ruleSet"
-          :key="ruleset.tag"
+          v-for="ruleset in filteredProfileRulesets"
+          :key="ruleset.id"
           v-tips="ruleset.type"
           :title="ruleset.tag"
           :selected="isRulesetSelected(ruleset.id)"
@@ -492,6 +840,79 @@ const resetTarget = () => {
           </div>
         </Card>
       </div>
+      <template v-if="filteredPresetRulesets.length">
+        <Divider>{{ t('profileSimple.commonServicesAutoRegister') }}</Divider>
+        <div class="responsive-card-grid mb-12">
+          <Card
+            v-for="preset in filteredPresetRulesets"
+            :key="preset.id"
+            :title="t(preset.labelKey)"
+            interactive
+            class="ruleset"
+            @click="handleUsePresetRuleset(preset)"
+          >
+            <div class="text-12 text-muted">{{ preset.tag }}</div>
+          </Card>
+        </div>
+      </template>
+      <template v-if="filteredLocalRulesets.length">
+        <Divider>{{ t('profileSimple.localRulesetsAutoRegister') }}</Divider>
+        <div class="responsive-card-grid mb-12">
+          <Card
+            v-for="ruleset in filteredLocalRulesets"
+            :key="ruleset.id"
+            :title="ruleset.name"
+            interactive
+            class="ruleset"
+            @click="handleUseLocalRuleset(ruleset)"
+          >
+            <div class="text-12 text-muted break-all">{{ ruleset.path }}</div>
+          </Card>
+        </div>
+      </template>
+      <template v-if="visibleHubRulesets.length">
+        <Divider>{{ t('profileSimple.rulesetHubAutoRegister') }}</Divider>
+        <div
+          v-if="allFilteredHubRulesets.length > visibleHubRulesets.length"
+          class="text-12 text-muted mb-8"
+        >
+          {{
+            t('profileSimple.rulesetHubShowingFirst', [
+              visibleHubRulesets.length,
+              allFilteredHubRulesets.length,
+            ])
+          }}
+        </div>
+        <div class="responsive-card-grid mb-12">
+          <Card
+            v-for="item in visibleHubRulesets"
+            :key="item.type + ':' + item.name"
+            :title="item.name"
+            interactive
+            class="ruleset"
+            @click="handleUseHubRuleset(item)"
+          >
+            <div class="text-12 text-muted">{{ item.type }} · {{ item.count }}</div>
+          </Card>
+        </div>
+      </template>
+      <div
+        v-else-if="!(rulesetsStore.rulesetHub?.list?.length) && hasHubLoader"
+        class="flex justify-center my-8"
+      >
+        <Button size="small" :loading="hubLoading" @click="handleLoadRulesetHub">
+          {{ t('profileSimple.loadRulesetHub') }}
+        </Button>
+      </div>
+      <Empty
+        v-if="
+          !filteredProfileRulesets.length &&
+          !filteredPresetRulesets.length &&
+          !filteredLocalRulesets.length &&
+          !visibleHubRulesets.length
+        "
+        :description="t('kernel.route.rule_set.empty')"
+      />
     </template>
   </Modal>
 </template>

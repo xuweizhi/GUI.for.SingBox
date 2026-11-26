@@ -4,6 +4,7 @@ import {
   Inbound,
   Outbound,
   RuleAction,
+  RuleActionReject,
   RulesetType,
   RuleType as RouteRuleType,
   DnsServer,
@@ -183,6 +184,11 @@ export const restoreProfile = (
   )
 
   const InboundsIds = buildTagIdMapping('in-', config.inbounds)
+  if (profile) {
+    profile.inbounds.forEach((entry) => {
+      if (entry.tag) InboundsIds[entry.tag] = entry.id
+    })
+  }
   const OutboundsIds = buildTagIdMapping('out-', rawNodes)
   leafNodes.forEach((entry) => {
     OutboundsIds[entry.tag] = entry.tag
@@ -192,6 +198,11 @@ export const restoreProfile = (
       OutboundsIds[entry.tag] = entry.id
     })
   const RouteRuleSetIds = buildTagIdMapping('ruleset-', config.route?.rule_set)
+  if (profile) {
+    profile.route.rule_set.forEach((entry) => {
+      if (entry.tag) RouteRuleSetIds[entry.tag] = entry.id
+    })
+  }
   const DnsServersIds = buildTagIdMapping('dns-', config.dns?.servers)
   for (const entry of config.dns?.servers || []) {
     if (!entry.type || (preserveSources && entry.tag === SystemDnsResolverTag))
@@ -222,9 +233,39 @@ export const restoreProfile = (
     restoredOutbounds.find((outbound) => outbound.tag === originalPrimaryTag) ||
     getPrimaryProxyOutbound({ outbounds: restoredOutbounds })
 
+  const rawPreserveRouteRules =
+    preserveSources &&
+    JSON.stringify(config.route?.rules || []) === JSON.stringify(baseline!.route?.rules || []) &&
+    JSON.stringify(config.route?.rule_set || []) === JSON.stringify(baseline!.route?.rule_set || [])
+  const rawPreserveDnsRules =
+    preserveSources &&
+    JSON.stringify(config.dns?.rules || []) === JSON.stringify(baseline!.dns?.rules || [])
+  const hasQuickRules = Boolean(
+    profile?.route.quick_rules &&
+      (profile.route.quick_rules.direct.length ||
+        profile.route.quick_rules.proxy.length ||
+        profile.route.quick_rules.block.length),
+  )
+  // Keep quick_rules intact only when both route and DNS rules stayed untouched;
+  // otherwise restore both from config so compiled quick rules are neither dropped nor duplicated.
+  const preserveQuickRules = hasQuickRules && rawPreserveRouteRules && rawPreserveDnsRules
+  const preserveRouteRules = hasQuickRules ? preserveQuickRules : rawPreserveRouteRules
+  const preserveDnsRules = hasQuickRules ? preserveQuickRules : rawPreserveDnsRules
+
+  const restoredInbounds = restoreInbounds(config.inbounds || [], InboundsIds)
+  if (profile) {
+    const activeTags = new Set(restoredInbounds.map((entry) => entry.tag))
+    for (const originalInbound of profile.inbounds) {
+      if (!originalInbound.enable && !activeTags.has(originalInbound.tag)) {
+        restoredInbounds.push(deepClone(originalInbound))
+      }
+    }
+  }
+
   return {
     id: profile?.id || sampleID(),
     name,
+    ...(preserveRouteRules && profile?.preset ? { preset: profile.preset } : {}),
     native: preserveSources
       ? profile!.native
         ? deepClone(profile!.native)
@@ -263,17 +304,24 @@ export const restoreProfile = (
     primary_proxy_outbound: restoredPrimary?.id,
     log: deepAssign(Defaults.DefaultLog(), config.log),
     experimental: restoreExperimental(config.experimental, OutboundsIds),
-    inbounds: restoreInbounds(config.inbounds || [], InboundsIds),
+    inbounds: restoredInbounds,
     outbounds: restoredOutbounds,
     route: {
-      rule_set: restoreRouteRuleset(config.route?.rule_set || [], RouteRuleSetIds, OutboundsIds),
-      rules: restoreRouteRules(
-        config.route?.rules || [],
-        InboundsIds,
-        OutboundsIds,
-        RouteRuleSetIds,
-        DnsServersIds,
-      ),
+      rule_set: preserveRouteRules
+        ? deepClone(profile!.route.rule_set)
+        : restoreRouteRuleset(config.route?.rule_set || [], RouteRuleSetIds, OutboundsIds),
+      rules: preserveRouteRules
+        ? deepClone(profile!.route.rules)
+        : restoreRouteRules(
+            config.route?.rules || [],
+            InboundsIds,
+            OutboundsIds,
+            RouteRuleSetIds,
+            DnsServersIds,
+          ),
+      ...(preserveQuickRules && profile?.route.quick_rules
+        ? { quick_rules: deepClone(profile.route.quick_rules) }
+        : {}),
       auto_detect_interface:
         config.route?.auto_detect_interface ?? template.route.auto_detect_interface,
       find_process: config.route?.find_process ?? template.route.find_process,
@@ -295,6 +343,11 @@ export const restoreProfile = (
       },
     },
     dns: {
+      ...(preserveDnsRules && profile?.dns.preset
+        ? { preset: profile.dns.preset }
+        : profile?.dns.preset
+          ? { preset: 'custom' as const }
+          : {}),
       disable_cache: config.dns?.disable_cache ?? template.dns.disable_cache,
       disable_expire: config.dns?.disable_expire ?? template.dns.disable_expire,
       independent_cache: config.dns?.independent_cache ?? template.dns.independent_cache,
@@ -304,7 +357,9 @@ export const restoreProfile = (
       servers: preserveSources
         ? deepClone(profile!.dns.servers)
         : restoreDnsServers(config.dns?.servers || [], DnsServersIds, OutboundsIds),
-      rules: restoreDnsRules(config.dns?.rules || [], InboundsIds, RouteRuleSetIds, DnsServersIds),
+      rules: preserveDnsRules
+        ? deepClone(profile!.dns.rules)
+        : restoreDnsRules(config.dns?.rules || [], InboundsIds, RouteRuleSetIds, DnsServersIds),
     },
     mixin: profile?.mixin || Defaults.DefaultMixin(),
     script: profile?.script || Defaults.DefaultScript(),
@@ -481,6 +536,9 @@ const restoreOutbounds = (
       outbound.include = originalGroup.include
       outbound.exclude = originalGroup.exclude
       outbound.source_node_group = originalGroup.source_node_group
+      if (originalGroup.source_node_group_role)
+        outbound.source_node_group_role = originalGroup.source_node_group_role
+      if (originalGroup.pre_proxy_override) outbound.pre_proxy_override = true
 
       const currentNonBuiltInIds = new Set(
         newOutbounds.filter((v) => v.type !== 'Built-in').map((v) => v.id),
@@ -631,9 +689,7 @@ const restoreRouteRules = (
     if (RuleAction.Route === rule.action) {
       rule.outbound = OutboundsIds[raw.outbound]
     } else if (RuleAction.Reject === rule.action) {
-      if ('method' in raw) {
-        rule.outbound = raw.method
-      }
+      rule.outbound = 'method' in raw && raw.method ? raw.method : RuleActionReject.Default
     } else if (RuleAction.RouteOptions === rule.action) {
       rule.outbound = actionJson(raw, routeOptionFields)
     } else if (RuleAction.Sniff === rule.action) {
@@ -771,9 +827,7 @@ const restoreDnsRules = (
         rule.strategy = raw.strategy
       }
     } else if (RuleAction.Reject === rule.action) {
-      if ('method' in raw) {
-        rule.server = raw.method
-      }
+      rule.server = 'method' in raw && raw.method ? raw.method : RuleActionReject.Default
     } else if (rule.action === RuleAction.RouteOptions || rule.action === RuleAction.Predefined) {
       rule.server = actionJson(
         raw,

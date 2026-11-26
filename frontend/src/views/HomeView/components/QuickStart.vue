@@ -2,6 +2,7 @@
 import { computed, h, inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { ProfilePresetOptions } from '@/constant/profilePresets'
 import { useProfilesStore, useAppSettingsStore, useSubscribesStore } from '@/stores'
 import { message, sampleID } from '@/utils'
 
@@ -15,7 +16,11 @@ const appSettingsStore = useAppSettingsStore()
 const url = ref('')
 const name = ref('')
 const decryptPassword = ref('')
+const preset = ref<App.ProfilePreset>('bypass-cn')
 const loading = ref(false)
+const presetOptions = computed(() =>
+  ProfilePresetOptions.map((item) => ({ label: t(item.labelKey), value: item.value })),
+)
 
 const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
@@ -45,7 +50,7 @@ const handleSave = async () => {
     await subscribeStore.addSubscribe(sub, false)
     added = true
     await subscribeStore.updateSubscribe(sub.id)
-    const profile = profilesStore.getProfileTemplate(resolvedName)
+    const profile = profilesStore.getProfileTemplate(resolvedName, preset.value)
     for (const outbound of profile.outbounds.slice(0, 2)) {
       outbound.outbounds.push({ id: sub.id, tag: sub.id, type: 'Subscription' })
     }
@@ -84,11 +89,17 @@ const modalSlots = {
     ),
 }
 
+const handleKeydownEnter = (event: KeyboardEvent) => {
+  if (event.isComposing || !(event.target instanceof HTMLInputElement)) return
+  event.preventDefault()
+  void handleSave()
+}
+
 defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div class="form-grid" @keydown.enter.prevent="handleSave">
+  <div class="form-grid" @keydown.enter="handleKeydownEnter">
     <label for="quick-name">{{ t('profile.name') }}</label>
     <Input v-model="name" input-id="quick-name" clearable />
     <label for="quick-url">URL</label>
@@ -112,5 +123,7 @@ defineExpose({ modalSlots })
     </div>
     <label for="quick-password">{{ t('subscribe.decryptPassword') }}</label>
     <Input v-model="decryptPassword" input-id="quick-password" type="password" clearable />
+    <label>{{ t('profileSimple.presetTitle') }}</label>
+    <Select v-model="preset" :options="presetOptions" />
   </div>
 </template>

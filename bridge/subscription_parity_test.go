@@ -101,14 +101,20 @@ func TestBackendSubscriptionPreservesFutureFieldsThroughWorkerAndYAML(t *testing
 	// Structured profile fields and nested future fields survive the sync writeback.
 	backendFixtureWrite(t, "data/user.yaml", "kernel:\n  profile: p\n")
 	backendFixtureWrite(t, profilesFilePath, `- id: p
+  preset: bypass-cn
   native: {endpoints: [{type: wireguard, tag: wg}]}
   futureProfile: preserved
+  route:
+    quick_rules: {direct: [corp.local], proxy: [openai.com], block: [ads.invalid]}
+  dns:
+    preset: smart
   outbounds:
   - id: outbound-select
     tag: Select
     type: selector
     role: proxy
     pre_proxy: upstream
+    pre_proxy_override: true
     url: https://probe.invalid
     interval: 5m
     tolerance: 50
@@ -116,6 +122,7 @@ func TestBackendSubscriptionPreservesFutureFieldsThroughWorkerAndYAML(t *testing
     include: HongKong
     exclude: Expired
     source_node_group: group
+    source_node_group_role: outlet
     native: {default: node}
     futureStrategy: {newField: value}
     outbounds: [{id: s, tag: s, type: Subscription, futureRef: keep}]
@@ -124,7 +131,7 @@ func TestBackendSubscriptionPreservesFutureFieldsThroughWorkerAndYAML(t *testing
 		t.Fatal(err)
 	}
 	savedProfile := backendFixtureRead(t, profilesFilePath)
-	for _, key := range []string{"pre_proxy:", "interval:", "tolerance:", "include:", "exclude:", "role:", "futureProfile:", "futureStrategy:", "futureRef:", "endpoints:", "default:"} {
+	for _, key := range []string{"preset:", "quick_rules:", "pre_proxy:", "pre_proxy_override:", "source_node_group_role:", "interval:", "tolerance:", "include:", "exclude:", "role:", "futureProfile:", "futureStrategy:", "futureRef:", "endpoints:", "default:"} {
 		if !strings.Contains(savedProfile, key) {
 			t.Fatalf("lost %s in %s", key, savedProfile)
 		}

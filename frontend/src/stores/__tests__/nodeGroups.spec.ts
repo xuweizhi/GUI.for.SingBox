@@ -169,4 +169,29 @@ describe('node-groups store', () => {
     expect(store.nodeGroups).toEqual([])
     expect(profilesStore.profiles[0]!.outbounds[0]!.outbounds).toEqual([])
   })
+
+  it('validates pre-proxy node group cycles and cascades pre-proxy cleanup on delete', async () => {
+    const store = useNodeGroupsStore()
+    await store.addNodeGroup(createGroup({ id: 'relay', name: 'Relay' }))
+    await store.addNodeGroup(
+      createGroup({
+        id: 'landing',
+        name: 'Landing',
+        pre_proxy_group_id: 'relay',
+        pre_proxy_behavior: 'auto',
+      }),
+    )
+
+    await expect(
+      store.editNodeGroup(
+        'relay',
+        createGroup({ id: 'relay', name: 'Relay', pre_proxy_group_id: 'landing' }),
+      ),
+    ).rejects.toThrow('circular')
+
+    await expect(store.deleteNodeGroup('relay')).rejects.toBeInstanceOf(NodeGroupInUseError)
+    const result = await store.deleteNodeGroup('relay', { cascade: true })
+    expect(result.dependentGroups.map((g) => g.id)).toEqual(['landing'])
+    expect(store.getNodeGroupById('landing')?.pre_proxy_group_id).toBe('')
+  })
 })

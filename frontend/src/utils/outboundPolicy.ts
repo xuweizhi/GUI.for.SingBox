@@ -53,12 +53,13 @@ const outboundReferences = (outbound: App.Outbound, allIds: Set<string>) => [
 
 export const findOutboundGraphIssues = (
   outbounds: App.Outbound[],
-  nodeGroups: Pick<App.NodeGroup, 'id'>[] = [],
+  nodeGroups: Pick<App.NodeGroup, 'id' | 'pre_proxy_group_id'>[] = [],
 ): OutboundGraphIssue[] => {
   const issues: OutboundGraphIssue[] = []
   const ids = new Set(outbounds.map((outbound) => outbound.id))
   const byId = new Map(outbounds.map((outbound) => [outbound.id, outbound]))
-  const nodeGroupIds = new Set(nodeGroups.map((group) => group.id))
+  const nodeGroupById = new Map(nodeGroups.map((group) => [group.id, group]))
+  const nodeGroupIds = new Set(nodeGroupById.keys())
 
   outbounds.forEach((outbound) => {
     if ([Outbound.Direct, Outbound.Block].includes(outbound.tag as Outbound)) {
@@ -84,13 +85,44 @@ export const findOutboundGraphIssues = (
           targetId: member.id,
           chain: [outbound.id, member.id],
         })
-      } else if (member.type === 'NodeGroup' && !nodeGroupIds.has(member.id)) {
-        issues.push({
-          type: 'missing-node-group',
-          groupId: outbound.id,
-          targetId: member.id,
-          chain: [outbound.id, member.id],
-        })
+      } else if (member.type === 'NodeGroup') {
+        if (!nodeGroupIds.has(member.id)) {
+          issues.push({
+            type: 'missing-node-group',
+            groupId: outbound.id,
+            targetId: member.id,
+            chain: [outbound.id, member.id],
+          })
+        } else if (!outbound.pre_proxy_override) {
+          const seen = new Set<string>()
+          const chain = [outbound.id]
+          let currentId: string | undefined = member.id
+          while (currentId) {
+            if (seen.has(currentId)) {
+              issues.push({
+                type: 'cycle',
+                groupId: outbound.id,
+                targetId: currentId,
+                chain: [...chain, currentId],
+              })
+              break
+            }
+            seen.add(currentId)
+            chain.push(currentId)
+            const nextId: string | undefined = nodeGroupById.get(currentId)?.pre_proxy_group_id
+            if (!nextId) break
+            if (!nodeGroupById.has(nextId)) {
+              issues.push({
+                type: 'missing-node-group',
+                groupId: outbound.id,
+                targetId: nextId,
+                chain: [...chain, nextId],
+              })
+              break
+            }
+            currentId = nextId
+          }
+        }
       }
     })
   })

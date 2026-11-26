@@ -98,6 +98,7 @@ const hasContraryTarget = (outbound: App.Outbound) => {
 }
 
 const targetOptions = (outbound: App.Outbound) => {
+  if (outbound.type !== Outbound.Selector) return []
   const role = getOutboundRole(outbound)
   const byRole = (targetRole: App.OutboundRole) =>
     props.outbounds.find((candidate) => getOutboundRole(candidate) === targetRole)

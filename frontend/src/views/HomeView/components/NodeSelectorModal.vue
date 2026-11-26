@@ -223,9 +223,14 @@ const openRoutePolicies = async () => {
         :phase="nodePhases.get(node.name)"
         :favorite="!!node.favorite"
         :query="query"
+        :can-inspect="
+          ['Selector', 'URLTest'].includes(node.proxy?.type || '') &&
+          controller.groups.value.some((g) => g.name === node.name)
+        "
         @select="switchNode(node.name)"
         @favorite="controller.toggleFavorite(node.name)"
         @test="testNode(node.name)"
+        @inspect="controller.selectGroup(node.name)"
       />
     </div>
 

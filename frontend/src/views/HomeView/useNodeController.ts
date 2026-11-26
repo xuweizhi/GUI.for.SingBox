@@ -125,6 +125,9 @@ export const useNodeController = (
   )
   const nodeGroupRuntimeMap = computed(() => {
     const runtimeNames = selectedGroup.value?.all || []
+    const outboundByTag = new Map(
+      (profilesStore.currentProfile?.outbounds || []).map((outbound) => [outbound.tag, outbound]),
+    )
     return new Map(
       nodeGroupsStore.nodeGroups.flatMap((group) => {
         const names = getNodeGroupRuntimeNames(
@@ -132,6 +135,11 @@ export const useNodeController = (
           runtimeNames,
           subscribesStore.subscribes,
         )
+        runtimeNames.forEach((name) => {
+          if (outboundByTag.get(name)?.source_node_group === group.id) {
+            names.add(name)
+          }
+        })
         return names.size ? [[group.id, names] as const] : []
       }),
     )

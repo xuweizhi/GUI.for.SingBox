@@ -52,15 +52,26 @@ const kernelApiStore = useKernelApiStore()
 const profilesStore = useProfilesStore()
 
 const { isFavorite, toggleFavorite } = useNodeFavorites()
+const extractViaFromRuntimeName = (
+  name: string | undefined,
+  proxies: Record<string, any>,
+): string | undefined => {
+  if (!name) return undefined
+  const match = name.match(/ \[via ([^\]]+)\](?: [1-9]\d*)?$/)
+  const candidate = match?.[1]
+  return candidate && proxies[candidate] ? candidate : undefined
+}
+
 const groups = computed(() => {
   const { proxies } = kernelApiStore
-  const iconMapping = (profilesStore.currentProfile?.outbounds || []).reduce((p, c) => {
+  const profileOutbounds = profilesStore.currentProfile?.outbounds || []
+  const outboundByTag = new Map(profileOutbounds.map((item) => [item.tag, item]))
+  const outboundById = new Map(profileOutbounds.map((item) => [item.id, item]))
+  const iconMapping = profileOutbounds.reduce((p, c) => {
     p[c.tag] = c.icon
     return p
   }, {} as Recordable<string>)
-  const hiddenList = (profilesStore.currentProfile?.outbounds || []).flatMap((v) =>
-    v.hidden ? v.tag : [],
-  )
+  const hiddenList = profileOutbounds.flatMap((v) => (v.hidden ? v.tag : []))
   return Object.values(proxies)
     .filter(
       (v) =>
@@ -100,7 +111,27 @@ const groups = computed(() => {
         })
 
       const chains = resolveProxyChain(group.now, proxies).chain.filter((name) => proxies[name])
-      return { ...group, all, chains, icon: iconMapping[group.name] }
+      const configured = outboundByTag.get(group.name)
+      const configuredPreTag = configured?.pre_proxy
+        ? outboundById.get(configured.pre_proxy)?.tag
+        : undefined
+      const preProxyTag =
+        (configuredPreTag && proxies[configuredPreTag] ? configuredPreTag : undefined) ||
+        extractViaFromRuntimeName(group.now, proxies) ||
+        (group.all || [])
+          .map((item) => extractViaFromRuntimeName(item, proxies))
+          .find((item) => Boolean(item))
+      const isPreProxyGroup =
+        configured?.source_node_group_role === 'pre_proxy' ||
+        / · (?:Auto )?Pre-proxy(?: \d+)?$/.test(group.name)
+      return {
+        ...group,
+        all,
+        chains,
+        icon: iconMapping[group.name],
+        preProxyTag,
+        isPreProxyGroup,
+      }
     })
 })
 
@@ -199,6 +230,9 @@ const enqueueRefresh = () => {
       resultCache.forEach(({ result }) => result && applyResult(result))
     } finally {
       pendingRefreshes--
+      if (!pendingRefreshes) {
+        resultCache.forEach(({ owners }, name) => !owners.size && resultCache.delete(name))
+      }
     }
   })
   return refreshQueue
@@ -408,6 +442,19 @@ onScopeDispose(() => {
         <span class="font-bold text-16">{{ group.name }}</span>
         <Tag size="small" color="blue">{{ group.type }}</Tag>
         <Tag size="small" color="default">{{ group.all.length }}</Tag>
+        <Tag v-if="group.isPreProxyGroup" size="small" color="cyan">
+          {{ t('profileSimple.preProxyGroupTag') }}
+        </Tag>
+        <Button
+          v-if="group.preProxyTag"
+          type="text"
+          size="small"
+          @click.stop="locateGroup(group, group.preProxyTag)"
+        >
+          <Tag size="small" color="purple">
+            {{ t('profileSimple.preProxyVia', [group.preProxyTag]) }}
+          </Tag>
+        </Button>
         <span v-if="group.chains.length" class="text-muted">·</span>
         <template v-for="(chain, index) in group.chains" :key="chain">
           <span v-if="index !== 0" class="text-muted">→</span>
@@ -520,9 +567,14 @@ onScopeDispose(() => {
             :disabled="group.type !== 'Selector' || switchingGroup === group.name"
             :favorite="isFavorite(proxy.name)"
             :testing="isLoading(proxy.name)"
+            :can-inspect="
+              ['Selector', 'URLTest'].includes(proxy.type || '') &&
+              groups.some((g) => g.name === proxy.name)
+            "
             @favorite="toggleFavorite(proxy.name)"
             @select="useProxyWithCatchError(group, proxy)"
             @test="handleProxyDelay(proxy.name)"
+            @inspect="locateGroup(group, proxy.name)"
           />
         </div>
       </div>

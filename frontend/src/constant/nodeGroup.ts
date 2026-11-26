@@ -12,6 +12,8 @@ export const DefaultNodeGroup = (): App.NodeGroup => ({
   include: '',
   exclude: '',
   max_nodes: 0,
+  pre_proxy_group_id: '',
+  pre_proxy_behavior: 'manual',
 })
 
 export const NodeGroupMemberType = 'NodeGroup' as const

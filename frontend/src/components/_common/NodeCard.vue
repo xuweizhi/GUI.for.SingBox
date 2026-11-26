@@ -14,8 +14,9 @@ const props = defineProps<{
   favorite?: boolean | null
   testing: boolean
   phase?: string
+  canInspect?: boolean
 }>()
-const emit = defineEmits<{ select: []; test: []; favorite: [] }>()
+const emit = defineEmits<{ select: []; test: []; favorite: []; inspect: [] }>()
 const { t } = useI18n()
 const nameParts = computed(() => {
   const label = props.node.displayName ? t(props.node.displayName) : props.node.name
@@ -53,11 +54,12 @@ const nameParts = computed(() => {
         {{ nameParts[0] }}<mark v-if="nameParts[1]">{{ nameParts[1] }}</mark
         >{{ nameParts[2] }}
       </button>
-      <div v-if="node.displayName" class="text-12 text-muted line-clamp-1">
-        {{ node.name }}
+      <div v-if="node.displayName || node.proxy?.now" class="text-12 text-muted line-clamp-1">
+        <template v-if="node.displayName">{{ node.name }}</template>
         <span v-if="node.proxy?.now">
-          · {{ t('home.nodes.currentAutoNode') }}: {{ node.proxy.now }}</span
-        >
+          <template v-if="node.displayName"> · </template>{{ t('home.nodes.currentAutoNode') }}:
+          {{ node.proxy.now }}
+        </span>
       </div>
     </div>
     <div class="node-card__meta flex items-center text-12 gap-4">
@@ -113,6 +115,17 @@ const nameParts = computed(() => {
           </span>
           <span v-else class="text-muted">{{ t('home.nodes.untested') }}</span>
         </Button>
+        <Button
+          v-if="canInspect"
+          v-tips.fast="'home.nodes.inspectSubgroup'"
+          :data-inspect="node.name"
+          :aria-label="t('home.nodes.inspectSubgroup') + ' · ' + node.name"
+          icon="arrowRight"
+          type="text"
+          size="small"
+          class="shrink-0"
+          @click.stop="emit('inspect')"
+        />
       </div>
     </div>
   </article>

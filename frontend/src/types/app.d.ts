@@ -163,6 +163,7 @@ declare global {
       customFontPresets: CustomFontPreset[]
       nodeGroupsView: View
       profilesView: View
+      profileEditorMode?: 'simple' | 'advanced'
       subscribesView: View
       rulesetsView: View
       pluginsView: View
@@ -376,6 +377,7 @@ declare global {
     type NodeGroupMode = 'manual' | 'filter'
     type NodeGroupSourceScope = 'all' | 'selected'
     type NodeGroupMatchField = 'all' | 'name' | 'protocol' | 'subscription'
+    type NodeGroupOutletBehavior = 'manual' | 'auto'
 
     interface NodeGroupMember {
       subscription_id: string
@@ -395,6 +397,10 @@ declare global {
       include: string
       exclude: string
       max_nodes: number
+      // Optional default pre-proxy node group ID (reusable across profiles).
+      pre_proxy_group_id?: string
+      // Selection mode for the synthesized/reused pre-proxy strategy: manual (selector) or auto (urltest).
+      pre_proxy_behavior?: NodeGroupOutletBehavior
     }
 
     interface ProfileRuleSet {
@@ -469,11 +475,25 @@ declare global {
       hidden: boolean
       // GUI-only marker for visible strategy outbounds created from a node-group outlet shortcut.
       source_node_group?: string
+      source_node_group_role?: 'outlet' | 'pre_proxy'
       // Stable strategy ID used to dial the members through an upstream group.
       pre_proxy?: string
+      // When true, `pre_proxy` replaces member node groups' default pre-proxy instead of stacking on top.
+      pre_proxy_override?: boolean
       // Additional native strategy fields retained by the JSON editor.
       native?: Recordable
     }
+
+    type ManagedRuleKey =
+      | 'tun-sniff'
+      | 'hijack-dns'
+      | 'clash-direct'
+      | 'clash-global'
+      | 'icmp-direct'
+      | 'quic-block'
+      | 'ads-block'
+      | 'private-geosite'
+      | 'private-geoip'
 
     interface Rule {
       id: string
@@ -489,6 +509,14 @@ declare global {
       // action = resolve
       strategy: Strategy
       server: string
+      // Optional GUI marker identifying managed system/template rules for simplified view folding.
+      managed_key?: ManagedRuleKey
+    }
+
+    interface QuickRuleLists {
+      direct: string[]
+      proxy: string[]
+      block: string[]
     }
 
     interface Route {
@@ -502,6 +530,8 @@ declare global {
         server: string
         client_subnet: string
       }
+      // Simplified per-profile quick allow/proxy/block entries compiled at InsertionPoint.
+      quick_rules?: QuickRuleLists
     }
 
     interface DnsServerConfig {
@@ -541,6 +571,9 @@ declare global {
       client_subnet: string
     }
 
+    type DnsPreset = 'smart' | 'fakeip' | 'custom'
+    type ProfilePreset = 'bypass-cn' | 'proxy-list' | 'global' | 'minimal'
+
     interface Dns {
       servers: DnsServerConfig[]
       rules: DnsRule[]
@@ -550,6 +583,7 @@ declare global {
       client_subnet: string
       final: string
       strategy: Strategy
+      preset?: DnsPreset
     }
 
     interface Mixin {
@@ -565,6 +599,8 @@ declare global {
     interface Profile {
       id: string
       name: string
+      // GUI-only routing preset marker for the simplified editor.
+      preset?: ProfilePreset
       // GUI-only pointer to the selector opened by the home proxy-node picker.
       primary_proxy_outbound?: string
       // Native entries retained when editing/importing a generated core configuration.

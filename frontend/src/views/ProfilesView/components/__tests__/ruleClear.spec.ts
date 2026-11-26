@@ -3,9 +3,13 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/stores', () => ({
   useNodeGroupsStore: () => ({ nodeGroups: [], getNodeGroupById: vi.fn() }),
+  useRulesetsStore: () => ({ rulesets: [], getRulesetById: vi.fn() }),
 }))
 vi.mock('@/utils', () => ({
   deepClone: (v: any) => JSON.parse(JSON.stringify(v)),
+  detectManagedRuleKey: () => undefined,
+  ensureProfileRuleset: vi.fn(),
+  getOutboundRole: () => 'custom',
   message: { warn: vi.fn() },
   isValidJson: () => true,
   ensureNodeGroupOutlet: vi.fn(),

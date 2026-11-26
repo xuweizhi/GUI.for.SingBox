@@ -4,7 +4,14 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import { useNodeGroupsStore } from '@/stores'
-import { ensureNodeGroupOutlet, message, type NodeGroupOutletBehavior } from '@/utils'
+import {
+  ensureNodeGroupOutlet,
+  message,
+  pruneUnusedNodeGroupOutlets,
+  pruneUnusedProfileRulesets,
+  type NodeGroupOutletBehavior,
+  type NodeGroupOutletPreProxyOption,
+} from '@/utils'
 
 import RoutePolicyOverview from './RoutePolicyOverview.vue'
 import RouteRulesConfig from './RouteRulesConfig.vue'
@@ -15,9 +22,11 @@ interface Props {
   outboundOptions: { label: string; value: string }[]
   serverOptions: { label: string; value: string }[]
   dns: App.Dns
+  inbounds?: App.Inbound[]
+  experimental?: App.Experimental
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
 
 const model = defineModel<App.Profile['route']>({ required: true })
 const outbounds = defineModel<App.Outbound[]>('outbounds', { required: true })
@@ -61,10 +70,50 @@ const finalNodeGroup = ref(currentOutlet.value?.source_node_group || '')
 const finalNodeGroupBehavior = ref<NodeGroupOutletBehavior>(
   currentOutlet.value?.type === 'urltest' ? 'auto' : 'manual',
 )
+const finalPreProxyGroup = ref(
+  currentOutlet.value?.pre_proxy
+    ? outbounds.value.find((item) => item.id === currentOutlet.value?.pre_proxy)
+        ?.source_node_group || ''
+    : '',
+)
+const finalPreProxyBehavior = ref<NodeGroupOutletBehavior>(
+  currentOutlet.value?.pre_proxy &&
+    outbounds.value.find((item) => item.id === currentOutlet.value?.pre_proxy)?.type === 'urltest'
+    ? 'auto'
+    : 'manual',
+)
 
 const nodeGroupOptions = computed(() =>
   nodeGroupsStore.nodeGroups.map((group) => ({ label: group.name, value: group.id })),
 )
+const finalPreProxyOptions = computed(() => [
+  { label: t('nodeGroups.preProxyInherit'), value: '' },
+  ...nodeGroupsStore.nodeGroups
+    .filter((group) => group.id !== finalNodeGroup.value)
+    .map((group) => ({ label: group.name, value: group.id })),
+])
+
+watch(
+  currentOutlet,
+  (outlet) => {
+    targetType.value = outlet?.source_node_group ? 'group' : 'outbound'
+    finalNodeGroup.value = outlet?.source_node_group || ''
+    finalNodeGroupBehavior.value = outlet?.type === 'urltest' ? 'auto' : 'manual'
+    const upstream = outlet?.pre_proxy
+      ? outbounds.value.find((item) => item.id === outlet.pre_proxy)
+      : undefined
+    finalPreProxyGroup.value = upstream?.source_node_group || ''
+    finalPreProxyBehavior.value = upstream?.type === 'urltest' ? 'auto' : 'manual'
+  },
+  { flush: 'sync' },
+)
+
+const handleFinalNodeGroupChange = () => {
+  if (finalPreProxyGroup.value === finalNodeGroup.value) {
+    finalPreProxyGroup.value = ''
+  }
+  applyFinalNodeGroup()
+}
 
 const applyFinalNodeGroup = () => {
   const group = nodeGroupsStore.getNodeGroupById(finalNodeGroup.value)
@@ -79,11 +128,28 @@ const applyFinalNodeGroup = () => {
   const label = t(
     finalNodeGroupBehavior.value === 'auto' ? 'nodeGroups.outletAuto' : 'nodeGroups.outletManual',
   )
+  let preProxy: NodeGroupOutletPreProxyOption = { mode: 'inherit' }
+  if (finalPreProxyGroup.value) {
+    const preGroup = nodeGroupsStore.getNodeGroupById(finalPreProxyGroup.value)
+    if (preGroup) {
+      preProxy = {
+        mode: 'replace-group',
+        group: preGroup,
+        behavior: finalPreProxyBehavior.value,
+        behaviorLabel: t(
+          finalPreProxyBehavior.value === 'auto'
+            ? 'nodeGroups.outletAuto'
+            : 'nodeGroups.outletManual',
+        ),
+      }
+    }
+  }
   model.value.final = ensureNodeGroupOutlet(
     outbounds.value,
     group,
     finalNodeGroupBehavior.value,
     label,
+    { role: 'outlet', preProxy },
   ).id
 }
 
@@ -98,9 +164,26 @@ const handleAdd = () => {
 }
 
 defineExpose({ handleAdd })
+const handleCleanupUnused = () => {
+  const removedRulesets = pruneUnusedProfileRulesets({ route: model.value, dns: props.dns })
+  const removedOutlets = pruneUnusedNodeGroupOutlets({
+    outbounds: outbounds.value,
+    route: model.value,
+    dns: props.dns,
+    experimental:
+      props.experimental ||
+      ({ clash_api: { external_ui_download_detour: '' } } as App.Experimental),
+    primary_proxy_outbound: primaryProxyOutbound.value,
+  })
+  const total = removedRulesets.length + removedOutlets.length
+  if (total > 0) message.success(t('profileSimple.cleanupDone', [total]))
+  else message.info(t('profileSimple.cleanupNone'))
+}
+
 const resetTarget = () => {
   model.value.final = ''
   finalNodeGroup.value = ''
+  finalPreProxyGroup.value = ''
 }
 </script>
 
@@ -161,7 +244,7 @@ const resetTarget = () => {
               v-model="finalNodeGroup"
               :options="nodeGroupOptions"
               clearable
-              @change="applyFinalNodeGroup"
+              @change="handleFinalNodeGroupChange"
             />
             <Radio
               v-model="finalNodeGroupBehavior"
@@ -171,6 +254,24 @@ const resetTarget = () => {
               ]"
               @change="applyFinalNodeGroup"
             />
+            <div v-if="finalNodeGroup && finalPreProxyOptions.length > 1" class="flex flex-wrap items-center gap-8">
+              <Select
+                v-model="finalPreProxyGroup"
+                :options="finalPreProxyOptions"
+                clearable
+                :placeholder="t('nodeGroups.preProxy')"
+                @change="applyFinalNodeGroup"
+              />
+              <Radio
+                v-if="finalPreProxyGroup"
+                v-model="finalPreProxyBehavior"
+                :options="[
+                  { label: 'nodeGroups.outletManual', value: 'manual' },
+                  { label: 'nodeGroups.outletAuto', value: 'auto' },
+                ]"
+                @change="applyFinalNodeGroup"
+              />
+            </div>
           </template>
         </div>
       </div>
@@ -189,8 +290,11 @@ const resetTarget = () => {
         :inbound-options="inboundOptions"
         :outbound-options="outboundOptions"
         :outbounds="outbounds"
+        :inbounds="inbounds"
         :server-options="serverOptions"
         :rule-set="model.rule_set"
+        show-cleanup
+        @cleanup-unused="handleCleanupUnused"
       />
     </template>
   </Tabs>

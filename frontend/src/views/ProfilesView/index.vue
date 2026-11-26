@@ -248,10 +248,14 @@ const generateMenus = (profile: App.Profile) => {
   ]
 }
 
-const handleShowProfileForm = (id?: string, step = 1) =>
+const handleShowProfileForm = (id?: string, step?: number) =>
   router.push(
     id
-      ? { name: 'EditProfile', params: { id }, query: { step: Math.max(step, 1) } }
+      ? {
+          name: 'EditProfile',
+          params: { id },
+          ...(step !== undefined ? { query: { step: Math.max(step, 1) } } : {}),
+        }
       : { name: 'NewProfile' },
   )
 

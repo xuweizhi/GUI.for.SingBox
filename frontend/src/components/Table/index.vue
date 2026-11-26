@@ -29,6 +29,13 @@ const props = withDefaults(defineProps<Props>(), {
   sort: undefined,
 })
 const emit = defineEmits<{ 'row-click': [record: Recordable] }>()
+const bindMenuRecord = (items: App.Menu[], record: Recordable): App.Menu[] =>
+  items.map((item) => ({
+    ...item,
+    handler: item.handler ? () => item.handler?.(record) : undefined,
+    ...(item.children ? { children: bindMenuRecord(item.children, record) } : {}),
+  }))
+
 const handleRowClick = (event: MouseEvent, record: Recordable) => {
   const target = event.target as Element | null
   if (
@@ -167,7 +174,7 @@ onUnmounted(() => observer?.disconnect())
           <tr
             v-for="record in tableData"
             :key="record.id"
-            v-menu="menu.map((v) => ({ ...v, handler: () => v.handler?.(record) }))"
+            v-menu="bindMenuRecord(menu, record)"
             class="transition-all duration-200"
             @click="handleRowClick($event, record)"
           >

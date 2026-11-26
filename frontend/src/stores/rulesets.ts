@@ -129,10 +129,39 @@ export const useRulesetsStore = defineStore('rulesets', () => {
         ? JSON.parse(await ReadFile(rule.path))
         : { version: 1, rules: [] }
       if (!Array.isArray(data.rules)) throw new Error('Not a valid ruleset data')
-      const first = (data.rules[0] ??= {})
+      const findMutableRule = (predicate: (entry: Recordable) => boolean) =>
+        data.rules.find(
+          (entry: Recordable) =>
+            entry &&
+            typeof entry === 'object' &&
+            !Array.isArray(entry) &&
+            entry.type !== 'logical' &&
+            !entry.invert &&
+            predicate(entry),
+        )
+      const getOrCreateRule = (kind: 'network' | 'process') => {
+        const existing =
+          kind === 'process'
+            ? findMutableRule(
+                (entry) =>
+                  !entry.domain && !entry.domain_suffix && !entry.ip_cidr && !entry.domain_keyword,
+              )
+            : findMutableRule((entry) => !entry.process_path && !entry.process_name)
+        if (existing) return existing
+        const created: Recordable = {}
+        data.rules.push(created)
+        return created
+      }
       for (const payload of payloads) {
-        for (const key of ['domain', 'ip_cidr', 'process_path', 'domain_suffix']) {
-          if (payload[key]) first[key] = [...new Set([first[key] ?? [], payload[key]].flat())]
+        for (const key of ['domain', 'ip_cidr', 'domain_suffix']) {
+          if (payload[key]) {
+            const target = getOrCreateRule('network')
+            target[key] = [...new Set([target[key] ?? [], payload[key]].flat())]
+          }
+        }
+        if (payload.process_path) {
+          const target = getOrCreateRule('process')
+          target.process_path = [...new Set([target.process_path ?? [], payload.process_path].flat())]
         }
       }
       await persistLocalRuleset(rule, JSON.stringify(data, null, 2))

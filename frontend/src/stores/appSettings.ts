@@ -167,6 +167,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     customFontPresets: [],
     nodeGroupsView: View.Grid,
     profilesView: View.Grid,
+    profileEditorMode: 'simple',
     subscribesView: View.Grid,
     rulesetsView: View.Grid,
     pluginsView: View.Grid,

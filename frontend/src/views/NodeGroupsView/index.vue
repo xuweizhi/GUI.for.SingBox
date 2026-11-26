@@ -32,6 +32,10 @@ const groupCards = computed(() => {
       group,
       resolution: nodeGroupsStore.resolveGroup(group),
       dependencies: nodeGroupsStore.getDependencies(group.id),
+      preProxyGroup: group.pre_proxy_group_id
+        ? nodeGroupsStore.getNodeGroupById(group.pre_proxy_group_id)
+        : undefined,
+      preProxyDependents: nodeGroupsStore.getPreProxyDependents(group.id),
     }))
 })
 
@@ -46,12 +50,26 @@ const openForm = (id?: string) => {
 
 const removeGroup = async (group: App.NodeGroup) => {
   const dependencies = nodeGroupsStore.getDependencies(group.id)
+  const dependentGroups = nodeGroupsStore.getPreProxyDependents(group.id)
+  const hasReferences = dependencies.length > 0 || dependentGroups.length > 0
   try {
-    if (dependencies.length) {
-      const lines = dependencies
-        .map((dependency) => `${dependency.profileName} / ${dependency.outboundName}`)
-        .join('\n')
-      await confirm(t('common.delete'), t('nodeGroups.deleteReferenced', [lines]), {
+    if (hasReferences) {
+      const sections: string[] = []
+      if (dependencies.length) {
+        const lines = dependencies
+          .map((dependency) =>
+            dependency.viaGroupName
+              ? `${dependency.profileName} / ${dependency.outboundName} (${dependency.viaGroupName})`
+              : `${dependency.profileName} / ${dependency.outboundName}`,
+          )
+          .join('\n')
+        sections.push(t('nodeGroups.deleteReferenced', [lines]))
+      }
+      if (dependentGroups.length) {
+        const names = dependentGroups.map((item) => item.name).join('\n')
+        sections.push(t('nodeGroups.deleteReferencedPreProxy', [names]))
+      }
+      await confirm(t('common.delete'), sections.join('\n\n'), {
         type: 'text',
         okText: 'common.delete',
         danger: true,
@@ -63,7 +81,7 @@ const removeGroup = async (group: App.NodeGroup) => {
         danger: true,
       })
     }
-    await nodeGroupsStore.deleteNodeGroup(group.id, { cascade: dependencies.length > 0 })
+    await nodeGroupsStore.deleteNodeGroup(group.id, { cascade: hasReferences })
     message.success('common.success')
   } catch (error: any) {
     if (error !== t('common.canceled')) message.error(error.message || error)
@@ -127,6 +145,14 @@ const actions = (group: App.NodeGroup) => [
         <div class="flex flex-wrap gap-6">
           <Tag color="blue" size="small">{{ t(`nodeGroups.${card.group.mode}`) }}</Tag>
           <Tag size="small">{{ t('nodeGroups.resolved') }} {{ card.resolution.nodes.length }}</Tag>
+          <Tag
+            v-if="card.group.pre_proxy_group_id"
+            :color="card.preProxyGroup ? 'purple' : 'orange'"
+            size="small"
+          >
+            {{ t('nodeGroups.preProxyBadge') }}:
+            {{ card.preProxyGroup?.name || card.group.pre_proxy_group_id }}
+          </Tag>
           <Tag v-if="card.resolution.issues.length" color="orange" size="small">
             {{ t('nodeGroups.unresolved') }} {{ card.resolution.issues.length }}
           </Tag>

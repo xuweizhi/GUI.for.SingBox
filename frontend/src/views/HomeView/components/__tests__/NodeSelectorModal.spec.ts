@@ -400,4 +400,37 @@ describe('NodeSelectorModal', () => {
     expect(controller.switchNode).not.toHaveBeenCalled()
     expect(controller.testNode).toHaveBeenCalledWith('JP 01')
   })
+
+  it('displays active sub-node on subgroup cards and allows switching or inspecting into the subgroup', async () => {
+    const controller = createController()
+    const subgroupProxy = {
+      alive: true,
+      name: 'HK · Auto',
+      type: 'URLTest',
+      all: ['HK 01'],
+      now: 'HK 01',
+      udp: false,
+      history: [{ delay: 55 }],
+    }
+    controller.groups = computed(() => [controller.selectedGroup.value, subgroupProxy]) as never
+    controller.nodes.value.unshift({
+      name: 'HK · Auto',
+      proxy: subgroupProxy as never,
+      delay: 55,
+      delayStatus: 'success',
+      attempts: 1,
+      originalIndex: 0,
+    })
+    const wrapper = mountModal(controller)
+
+    const subgroupCard = wrapper.get('[data-node="HK · Auto"]')
+    expect(subgroupCard.text()).toContain('home.nodes.currentAutoNode')
+    expect(subgroupCard.text()).toContain('HK 01')
+
+    await subgroupCard.trigger('click')
+    expect(controller.switchNode).toHaveBeenCalledWith('HK · Auto')
+
+    await wrapper.get('[data-inspect="HK · Auto"]').trigger('click')
+    expect(controller.selectGroup).toHaveBeenCalledWith('HK · Auto')
+  })
 })

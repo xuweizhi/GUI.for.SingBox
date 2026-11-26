@@ -151,6 +151,8 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
           }
         })
         runtimeProfile.id = _profile.id
+        runtimeProfile.preset = _profile.preset
+        runtimeProfile.primary_proxy_outbound = _profile.primary_proxy_outbound
         runtimeProfile.outbounds = _profile.outbounds
         runtimeProfile.native = _profile.native
         runtimeProfile.experimental = _profile.experimental
@@ -617,7 +619,11 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
 
   eventBus.on('nodeGroupChange', ({ id }) => {
     const profile = profilesStore.currentProfile
-    if (running.value && profile && getNodeGroupDependencies(id, [profile]).length)
+    if (
+      running.value &&
+      profile &&
+      getNodeGroupDependencies(id, [profile], nodeGroupsStore.nodeGroups).length
+    )
       needRestart.value = true
   })
 

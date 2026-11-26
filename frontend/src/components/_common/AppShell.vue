@@ -308,7 +308,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <KeepAlive exclude="ProfileForm">
             <component
               :is="Component"
-              :key="route.name === 'EditProfile' ? route.fullPath : route.name"
+              :key="route.name === 'EditProfile' ? route.path : route.name"
             />
           </KeepAlive>
         </RouterView>

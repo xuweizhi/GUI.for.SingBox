@@ -1,6 +1,7 @@
 import { parse } from 'yaml'
 
 import { ReadFile, WriteFile } from '@/bridge'
+import { DefaultTestURL } from '@/constant/app'
 import {
   CoreConfigFilePath,
   HeadlessDefaultRoutingMark,
@@ -13,6 +14,7 @@ import {
   Inbound,
   Outbound,
   RuleAction,
+  RuleActionReject,
   RulesetType,
   RuleType,
   Strategy,
@@ -35,7 +37,8 @@ import {
 } from '@/utils'
 
 import { makeNodeCatalog, profileNodeKey, subscriptionNodeKey } from './nodePreferences'
-import { findOutboundGraphIssues } from './outboundPolicy'
+import { findOutboundGraphIssues, getOutboundRole, getPrimaryProxyOutbound } from './outboundPolicy'
+import { compileQuickDnsRules, compileQuickRouteRules } from './quickRules'
 import {
   extractSubscriptionConfig,
   prefixSubscriptionReferences,
@@ -405,6 +408,98 @@ const generateOutbounds = async (
     return proxy
   }
 
+  const synthesizedPreProxyStrategies = new Map<string, string>()
+  const synthesizedPreProxyParents = new Map<string, string>()
+  const synthesizedEntries: Recordable[] = []
+  const activePreProxyGroups = new Set<string>()
+  const memberPreProxies = new Map<string, string[]>()
+
+  const ensureNodeGroupPreProxyStrategy = async (
+    groupId: string,
+    behavior: App.NodeGroupOutletBehavior = 'manual',
+  ): Promise<string> => {
+    const expectedType = behavior === 'auto' ? Outbound.Urltest : Outbound.Selector
+    const cacheKey = `${groupId}\u0000${behavior}`
+    const cached = synthesizedPreProxyStrategies.get(cacheKey)
+    if (cached) return cached
+
+    // Prefer an existing matching profile strategy created for the same node group without custom overrides.
+    const existing = outbounds.find(
+      (candidate) =>
+        candidate.source_node_group === groupId &&
+        candidate.type === expectedType &&
+        !candidate.pre_proxy &&
+        !candidate.pre_proxy_override &&
+        !candidate.include &&
+        !candidate.exclude &&
+        candidate.outbounds.length === 1 &&
+        candidate.outbounds[0]?.type === 'NodeGroup' &&
+        candidate.outbounds[0]?.id === groupId,
+    )
+    if (existing) {
+      synthesizedPreProxyStrategies.set(cacheKey, existing.tag)
+      return existing.tag
+    }
+
+    if (activePreProxyGroups.has(groupId)) {
+      throw new Error(`Circular pre-proxy node group reference: ${groupId}`)
+    }
+    const group = nodeGroupsStore.getNodeGroupById(groupId)
+    if (!group) throw new Error(`Pre-proxy node group not found: ${groupId}`)
+
+    activePreProxyGroups.add(groupId)
+    try {
+      const resolution = resolveNodeGroup(group, subscribesStore.subscribes)
+      const members: string[] = []
+      const seenMembers = new Set<string>()
+      for (const node of resolution.nodes) {
+        const source = await findSubscriptionNode(
+          node.subscription.id,
+          node.proxy.id,
+          node.proxy.tag,
+        )
+        const registeredTag = await registerProxy(source, node.subscription.id)
+        if (!seenMembers.has(registeredTag)) {
+          seenMembers.add(registeredTag)
+          members.push(registeredTag)
+        }
+      }
+      if (!members.length) {
+        throw new Error(
+          `Pre-proxy node group "${group.name}" has no valid runtime members.`,
+        )
+      }
+
+      const suffix = behavior === 'auto' ? 'Auto Pre-proxy' : 'Pre-proxy'
+      const tag = uniqueTag(`${group.name} · ${suffix}`, usedRuntimeTags)
+      const runtime: Recordable = {
+        type: expectedType,
+        tag,
+        outbounds: members,
+        interrupt_exist_connections: true,
+      }
+      if (expectedType === Outbound.Urltest) {
+        runtime.url = DefaultTestURL
+        runtime.interval = '3m'
+        runtime.tolerance = 150
+      }
+
+      synthesizedPreProxyStrategies.set(cacheKey, tag)
+      synthesizedEntries.push(runtime)
+
+      if (group.pre_proxy_group_id) {
+        const parentTag = await ensureNodeGroupPreProxyStrategy(
+          group.pre_proxy_group_id,
+          group.pre_proxy_behavior || 'manual',
+        )
+        synthesizedPreProxyParents.set(tag, parentTag)
+      }
+      return tag
+    } finally {
+      activePreProxyGroups.delete(groupId)
+    }
+  }
+
   for (const outbound of outbounds) {
     const runtime: Recordable = {
       ...deepClone(outbound.native || {}),
@@ -418,24 +513,33 @@ const generateOutbounds = async (
     }
     if ([Outbound.Selector, Outbound.Urltest].includes(outbound.type as Outbound)) {
       runtime.interrupt_exist_connections = outbound.interrupt_exist_connections
-      const members = new Set<string>()
+      const members: string[] = []
+      const upstreams: string[] = []
+      const seenMemberKeys = new Set<string>()
+      const addMember = (memberTag: string, memberUpstream = '') => {
+        const key = `${memberTag}\u0000${memberUpstream}`
+        if (seenMemberKeys.has(key)) return
+        seenMemberKeys.add(key)
+        members.push(memberTag)
+        upstreams.push(memberUpstream)
+      }
       const emptySources: string[] = []
       const isTagMatching = createTextMatcher(outbound.include, outbound.exclude)
       for (const proxy of outbound.outbounds) {
         if (proxy.type === 'Built-in') {
           if ([Outbound.Direct, Outbound.Block].includes(proxy.id as Outbound)) {
             builtInProxiesSet.add(proxy.id)
-            members.add(proxy.id)
-          } else members.add(byId.get(proxy.id)!.tag)
+            addMember(proxy.id)
+          } else addMember(byId.get(proxy.id)!.tag)
         } else if (proxy.type === 'Native') {
           if (!proxiesByTag.has(proxy.id))
             throw new Error(`Native node not found: ${proxy.tag || proxy.id}`)
-          members.add(proxy.id)
+          addMember(proxy.id)
         } else if (proxy.type === 'NodeGroup') {
           const group = nodeGroupsStore.getNodeGroupById(proxy.id)
           if (!group) throw new Error(`Node group not found: ${proxy.tag || proxy.id}`)
           const resolution = resolveNodeGroup(group, subscribesStore.subscribes)
-          let matched = 0
+          const matchedNodes: Array<{ source: Recordable; subscriptionId: string }> = []
           for (const node of resolution.nodes) {
             const source = await findSubscriptionNode(
               node.subscription.id,
@@ -443,25 +547,35 @@ const generateOutbounds = async (
               node.proxy.tag,
             )
             if (!isTagMatching(source.tag)) continue
-            members.add(await registerProxy(source, node.subscription.id))
-            matched++
+            matchedNodes.push({ source, subscriptionId: node.subscription.id })
           }
-          if (!matched) emptySources.push(`node group "${group.name}"`)
+          let groupPreProxyTag = ''
+          if (matchedNodes.length && group.pre_proxy_group_id && !outbound.pre_proxy_override) {
+            groupPreProxyTag = await ensureNodeGroupPreProxyStrategy(
+              group.pre_proxy_group_id,
+              group.pre_proxy_behavior || 'manual',
+            )
+          }
+          for (const { source, subscriptionId } of matchedNodes) {
+            addMember(await registerProxy(source, subscriptionId), groupPreProxyTag)
+          }
+          if (!matchedNodes.length) emptySources.push(`node group "${group.name}"`)
         } else {
           const subId = proxy.type === 'Subscription' ? proxy.id : proxy.type
           const subscription = await getSubscriptionProxies(subId)
           if (proxy.type === 'Subscription') {
             for (const node of subscription.proxies) {
-              if (isTagMatching(node.tag)) members.add(await registerProxy(node, subId))
+              if (isTagMatching(node.tag)) addMember(await registerProxy(node, subId))
             }
           } else {
             const source = await findSubscriptionNode(subId, proxy.id, proxy.tag)
-            if (isTagMatching(source.tag)) members.add(await registerProxy(source, subId))
+            if (isTagMatching(source.tag)) addMember(await registerProxy(source, subId))
           }
         }
       }
-      runtime.outbounds = [...members]
-      if (outbound.outbounds.length && !members.size) {
+      runtime.outbounds = members
+      if (upstreams.some(Boolean)) memberPreProxies.set(runtime.tag, upstreams)
+      if (outbound.outbounds.length && !members.length) {
         throw new Error(
           `Strategy "${outbound.tag}" has no valid runtime members. Check ${emptySources.join(', ') || 'its member sources'} and include/exclude filters.`,
         )
@@ -473,12 +587,15 @@ const generateOutbounds = async (
 
   // A URL-test has no detour field. Each tested leaf gets its own upstream-specific
   // instance, and nested groups receive equivalent instances with rewritten members.
-  const strategies = new Map(result.map((entry) => [entry.tag, entry]))
-  const preProxyByTag = new Map(
-    outbounds
-      .filter((entry) => entry.pre_proxy)
-      .map((entry) => [entry.tag, byId.get(entry.pre_proxy!)!.tag]),
+  const strategies = new Map(
+    [...result, ...synthesizedEntries].map((entry) => [entry.tag, entry]),
   )
+  const preProxyByTag = new Map([
+    ...synthesizedPreProxyParents,
+    ...outbounds
+      .filter((entry) => entry.pre_proxy)
+      .map((entry) => [entry.tag, byId.get(entry.pre_proxy!)!.tag] as const),
+  ])
   const templates = new Map(
     [...strategies, ...proxiesByTag].map(([tag, entry]) => [tag, deepClone(entry)]),
   )
@@ -511,8 +628,22 @@ const generateOutbounds = async (
       proxiesByTag.set(runtimeTag, runtime)
     }
     if (Array.isArray(runtime.outbounds)) {
-      runtime.outbounds = runtime.outbounds.map((member: string) => chain(member, upstream))
-      if (runtime.default) runtime.default = chain(runtime.default, upstream)
+      const memberUpstreams = memberPreProxies.get(tag)
+      runtime.outbounds = runtime.outbounds.map((member: string, index: number) => {
+        const memberUpstream = memberUpstreams?.[index] || ''
+        const effectiveUpstream = memberUpstream ? chain(memberUpstream, upstream) : upstream
+        return chain(member, effectiveUpstream)
+      })
+      if (runtime.default) {
+        const defaultIdx = Array.isArray(original.outbounds)
+          ? original.outbounds.indexOf(runtime.default)
+          : -1
+        const defaultUpstream = defaultIdx >= 0 ? memberUpstreams?.[defaultIdx] || '' : ''
+        const effectiveDefaultUpstream = defaultUpstream
+          ? chain(defaultUpstream, upstream)
+          : upstream
+        runtime.default = chain(runtime.default, effectiveDefaultUpstream)
+      }
     } else if (upstream) {
       if (['direct', 'block', 'dns'].includes(runtime.type)) {
         throw new Error(
@@ -529,7 +660,7 @@ const generateOutbounds = async (
     return runtimeTag
   }
   // Always clone from immutable templates, independent of strategy ordering.
-  for (const outbound of outbounds) chain(outbound.tag)
+  for (const entry of [...result, ...synthesizedEntries]) chain(entry.tag)
   const all = new Map([...strategies, ...proxiesByTag])
   const reachable = new Set<string>()
   const visiting = new Set<string>()
@@ -588,6 +719,7 @@ const generateRoute = (
   outbounds: App.Outbound[],
   dns: App.Dns,
   native?: App.Profile['native'],
+  primaryProxyOutbound?: string,
 ) => {
   const getOutbound = (id: string) => findOutbound(id, outbounds, native)?.tag
   const getDnsServer = (id: string) => dnsServerTag(id, dns, native)
@@ -603,41 +735,79 @@ const generateRoute = (
 
   const rulesetsStore = useRulesetsStore()
 
+  const directTag =
+    outbounds.find((o) => getOutboundRole(o) === 'direct')?.tag ||
+    outbounds.find((o) => o.type === Outbound.Direct)?.tag ||
+    native?.outbounds?.find((o) => o.type === Outbound.Direct)?.tag
+  const proxyTag = getPrimaryProxyOutbound({
+    outbounds,
+    primary_proxy_outbound: primaryProxyOutbound,
+  })?.tag
+  const blockTag =
+    outbounds.find((o) => getOutboundRole(o) === 'block')?.tag ||
+    outbounds.find((o) => o.type === Outbound.Block)?.tag ||
+    native?.outbounds?.find((o) => o.type === Outbound.Block)?.tag
+  const quickRouteRules = compileQuickRouteRules(route.quick_rules, {
+    direct: directTag,
+    proxy: proxyTag,
+    block: blockTag,
+  })
+  let quickInserted = false
+
   const extra: Recordable = {}
   if (!route.auto_detect_interface) {
     extra.default_interface = route.default_interface
   }
-  return {
-    rules: route.rules.flatMap((rule) => {
-      if (rule.type === RuleType.InsertionPoint || !rule.enable) {
-        return []
+  const compiledRules = route.rules.flatMap((rule) => {
+    if (rule.type === RuleType.InsertionPoint) {
+      if (!quickInserted && quickRouteRules.length) {
+        quickInserted = true
+        return quickRouteRules
       }
-      if (rule.type === RuleType.Inbound && !isInboundEnabled(rule.payload)) {
-        return []
-      }
-      const extra: Recordable = _generateRule(rule, route.rule_set, inbounds)
+      return []
+    }
+    if (!rule.enable) {
+      return []
+    }
+    if (rule.type === RuleType.Inbound && !isInboundEnabled(rule.payload)) {
+      return []
+    }
+    const extra: Recordable = _generateRule(rule, route.rule_set, inbounds)
 
-      if (rule.action === RuleAction.Route) {
-        extra.outbound = getOutbound(rule.outbound)
-      } else if (rule.action === RuleAction.RouteOptions) {
-        deepAssign(extra, JSON.parse(rule.outbound))
-      } else if (rule.action === RuleAction.Reject) {
-        extra.method = rule.outbound
-      } else if (rule.action === RuleAction.Sniff) {
-        if (rule.sniffer.length) {
-          extra.sniffer = rule.sniffer
-        }
-      } else if (rule.action === RuleAction.Resolve) {
-        if (rule.strategy !== Strategy.Default) {
-          extra.strategy = rule.strategy
-        }
-        extra.server = getDnsServer(rule.server)
+    if (rule.action === RuleAction.Route) {
+      extra.outbound = getOutbound(rule.outbound)
+    } else if (rule.action === RuleAction.RouteOptions) {
+      deepAssign(extra, JSON.parse(rule.outbound))
+    } else if (rule.action === RuleAction.Reject) {
+      extra.method = rule.outbound || RuleActionReject.Default
+    } else if (rule.action === RuleAction.Sniff) {
+      if (rule.sniffer.length) {
+        extra.sniffer = rule.sniffer
       }
-      if (rule.invert) {
-        extra.invert = true
+    } else if (rule.action === RuleAction.Resolve) {
+      if (rule.strategy !== Strategy.Default) {
+        extra.strategy = rule.strategy
       }
-      return extra
-    }),
+      extra.server = getDnsServer(rule.server)
+    }
+    if (rule.invert) {
+      extra.invert = true
+    }
+    return extra
+  })
+  if (!quickInserted && quickRouteRules.length) {
+    // Insert after system preamble rules (sniff / hijack-dns / clash_mode) when InsertionPoint is absent.
+    const preambleEnd = compiledRules.findIndex(
+      (item) =>
+        item.action !== RuleAction.Sniff &&
+        item.action !== RuleAction.HijackDNS &&
+        !('clash_mode' in item),
+    )
+    const idx = preambleEnd === -1 ? compiledRules.length : preambleEnd
+    compiledRules.splice(idx, 0, ...quickRouteRules)
+  }
+  return {
+    rules: compiledRules,
     rule_set: route.rule_set.map((ruleset) => {
       const extra: Recordable = {}
       if (ruleset.type === RuleType.Inline) {
@@ -793,6 +963,7 @@ const generateDns = (
   inbounds: App.Inbound[],
   outbounds: App.Outbound[],
   native?: App.Profile['native'],
+  quickRules?: App.QuickRuleLists,
 ) => {
   const getDnsServer = (id: string) => dnsServerTag(id, dns, native)
   const extra: Recordable = {}
@@ -804,37 +975,73 @@ const generateDns = (
   }
   const servers = generateDnsTransports(dns, outbounds, native)
 
-  return {
-    servers,
-    rules: dns.rules.flatMap((rule) => {
-      if (rule.type === RuleType.InsertionPoint || !rule.enable) {
+  const isInboundEnabled = (id: string) => inbounds.find((v) => v.id === id)?.enable
+  const localDnsTag =
+    dns.servers.find(
+      (server) =>
+        server.id === 'Local-DNS' ||
+        (!server.detour &&
+          ![DnsServer.FakeIP, DnsServer.Hosts, DnsServer.Local].includes(server.type as any)),
+    )?.tag ||
+    dns.servers.find((server) => server.type === DnsServer.Local)?.tag ||
+    SystemDnsResolverTag
+  const fakeIpTag = dns.servers.find((server) => server.type === DnsServer.FakeIP)?.tag
+  const remoteDnsTag = getDnsServer(dns.final)
+  const quickDnsRules = compileQuickDnsRules(quickRules, {
+    local: localDnsTag,
+    remote: remoteDnsTag,
+    fakeip: dns.preset === 'fakeip' ? fakeIpTag : undefined,
+  })
+  let quickDnsInserted = false
+
+  const compiledDnsRules = dns.rules.flatMap((rule) => {
+    if (rule.type === RuleType.InsertionPoint) {
+      if (!quickDnsInserted && quickDnsRules.length) {
+        quickDnsInserted = true
+        return quickDnsRules
+      }
+      return []
+    }
+    if (!rule.enable) {
+      return []
+    }
+    if (rule.type === RuleType.Inbound && !isInboundEnabled(rule.payload)) {
+      return []
+    }
+    const extra: Recordable = _generateRule(rule, rule_set, inbounds)
+    if (rule.type === RuleType.Inline && rule.payload.includes('__is_fake_ip')) {
+      if (!dns.servers.find((v) => v.type === DnsServer.FakeIP)) {
         return []
       }
-      const extra: Recordable = _generateRule(rule, rule_set, inbounds)
-      if (rule.type === RuleType.Inline && rule.payload.includes('__is_fake_ip')) {
-        if (!dns.servers.find((v) => v.type === DnsServer.FakeIP)) {
-          return []
-        }
-        delete extra.__is_fake_ip
-      }
-      if ([RuleAction.Route, RuleAction.RouteOptions].includes(rule.action as any)) {
-        rule.disable_cache && (extra.disable_cache = rule.disable_cache)
-        rule.client_subnet && (extra.client_subnet = rule.client_subnet)
-        if (rule.action === RuleAction.Route) {
-          extra.server = getDnsServer(rule.server)
-          if (rule.strategy !== Strategy.Default) {
-            extra.strategy = rule.strategy
-          }
+      delete extra.__is_fake_ip
+    }
+    if ([RuleAction.Route, RuleAction.RouteOptions].includes(rule.action as any)) {
+      rule.disable_cache && (extra.disable_cache = rule.disable_cache)
+      rule.client_subnet && (extra.client_subnet = rule.client_subnet)
+      if (rule.action === RuleAction.Route) {
+        extra.server = getDnsServer(rule.server)
+        if (rule.strategy !== Strategy.Default) {
+          extra.strategy = rule.strategy
         }
       }
-      if ([RuleAction.RouteOptions, RuleAction.Predefined].includes(rule.action as any)) {
-        deepAssign(extra, JSON.parse(rule.server))
-      }
-      if (rule.action === RuleAction.Reject) {
-        extra.method = rule.server
-      }
-      return extra
-    }),
+    }
+    if ([RuleAction.RouteOptions, RuleAction.Predefined].includes(rule.action as any)) {
+      deepAssign(extra, JSON.parse(rule.server))
+    }
+    if (rule.action === RuleAction.Reject) {
+      extra.method = rule.server || RuleActionReject.Default
+    }
+    return extra
+  })
+  if (!quickDnsInserted && quickDnsRules.length) {
+    const preambleEnd = compiledDnsRules.findIndex((item) => !('clash_mode' in item))
+    const idx = preambleEnd === -1 ? compiledDnsRules.length : preambleEnd
+    compiledDnsRules.splice(idx, 0, ...quickDnsRules)
+  }
+
+  return {
+    servers,
+    rules: compiledDnsRules,
     disable_cache: dns.disable_cache,
     disable_expire: dns.disable_expire,
     independent_cache: dns.independent_cache,
@@ -902,6 +1109,7 @@ export const generateConfig = async (
     profile.inbounds,
     profile.outbounds,
     profile.native,
+    profile.route.quick_rules,
   )
   const nativeRouteRoots = [
     profile.route.final,
@@ -946,6 +1154,7 @@ export const generateConfig = async (
       profile.outbounds,
       profile.dns,
       profile.native,
+      profile.primary_proxy_outbound,
     ),
     dns,
   }

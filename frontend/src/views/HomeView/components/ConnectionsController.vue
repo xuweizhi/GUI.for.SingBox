@@ -15,7 +15,13 @@ import { deleteConnection } from '@/api/kernel'
 import { DraggableOptions } from '@/constant/app'
 import { DefaultConnections } from '@/constant/kernel'
 import { useBool } from '@/hooks'
-import { useAppSettingsStore, useAppStore, useKernelApiStore } from '@/stores'
+import {
+  useAppSettingsStore,
+  useAppStore,
+  useKernelApiStore,
+  useNodeGroupsStore,
+  useProfilesStore,
+} from '@/stores'
 import {
   addToRuleSet,
   confirm,
@@ -25,6 +31,7 @@ import {
   isValidIPv6,
   message,
   picker,
+  quickRulePayloadToEntry,
 } from '@/utils'
 
 import ResourceActions from '@/components/_common/ResourceActions.vue'
@@ -45,6 +52,15 @@ const TrafficCache: Record<string, TrafficCacheType> = {}
 
 const appSettingsStore = useAppSettingsStore()
 const appStore = useAppStore()
+const profilesStore = useProfilesStore()
+const nodeGroupsStore = useNodeGroupsStore()
+
+const bindMenuRecord = (items: App.Menu[], record: Record<string, any>): App.Menu[] =>
+  items.map((item) => ({
+    ...item,
+    handler: item.handler ? () => item.handler?.(record) : undefined,
+    ...(item.children ? { children: bindMenuRecord(item.children, record) } : {}),
+  }))
 
 const openDetails = (record: Record<string, any>) => {
   details.value = { ...record, metadata: { ...record.metadata } }
@@ -55,10 +71,7 @@ const closeSingleConnection = (record: Record<string, any>) => {
   if (isActive.value) return closeConnections([record.id])
 }
 
-const addRecordToRuleset = async (
-  ruleset: 'direct' | 'proxy' | 'reject',
-  record: Record<string, any>,
-) => {
+const pickConnectionPayloads = async (record: Record<string, any>) => {
   const options: PickerItem<Record<string, any>[]>[] = []
   if (record.metadata.host) {
     options.push({
@@ -91,11 +104,53 @@ const addRecordToRuleset = async (
       description: record.metadata.processPath,
     })
   }
-  const payloads = await picker.multi('rulesets.selectRuleType', options).catch(() => [])
+  return picker.multi('rulesets.selectRuleType', options).catch(() => [])
+}
+
+const addRecordToRuleset = async (
+  ruleset: 'direct' | 'proxy' | 'reject',
+  record: Record<string, any>,
+) => {
+  const payloads = await pickConnectionPayloads(record)
   if (!payloads.length) return
   try {
+    const activeProfile = profilesStore.currentProfile
+    if (activeProfile) {
+      const bucket = ruleset === 'reject' ? 'block' : ruleset
+      const entries = payloads
+        .map((payload) => quickRulePayloadToEntry(payload))
+        .filter((entry): entry is string => Boolean(entry))
+      if (entries.length) {
+        await profilesStore.addQuickRuleToProfile(activeProfile.id, bucket, entries)
+        message.success('profileSimple.quickRuleAddedToProfile')
+        return
+      }
+    }
     await addToRuleSet(ruleset, payloads)
     message.success('common.success')
+  } catch (error: any) {
+    message.error(error)
+    console.log(error)
+  }
+}
+
+const addRecordToNodeGroup = async (group: App.NodeGroup, record: Record<string, any>) => {
+  const activeProfile = profilesStore.currentProfile
+  if (!activeProfile) {
+    message.warn('profiles.empty')
+    return
+  }
+  const payloads = await pickConnectionPayloads(record)
+  if (!payloads.length) return
+  try {
+    await profilesStore.addNodeGroupRuleToProfile(
+      activeProfile.id,
+      payloads,
+      group,
+      'manual',
+      t('nodeGroups.outletManual'),
+    )
+    message.success('profileSimple.quickRuleAddedToProfile')
   } catch (error: any) {
     message.error(error)
     console.log(error)
@@ -257,6 +312,17 @@ const menu = computed<App.Menu[]>(() => [
     label,
     handler: (record: Record<string, any>) => addRecordToRuleset(ruleset, record),
   })),
+  ...(profilesStore.currentProfile && nodeGroupsStore.nodeGroups.length
+    ? [
+        {
+          label: 'profileSimple.routeToNodeGroup',
+          children: nodeGroupsStore.nodeGroups.map((group) => ({
+            label: group.name,
+            handler: (record: Record<string, any>) => addRecordToNodeGroup(group, record),
+          })),
+        },
+      ]
+    : []),
 ])
 
 const details = ref<Record<string, any>>({})
@@ -399,7 +465,9 @@ onMounted(() => {
   if (root.value && typeof ResizeObserver !== 'undefined') {
     observer = new ResizeObserver(([entry]) => {
       if (entry && entry.contentRect.width > 0) {
-        compact.value = entry.contentRect.width <= 640
+        const nextCompact = entry.contentRect.width <= 640
+        if (nextCompact && !compact.value) hovering.value = false
+        compact.value = nextCompact
       }
     })
     observer.observe(root.value)
@@ -620,9 +688,10 @@ const clearFilters = () => {
           <ResourceActions
             :name="record.metadata.host || record.metadata.destinationIP"
             :items="
-              menu
-                .filter((m) => m.label !== 'common.details')
-                .map((m) => ({ ...m, handler: () => m.handler?.(record) }))
+              bindMenuRecord(
+                menu.filter((m) => m.label !== 'common.details'),
+                record,
+              )
             "
           />
         </div>
