@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { ClipboardSetText, FileExists, ReadFile } from '@/bridge'
 import { DraggableOptions } from '@/constant/app'
 import { useBool } from '@/hooks'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
 import { buildSmartRegExp, deepClone, message, sampleID } from '@/utils'
 import {
@@ -38,7 +39,7 @@ const filteredProxyTypeOptions = computed(() => {
     p[c.type] = (p[c.type] || 0) + 1
     return p
   }, {} as Recordable)
-  return [{ label: 'All', value: '', count: 0 }].concat(
+  return [{ label: 'workspace.all', value: '', count: 0 }].concat(
     Object.entries(proxyProtocols).map(([label, count]) => ({
       label: `${label}(${count})`,
       value: label,
@@ -48,9 +49,11 @@ const filteredProxyTypeOptions = computed(() => {
 })
 
 const filteredProxies = computed(() => {
+  const q = keywords.value.trim()
+  const matcher = q ? buildSmartRegExp(q, 'i') : null
   return sub.value.proxies.filter((v) => {
     const hitType = proxyType.value ? proxyType.value === v.type : true
-    const hitName = buildSmartRegExp(keywords.value, 'i').test(v.tag)
+    const hitName = matcher ? matcher.test(v.tag) : true
     return hitName && hitType
   })
 })
@@ -135,14 +138,16 @@ const generateMenus = (record: App.Subscription['proxies'][0]): App.Menu[] => [
           label: group.name,
           handler: () => handleAddToManualGroup(group.id, record),
         }))
-      : [{ label: 'nodeGroups.noManualGroups' }],
+      : [{ label: 'nodeGroups.noManualGroups', disabled: true }],
   },
 ]
 
 const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
+useFormDraft(() => [sub.value.proxies, pendingAssignments.value])
 
 const handleSave = async () => {
+  if (loading.value) return
   loading.value = true
   try {
     await initAllFieldsProxies()
@@ -160,8 +165,9 @@ const handleSave = async () => {
   } catch (error: any) {
     console.log(error)
     message.error(error)
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 const handleAdd = async () => {
@@ -281,7 +287,21 @@ defineExpose({ modalSlots })
       </Button>
     </div>
 
-    <Empty v-if="filteredProxies.length === 0" />
+    <div v-if="filteredProxies.length === 0" class="flex-1 flex flex-col items-center justify-center gap-8">
+      <Empty />
+      <Button
+        v-if="keywords.trim() || proxyType"
+        size="small"
+        @click="
+          () => {
+            keywords = ''
+            proxyType = ''
+          }
+        "
+      >
+        {{ t('workspace.clearFilters') }}
+      </Button>
+    </div>
 
     <VueDraggable
       v-else
@@ -419,7 +439,7 @@ defineExpose({ modalSlots })
   }
 }
 
-@container (max-width: 640px) {
+@container (max-width: 900px) {
   .proxies-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

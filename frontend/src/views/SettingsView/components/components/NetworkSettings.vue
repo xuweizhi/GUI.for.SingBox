@@ -21,6 +21,7 @@ const getCurrentProxy = async () => {
 }
 
 const handleTestProxy = async () => {
+  if (testing.value) return
   const proxy = await getCurrentProxy()
   const hasSystemProxy =
     appSettings.app.requestProxyMode === RequestProxyMode.System &&
@@ -59,12 +60,12 @@ const handleClearGithubMirror = () => {
 </script>
 
 <template>
-  <div class="px-8 py-12 text-16 font-bold">{{ $t('settings.network') }}</div>
+  <div class="px-4 py-8 text-16 font-bold">{{ $t('settings.network') }}</div>
 
   <Card>
     <div class="settings-row">
       <div>{{ $t('settings.requestProxy.name') }}</div>
-      <div class="flex items-center gap-6">
+      <div class="flex flex-wrap items-center gap-6">
         <Button
           v-if="showProxyTest"
           :loading="testing"
@@ -85,7 +86,7 @@ const handleClearGithubMirror = () => {
         editable
         clearable
         :max-width="false"
-        class="text-14"
+        class="text-14 w-full"
       >
         <template #suffix>
           <Button
@@ -109,7 +110,7 @@ const handleClearGithubMirror = () => {
         :placeholder="APP_TITLE + '/' + APP_VERSION"
         editable
         :max-width="false"
-        class="text-14"
+        class="text-14 w-full"
       >
         <template #suffix>
           <Button
@@ -164,7 +165,7 @@ const handleClearGithubMirror = () => {
         editable
         clearable
         :max-width="false"
-        class="text-14"
+        class="text-14 w-full"
       >
         <template #suffix>
           <Button

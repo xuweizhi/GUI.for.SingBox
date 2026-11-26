@@ -20,7 +20,7 @@ import type { ResourceSelectProps } from '@/components/ResourceSelect/index.vue'
 
 const ContainerCssText = `
     position: fixed;
-    z-index: 99999;
+    z-index: var(--z-dialog, 99999);
     inset: 0;
 `
 
@@ -40,7 +40,7 @@ class Message {
     this.container.id = ID
     this.container.style.cssText = `
         position: fixed;
-        z-index: 999999;
+        z-index: var(--z-toast, 999999);
         top: 16px;
         left: 50%;
         transform: translateX(-50%);
@@ -309,24 +309,29 @@ export const modal = (options: ModalProps = {}, slots: ModalSlots = {}) => {
   document.body.appendChild(container)
 
   let cleaned = false
+  let userAfterDestroy = options.afterDestroy
   const cleanup = () => {
     if (cleaned) return
     cleaned = true
     try {
-      options.afterDestroy?.()
+      userAfterDestroy?.()
     } finally {
       render(null, container)
       container.remove()
     }
   }
 
+  const protectedProps = () => ({
+    container: '#' + id,
+    afterDestroy() {
+      cleanup()
+    },
+  })
+
   const [Modal, api] = useModal(
     {
       ...options,
-      container: '#' + id,
-      afterDestroy() {
-        cleanup()
-      },
+      ...protectedProps(),
     },
     slots,
   )
@@ -346,7 +351,20 @@ export const modal = (options: ModalProps = {}, slots: ModalSlots = {}) => {
     )
     return destroyPromise
   }
-  const powerApi = { ...api, destroy }
+  const powerApi = {
+    ...api,
+    setProps(nextOptions: Partial<ModalProps> & Recordable) {
+      userAfterDestroy = nextOptions.afterDestroy
+      api.setProps({ ...nextOptions, ...protectedProps() })
+      return powerApi
+    },
+    patchProps(nextOptions: Partial<ModalProps> & Recordable) {
+      if ('afterDestroy' in nextOptions) userAfterDestroy = nextOptions.afterDestroy
+      api.patchProps({ ...nextOptions, ...protectedProps() })
+      return powerApi
+    },
+    destroy,
+  }
   return powerApi
 }
 

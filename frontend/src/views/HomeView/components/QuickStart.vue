@@ -21,9 +21,10 @@ const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
 
 const attempted = ref(false)
+const urlBlurred = ref(false)
 const valid = computed(() => {
   try {
-    return ['http:', 'https:'].includes(new URL(url.value).protocol)
+    return ['http:', 'https:'].includes(new URL(url.value.trim()).protocol)
   } catch {
     return false
   }
@@ -31,11 +32,10 @@ const valid = computed(() => {
 const handleSave = async () => {
   attempted.value = true
   if (!valid.value || loading.value) return
-  if (!name.value) {
-    name.value = sampleID()
-  }
+  const resolvedName = name.value.trim() || sampleID()
+  const resolvedUrl = url.value.trim()
 
-  const sub = subscribeStore.getSubscribeTemplate(name.value, { url: url.value })
+  const sub = subscribeStore.getSubscribeTemplate(resolvedName, { url: resolvedUrl })
   sub.decryptPassword = decryptPassword.value
 
   loading.value = true
@@ -45,7 +45,7 @@ const handleSave = async () => {
     await subscribeStore.addSubscribe(sub, false)
     added = true
     await subscribeStore.updateSubscribe(sub.id)
-    const profile = profilesStore.getProfileTemplate(name.value)
+    const profile = profilesStore.getProfileTemplate(resolvedName)
     for (const outbound of profile.outbounds.slice(0, 2)) {
       outbound.outbounds.push({ id: sub.id, tag: sub.id, type: 'Subscription' })
     }
@@ -88,10 +88,11 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div class="form-grid">
-    <label for="quick-name">{{ t('profile.name') }}</label
-    ><Input v-model="name" input-id="quick-name" clearable /> <label for="quick-url">URL</label>
-    <div>
+  <div class="form-grid" @keydown.enter.prevent="handleSave">
+    <label for="quick-name">{{ t('profile.name') }}</label>
+    <Input v-model="name" input-id="quick-name" clearable />
+    <label for="quick-url">URL</label>
+    <div :data-invalid="(attempted || urlBlurred) && !valid ? 'true' : undefined">
       <Input
         v-model="url"
         input-id="quick-url"
@@ -100,12 +101,16 @@ defineExpose({ modalSlots })
         allow-paste
         placeholder="https://"
         class="w-full"
+        @submit="urlBlurred = true"
       />
-      <span v-if="(attempted || url) && !valid" role="alert" class="text-danger text-12">{{
-        t('workspace.url')
-      }}</span>
+      <span
+        v-if="(attempted || urlBlurred) && !valid"
+        role="alert"
+        class="field-error text-12"
+        >{{ t('workspace.url') }}</span
+      >
     </div>
-    <label for="quick-password">{{ t('subscribe.decryptPassword') }}</label
-    ><Input v-model="decryptPassword" input-id="quick-password" type="password" clearable />
+    <label for="quick-password">{{ t('subscribe.decryptPassword') }}</label>
+    <Input v-model="decryptPassword" input-id="quick-password" type="password" clearable />
   </div>
 </template>

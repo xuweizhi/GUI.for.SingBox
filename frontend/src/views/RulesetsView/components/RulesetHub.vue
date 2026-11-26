@@ -3,10 +3,10 @@ import { computed, h, inject, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { HttpGet } from '@/bridge'
-import { DefaultRouteRule, DefaultRouteRuleset } from '@/constant/profile'
-import { RulesetFormat, RulesetType, RuleType } from '@/enums/kernel'
-import { useProfilesStore, useRulesetsStore } from '@/stores'
-import { previewCode, deepClone, message, picker } from '@/utils'
+import { RulesetFormat } from '@/enums/kernel'
+import { useRulesetsStore } from '@/stores'
+import { previewCode, message } from '@/utils'
+import { addRulesetToProfile } from '@/utils/profileRuleset'
 
 import ResourceHubModal from '@/components/_common/ResourceHubModal.vue'
 import Button from '@/components/Button/index.vue'
@@ -18,7 +18,6 @@ const currentPage = ref(1)
 
 const { t } = useI18n()
 const rulesetsStore = useRulesetsStore()
-const profilesStore = useProfilesStore()
 
 const keywords = ref('')
 const handleCancel = inject('cancel') as any
@@ -58,6 +57,8 @@ const handleAddRuleset = async (ruleset: App.RulesetHub['list'][number], format:
   if (installing.value.has(id) || isAlreadyAdded(ruleset, format)) return
   installing.value.add(id)
   const file = ruleset.type + '_' + ruleset.name + suffix
+  let added = false
+  let toast: ReturnType<typeof message.info> | undefined
   try {
     await rulesetsStore.addRuleset({
       id,
@@ -70,10 +71,16 @@ const handleAddRuleset = async (ruleset: App.RulesetHub['list'][number], format:
       url,
       count: ruleset.count,
     })
-    const { success } = message.info('rulesets.updating')
+    added = true
+    toast = message.info('rulesets.updating', 60_000)
     await rulesetsStore.updateRuleset(id)
-    success('common.success')
+    toast.destroy()
+    message.success('common.success')
   } catch (error: any) {
+    toast?.destroy()
+    if (added) {
+      await rulesetsStore.deleteRuleset(id).catch(() => undefined)
+    }
     console.error(error)
     message.error(error.message || error)
   } finally {
@@ -86,73 +93,13 @@ const handleAddRulesetToProfile = async (
   format: RulesetFormat,
 ) => {
   const [url, suffix] = getRulesetUrlAndSuffix(ruleset, format)
-
   try {
-    const selected = await picker
-      .resource('profile', 'profiles.select', { min: 1, max: 1 })
-      .catch(() => undefined)
-    const profile = selected?.items[0]
-    if (!profile) return
-
-    const insertionPointIndex = profile.route.rules.findIndex(
-      (rule) => rule.type === RuleType.InsertionPoint,
-    )
-
-    if (insertionPointIndex === -1) {
-      message.warn('kernel.missingInsertionPoint')
-      return
-    }
-
-    const profileRuleset = profile.route.rule_set.find(
-      (item) => item.type === RulesetType.Remote && item.url === url,
-    )
-    if (
-      profileRuleset &&
-      profile.route.rules.some(
-        (rule) =>
-          rule.type === RuleType.RuleSet && rule.payload.split(',').includes(profileRuleset.id),
-      )
-    ) {
-      message.info('common.added')
-      return
-    }
-
-    const outboundOptions = profile.outbounds.map((outbound) => ({
-      label: outbound.tag,
-      value: outbound.id,
-      description: outbound.type,
-    }))
-    if (!outboundOptions.length) {
-      message.warn('kernel.route.rules.invalid')
-      return
-    }
-    const target = await picker
-      .single('kernel.route.rules.outbound', outboundOptions, [outboundOptions[0]!.value])
-      .catch(() => undefined)
-    if (!target) return
-
-    const nextProfile = deepClone(profile)
-    let rulesetReferenceId = profileRuleset?.id
-    if (!rulesetReferenceId) {
-      const rulesetReference = {
-        ...DefaultRouteRuleset(),
-        type: RulesetType.Remote,
-        tag: `${ruleset.name}-${ruleset.type}${suffix}`,
-        format,
-        url,
-      }
-      nextProfile.route.rule_set.unshift(rulesetReference)
-      rulesetReferenceId = rulesetReference.id
-    }
-
-    nextProfile.route.rules.splice(insertionPointIndex + 1, 0, {
-      ...DefaultRouteRule(),
-      payload: rulesetReferenceId,
-      outbound: target,
+    await addRulesetToProfile({
+      kind: 'remote',
+      url,
+      tag: `${ruleset.name}-${ruleset.type}${suffix}`,
+      format,
     })
-
-    await profilesStore.editProfile(nextProfile.id, nextProfile)
-    message.success('common.success')
   } catch (error) {
     message.error(error)
   }
@@ -246,7 +193,7 @@ defineExpose({ modalSlots })
           <div class="flex items-center justify-between">
             <Dropdown placement="bottom">
               <Button type="text" size="small" style="margin-left: -2px; padding-left: 2px">
-                {{ t('common.more') }}
+                {{ t('common.add') }}
               </Button>
               <template #overlay="{ close }">
                 <div class="flex flex-col gap-4 min-w-96 p-4">

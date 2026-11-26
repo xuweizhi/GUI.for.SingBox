@@ -18,7 +18,7 @@ export function useFormDraft(snapshot: () => unknown) {
   const remove = register?.(async () => {
     if (!isDirty()) return true
     const { confirm } = await import('@/utils/interaction')
-    return confirm(t('common.warning'), t('workspace.discard')).then(
+    return confirm('common.warning', 'workspace.discard').then(
       () => true,
       () => false,
     )
@@ -30,7 +30,11 @@ export function useFormDraft(snapshot: () => unknown) {
     await nextTick()
     const row = root.value?.querySelector<HTMLElement>('[data-invalid="true"]')
     row?.scrollIntoView?.({ block: 'nearest' })
-    row?.querySelector<HTMLElement>('input, select, textarea, [tabindex="0"]')?.focus()
+    row
+      ?.querySelector<HTMLElement>(
+        'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="combobox"]:not([aria-disabled="true"]), [tabindex="0"]:not([aria-disabled="true"])',
+      )
+      ?.focus()
   }
   return { errorField, errorMessage, invalid, resetBaseline, isDirty }
 }

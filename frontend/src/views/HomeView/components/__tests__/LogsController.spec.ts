@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/bridge', () => ({ ClipboardSetText: vi.fn().mockResolvedValue(true) }))
 vi.mock('@/stores', () => ({
+  useAppStore: () => ({ menuShow: false, menuPosition: {}, menuList: [] }),
   useKernelApiStore: () => ({ refreshKernelLogs: mocks.refreshKernelLogs }),
   useLogsStore: () => mocks.logsStore,
 }))

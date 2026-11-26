@@ -42,8 +42,8 @@ useOverlayFocus(dialog, handleCancel)
   <div class="gui-overlay-mask fixed inset-0 flex items-center justify-center p-16 backdrop-blur-sm">
     <Transition name="dialog-pop" appear>
       <div
-        role="dialog"
         ref="dialog"
+        role="dialog"
         tabindex="-1"
         aria-modal="true"
         :aria-label="t(title)"
@@ -77,25 +77,28 @@ useOverlayFocus(dialog, handleCancel)
 
 <style lang="less" scoped>
 .gui-overlay-mask {
-  z-index: 99999;
+  z-index: var(--z-dialog, 99999);
   background: var(--modal-mask-bg);
 }
 
 .gui-prompt {
   width: min(440px, 100%);
-  background: var(--modal-bg);
+  background: var(--surface-elevated-bg, var(--modal-bg));
   color: var(--color);
-  border: 1px solid var(--border-color);
-  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+  border: 1px solid var(--surface-border, var(--border-color));
+  border-radius: var(--modal-radius, 14px);
+  box-shadow: var(--modal-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   overflow: hidden;
 }
 
 .gui-prompt__header {
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--surface-border, var(--border-color));
 }
 
 .gui-prompt__footer {
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--surface-border, var(--border-color));
 }
 
 .dialog-pop-enter-active,

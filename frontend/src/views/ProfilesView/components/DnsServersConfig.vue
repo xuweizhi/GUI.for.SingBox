@@ -7,7 +7,7 @@ import { DnsServerTypeOptions } from '@/constant/kernel'
 import { DefaultDnsServer } from '@/constant/profile'
 import { DnsServer } from '@/enums/kernel'
 import { useBool } from '@/hooks'
-import { deepClone, generateDnsServerURL } from '@/utils'
+import { deepClone, generateDnsServerURL, message } from '@/utils'
 
 import Tag from '@/components/Tag/index.vue'
 
@@ -63,6 +63,15 @@ const handleAdd = () => {
 defineExpose({ handleAdd })
 
 const handleAddEnd = () => {
+  fields.value.tag = fields.value.tag.trim()
+  if (!fields.value.tag) {
+    message.warn('workspace.required')
+    return false
+  }
+  if (isSupportServerAndPort.value && !fields.value.server.trim()) {
+    message.warn('workspace.required')
+    return false
+  }
   if (serverId !== -1) {
     model.value[serverId] = fields.value
   } else {
@@ -90,7 +99,7 @@ const renderServer = (server: App.DnsServerConfig) => {
     const tag = props.outboundOptions.find((v) => v.value === detour)?.label || detour
     children.push(h(Tag, { color: 'default' }, () => tag))
   }
-  return h('div', { class: 'font-bold' }, children)
+  return h('div', { class: 'font-bold flex flex-wrap items-center gap-4 flex-1 min-w-0' }, children)
 }
 </script>
 <template>
@@ -114,7 +123,7 @@ const renderServer = (server: App.DnsServerConfig) => {
         <div class="flex items-center py-6 gap-6">
           <Icon icon="drag" :size="15" color="var(--muted-color)" class="cursor-move shrink-0" />
           <component :is="renderServer(server)" />
-          <div class="ml-auto flex items-center gap-2">
+          <div class="ml-auto shrink-0 flex items-center gap-2">
             <Button
               icon="edit"
               type="text"

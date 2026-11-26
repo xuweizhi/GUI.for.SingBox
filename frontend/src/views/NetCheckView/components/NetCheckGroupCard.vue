@@ -63,6 +63,9 @@ const statusLabel = (status: string) => {
   return te(key) ? t(key) : status
 }
 
+const effectiveStatus = computed(() =>
+  props.running && props.group.items.length === 0 ? 'running' : props.group.status,
+)
 const showEmptyBody = computed(() => !props.running && props.group.items.length === 0)
 const collapsible = computed(() => props.group.id === 'rulesets')
 const expanded = ref(!collapsible.value || props.group.status === 'failed')
@@ -100,44 +103,44 @@ watch(
 <template>
   <section
     class="group-card flex flex-col gap-10"
-    :class="`group-card--${props.group.status}`"
+    :class="`group-card--${effectiveStatus}`"
     :data-group="props.group.id"
   >
-    <component
-      :is="collapsible ? 'button' : 'div'"
-      :type="collapsible ? 'button' : undefined"
-      :aria-expanded="collapsible ? expanded : undefined"
-      class="group-card__header flex flex-wrap items-center justify-between gap-8"
-      :class="{ 'is-collapsible': collapsible }"
-      @click="toggleExpanded"
-    >
-      <div class="flex items-center gap-8">
+    <div class="group-card__header flex flex-wrap items-center justify-between gap-8">
+      <component
+        :is="collapsible ? 'button' : 'div'"
+        :type="collapsible ? 'button' : undefined"
+        :aria-expanded="collapsible ? expanded : undefined"
+        class="group-card__toggle flex items-center gap-8 min-w-0"
+        :class="{ 'is-collapsible': collapsible }"
+        @click="toggleExpanded"
+      >
         <Icon
           v-if="collapsible"
           icon="arrowRight"
           :size="14"
           color="currentColor"
-          class="group-card__chevron"
+          class="group-card__chevron shrink-0"
           :class="{ 'is-expanded': expanded }"
         />
         <span class="font-bold text-14">{{ renderText(props.group.title) }}</span>
-        <span class="status-badge" :class="`status-badge--${props.group.status}`">
-          {{ statusLabel(props.group.status) }}
+        <span class="status-badge" :class="`status-badge--${effectiveStatus}`">
+          {{ statusLabel(effectiveStatus) }}
         </span>
-      </div>
-      <div class="flex items-center gap-8">
+      </component>
+      <div class="flex items-center gap-8 shrink-0">
         <div v-if="props.group.summary" class="text-12 text-muted">
           {{ renderGroupSummary() }}
         </div>
         <template v-if="collapsible && hasFailures">
-          <Button size="small" type="text" @click.stop="toggleFailureOnly">
+          <Button size="small" type="text" @click="toggleFailureOnly">
             {{
               t(failureOnly ? 'netCheck.actions.showAll' : 'netCheck.actions.failuresOnly')
             }}
           </Button>
         </template>
       </div>
-    </component>
+    </div>
 
     <div v-if="showEmptyBody" class="text-12 text-muted">
       {{ t('netCheck.results.empty') }}
@@ -172,7 +175,7 @@ watch(
             </span>
           </div>
         </div>
-        <div class="text-12 mt-6">
+        <div class="group-item__summary text-12 mt-6">
           {{ renderText(item.summary) }}
         </div>
         <div v-if="item.detail" class="text-12 text-muted mt-4 font-mono break-all">
@@ -192,15 +195,28 @@ watch(
 .group-card__header {
   width: 100%;
   min-width: 0;
-  padding: 0;
+}
+.group-card__toggle {
+  padding: 2px 4px;
+  margin: -2px -4px;
   border: 0;
+  border-radius: var(--control-radius);
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: start;
 }
-.group-card__header.is-collapsible {
+.group-card__toggle.is-collapsible {
   cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}
+.group-item__summary {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .group-card__chevron {
   transition: transform 0.16s ease;
@@ -253,7 +269,7 @@ watch(
   align-items: center;
   padding: 1px 7px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
 
   &--success {

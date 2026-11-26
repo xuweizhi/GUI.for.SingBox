@@ -34,11 +34,12 @@ const toggle = () => {
 
 <template>
   <div
-    v-tips.slow="label"
+    v-tips="label"
     role="switch"
     :tabindex="disabled ? -1 : 0"
     :aria-checked="model"
     :aria-disabled="disabled"
+    :aria-label="label ? t(label) : undefined"
     :class="[
       size,
       border,
@@ -46,7 +47,7 @@ const toggle = () => {
       border === 'square' ? 'rounded-4' : 'rounded-full',
       { 'cursor-not-allowed is-disabled': disabled },
     ]"
-    class="gui-switch relative cursor-pointer h-24 inline-flex items-center text-12 duration-200"
+    class="gui-switch relative cursor-pointer inline-flex items-center text-12 duration-200"
     @click="toggle"
     @keydown.enter.prevent="toggle"
     @keydown.space.prevent="toggle"
@@ -66,6 +67,8 @@ const toggle = () => {
 <style lang="less" scoped>
 .gui-switch {
   min-width: 50px;
+  min-height: 24px;
+  padding-block: 2px;
   transition:
     background-color 0.2s ease,
     border-color 0.2s ease,
@@ -76,7 +79,7 @@ const toggle = () => {
 }
 
 .small {
-  height: 20px;
+  min-height: 20px;
   .dot {
     width: 12px;
     height: 12px;
@@ -93,7 +96,7 @@ const toggle = () => {
   color: #fff;
   background-color: var(--switch-on-bg);
   border: 1px solid transparent;
-  &:hover {
+  &:hover:not(.is-disabled) {
     background-color: var(--switch-on-hover-bg);
   }
   .dot {
@@ -132,7 +135,7 @@ const toggle = () => {
   color: var(--card-color);
   background-color: var(--switch-off-bg);
   border: 1px solid var(--border-color);
-  &:hover {
+  &:hover:not(.is-disabled) {
     background-color: var(--switch-off-hover-bg);
   }
   .dot {

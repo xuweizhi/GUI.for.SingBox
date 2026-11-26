@@ -62,6 +62,14 @@ const nodeGroupsStore = useNodeGroupsStore()
 const loading = ref(false)
 const currentStep = ref(Math.max(1, Math.min(Step.MixinScript, props.step)))
 
+const selectStep = (step: number) => {
+  const next = Math.max(1, Math.min(Step.MixinScript, step))
+  currentStep.value = next
+  if (String(route.query.step || '') !== String(next)) {
+    void router.replace({ query: { ...route.query, step: String(next) } }).catch(() => undefined)
+  }
+}
+
 const stepItems = [
   { title: 'profile.step.general' },
   { title: 'profile.step.inbounds' },
@@ -116,16 +124,16 @@ const nameRequired = ref(false)
 const graphIssues = computed(() =>
   findOutboundGraphIssues(profile.value.outbounds, nodeGroupsStore.nodeGroups),
 )
-const validationIssueCount = computed(() => {
+const validationReport = computed(() => {
   const p = profile.value
-  let count = p.name.trim() ? 0 : 1
-  count += graphIssues.value.length
+  const nameMissing = p.name.trim() ? 0 : 1
+  const outboundCount = graphIssues.value.length
   const outboundIds = new Set(p.outbounds.map((outbound) => outbound.id))
   const rulesetIds = new Set(p.route.rule_set.map((ruleset) => ruleset.id))
   const inboundIds = new Set(p.inbounds.map((inbound) => inbound.id))
   const serverIds = new Set(p.dns.servers.map((server) => server.id))
-  if (p.route.final && !outboundIds.has(p.route.final)) count++
-  if (p.dns.final && !serverIds.has(p.dns.final)) count++
+  let routeCount = p.route.final && !outboundIds.has(p.route.final) ? 1 : 0
+  let dnsCount = p.dns.final && !serverIds.has(p.dns.final) ? 1 : 0
   const routeRuleLost = (rule: App.Rule) => {
     if (rule.type === RuleType.InsertionPoint) return false
     let lost = !rule.payload
@@ -155,10 +163,22 @@ const validationIssueCount = computed(() => {
     else if (rule.type === RuleType.Inline) lost ||= !isValidJson(rule.payload)
     return lost
   }
-  count += p.route.rules.filter((rule) => rule.enable && routeRuleLost(rule)).length
-  count += p.dns.rules.filter((rule) => rule.enable && dnsRuleLost(rule)).length
-  return count
+  routeCount += p.route.rules.filter((rule) => rule.enable && routeRuleLost(rule)).length
+  dnsCount += p.dns.rules.filter((rule) => rule.enable && dnsRuleLost(rule)).length
+  const stepIssues = [0, 0, outboundCount, routeCount, dnsCount, 0]
+  const total = nameMissing + outboundCount + routeCount + dnsCount
+  return { nameMissing, stepIssues, total }
 })
+const validationIssueCount = computed(() => validationReport.value.total)
+const jumpToFirstIssue = () => {
+  if (validationReport.value.nameMissing) {
+    nameRequired.value = true
+    document.getElementById('profile-name')?.focus()
+    return
+  }
+  const idx = validationReport.value.stepIssues.findIndex((count) => count > 0)
+  if (idx !== -1) selectStep(idx + 1)
+}
 const counts = computed(() => [
   null,
   profile.value.inbounds.length,
@@ -175,11 +195,13 @@ const handleSave = async () => {
     return
   }
   if (graphIssues.value.some((issue) => issue.type === 'reserved-tag')) {
+    selectStep(Step.Outbounds)
     message.error(t('kernel.outbounds.reservedTag'))
     return
   }
   const cycle = graphIssues.value.find((issue) => issue.type === 'cycle')
   if (cycle) {
+    selectStep(Step.Outbounds)
     message.error(
       t('kernel.outbounds.cycle', [
         getOutboundChainLabels(cycle.chain, profile.value.outbounds).join(' → '),
@@ -189,6 +211,7 @@ const handleSave = async () => {
   }
   const missingNodeGroup = graphIssues.value.find((issue) => issue.type === 'missing-node-group')
   if (missingNodeGroup) {
+    selectStep(Step.Outbounds)
     message.error(t('kernel.outbounds.missingNodeGroup', [missingNodeGroup.targetId]))
     return
   }
@@ -203,12 +226,14 @@ const handleSave = async () => {
       await profilesStore.addProfile(profile.value)
     }
     baseline = JSON.stringify(profile.value)
+    message.success('common.success')
     await router.push('/profiles')
   } catch (error: any) {
     console.error('handleSave: ', error)
     message.error(error)
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 const handlePreview = async () => {
@@ -235,7 +260,10 @@ const allowLeave = async () => {
   }
 }
 onBeforeRouteLeave(allowLeave)
-onBeforeRouteUpdate((to, from) => to.fullPath === from.fullPath || allowLeave())
+onBeforeRouteUpdate((to, from) => {
+  if (to.path === from.path) return true
+  return allowLeave()
+})
 const beforeUnload = (event: BeforeUnloadEvent) => {
   if (dirty()) {
     event.preventDefault()
@@ -271,39 +299,47 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
         :key="item.title"
         :type="index + 1 === currentStep ? 'link' : 'text'"
         :aria-current="index + 1 === currentStep ? 'page' : undefined"
-        class="justify-start"
-        @click="currentStep = index + 1"
+        class="justify-start shrink-0"
+        @click="selectStep(index + 1)"
       >
-        {{ t(item.title)
-        }}<span v-if="counts[index] != null" class="ml-4 text-12 text-secondary">{{
+        <span>{{ t(item.title) }}</span>
+        <span v-if="counts[index] != null" class="ml-4 text-12 text-secondary">{{
           counts[index]
         }}</span>
+        <span
+          v-if="validationReport.stepIssues[index]"
+          class="step-issue-badge ml-auto text-12"
+          >{{ validationReport.stepIssues[index] }}</span
+        >
       </Button>
-      <span
+      <button
         v-if="validationIssueCount"
+        type="button"
         class="profile-health profile-health--issue text-12 text-danger"
         role="status"
-        >{{ t('kernel.route.policy.validationTitle') }} · {{ validationIssueCount }}</span
+        @click="jumpToFirstIssue"
       >
+        {{ t('kernel.route.policy.validationTitle') }} · {{ validationIssueCount }}
+      </button>
       <span v-else class="profile-health profile-health--ok text-12" role="status"
         >{{ t('workspace.validationOk') }}</span
       >
     </nav>
     <main class="profile-content">
-      <div v-if="currentStep === Step.General">
+      <div v-show="currentStep === Step.General">
         <GeneralConfig v-model="generalConfig" :outbound-options="outboundOptions" />
       </div>
-      <div v-if="currentStep === Step.Inbounds">
+      <div v-show="currentStep === Step.Inbounds">
         <InboundsConfig v-model="profile.inbounds" />
       </div>
-      <div v-if="currentStep === Step.Outbounds">
+      <div v-show="currentStep === Step.Outbounds">
         <OutboundsConfig
           ref="outboundEditor"
           v-model="profile.outbounds"
           :native="profile.native"
         />
       </div>
-      <div v-if="currentStep === Step.Route">
+      <div v-show="currentStep === Step.Route">
         <RouteConfig
           v-model="profile.route"
           v-model:outbounds="profile.outbounds"
@@ -315,7 +351,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
           @edit-outbound="editOutbound"
         />
       </div>
-      <div v-if="currentStep === Step.Dns">
+      <div v-show="currentStep === Step.Dns">
         <DnsConfig
           v-model="profile.dns"
           :profile="profile"
@@ -324,7 +360,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
           :rule-set="profile.route.rule_set"
         />
       </div>
-      <div v-if="currentStep === Step.MixinScript">
+      <div v-show="currentStep === Step.MixinScript">
         <MixinAndScript v-model="mixinAndScriptConfig" />
       </div>
     </main>
@@ -348,12 +384,27 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.step-issue-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-weight: 700;
+  color: var(--danger-color);
+  background: var(--danger-soft);
 }
 .profile-health {
   margin-top: 8px;
-  padding: 4px 10px;
+  padding: 5px 10px;
+  border: 0;
   border-radius: 999px;
   font-weight: 600;
+  text-align: left;
 }
 .profile-health--ok {
   color: var(--color-success);
@@ -361,6 +412,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 }
 .profile-health--issue {
   background: var(--danger-soft);
+  cursor: pointer;
 }
 .profile-content {
   min-width: 0;
@@ -373,13 +425,13 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
   }
   .profile-header {
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .profile-header > a {
-    grid-column: 1;
+    grid-column: 1 / -1;
   }
   .profile-header > .gui-input {
-    grid-column: 2 / -1;
+    grid-column: 1 / -1;
     width: 100%;
   }
   .profile-header > .gui-button {
@@ -390,7 +442,15 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
   }
   .profile-stepper {
     flex-direction: row;
+    align-items: center;
     overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .profile-health {
+    margin-top: 0;
+    margin-left: auto;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 }
 </style>

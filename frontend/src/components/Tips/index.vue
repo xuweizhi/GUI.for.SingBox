@@ -16,7 +16,9 @@ const model = defineModel<boolean>()
 const domRef = useTemplateRef('domRef')
 const fixedPosition = ref({ x: 0, y: 0 })
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+const displayMessage = (msg: string) => (msg && te(msg) ? t(msg) : msg)
 
 const updatePosition = (x: number, y: number) => {
   nextTick(() => {
@@ -30,7 +32,7 @@ const updatePosition = (x: number, y: number) => {
     const nextX = Math.min(maxX, Math.max(margin, x - width / 2))
     let nextY = y - height - gap
     if (nextY < margin) {
-      nextY = Math.min(window.innerHeight - height - margin, y + gap + 8)
+      nextY = Math.max(margin, Math.min(window.innerHeight - height - margin, y + gap + 8))
     }
     fixedPosition.value = { x: Math.round(nextX), y: Math.round(nextY) }
   })
@@ -54,9 +56,9 @@ watch(
       ref="domRef"
       role="tooltip"
       :style="{ left: fixedPosition.x + 'px', top: fixedPosition.y + 'px' }"
-      class="gui-tips fixed z-9999 pointer-events-none whitespace-pre-wrap text-center text-12 px-8 py-6 rounded-8 min-w-64 backdrop-blur-sm"
+      class="gui-tips fixed pointer-events-none whitespace-pre-wrap text-center text-12 px-8 py-6 rounded-8 min-w-64"
     >
-      {{ t(message) }}
+      {{ displayMessage(message) }}
     </div>
   </Transition>
 </template>
@@ -73,10 +75,13 @@ watch(
 }
 
 .gui-tips {
+  z-index: var(--z-tips, 100100);
   max-width: min(320px, calc(100vw - 16px));
-  background: var(--menu-bg);
+  background: var(--dropdown-bg, var(--menu-bg));
   color: var(--color);
-  border: 1px solid var(--border-color);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  border: 1px solid var(--surface-border, var(--border-color));
+  box-shadow: var(--dropdown-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
 }
 </style>

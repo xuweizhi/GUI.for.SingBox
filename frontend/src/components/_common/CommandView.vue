@@ -14,18 +14,24 @@ const showCommandPanel = ref(false)
 const userInput = ref('')
 const selected = ref(0)
 const inputRef = useTemplateRef<typeof Input>('inputRef')
+const panelRef = useTemplateRef<HTMLElement>('panelRef')
 const commands = ref(getCommands())
-const commandsRefMap: Record<string, HTMLElement | null> = {}
+const commandEls = new Map<number, HTMLElement>()
+let previouslyFocused: HTMLElement | null = null
+
+const setCommandEl = (index: number, el: unknown) => {
+  if (el instanceof HTMLElement) commandEls.set(index, el)
+  else commandEls.delete(index)
+}
 
 const hitCommand = computed(() => {
   const query = userInput.value.trim().toLocaleLowerCase()
   if (!query) return commands.value
-  return commands.value.filter(
-    (v) =>
-      v.cmd.toLocaleLowerCase().includes(query) ||
-      v.label.toLocaleLowerCase().includes(query) ||
-      (v.desc || '').toLocaleLowerCase().includes(query),
-  )
+  const tokens = query.split(/\s+/).filter(Boolean)
+  return commands.value.filter((v) => {
+    const haystack = `${v.label} ${v.cmd} ${v.desc || ''}`.toLocaleLowerCase()
+    return tokens.every((token) => haystack.includes(token))
+  })
 })
 
 const { t } = useI18n()
@@ -34,6 +40,8 @@ const appSettings = useAppSettingsStore()
 const pluginsStore = usePluginsStore()
 
 const openPanel = () => {
+  if (hasActiveOverlay() || appStore.modalStack.length > 0) return
+  previouslyFocused = document.activeElement as HTMLElement | null
   showCommandPanel.value = true
   selected.value = 0
   nextTick(() => inputRef.value?.focus())
@@ -43,9 +51,14 @@ const closePanel = () => {
   if (loading.value) return
   showCommandPanel.value = false
   userInput.value = ''
+  if (previouslyFocused?.isConnected && typeof previouslyFocused.focus === 'function') {
+    previouslyFocused.focus()
+  }
+  previouslyFocused = null
 }
 
 const handleExecCommand = async (index: number) => {
+  if (loading.value) return
   const target = hitCommand.value[index]
   if (!target) return
   loading.value = true
@@ -53,10 +66,12 @@ const handleExecCommand = async (index: number) => {
     await target.handler?.()
     userInput.value = ''
     showCommandPanel.value = false
+    previouslyFocused = null
   } catch (error: any) {
     message.error(error?.message || error)
+  } finally {
+    loading.value = false
   }
-  loading.value = false
   if (showCommandPanel.value) {
     nextTick(() => inputRef.value?.focus())
   }
@@ -65,10 +80,12 @@ const handleExecCommand = async (index: number) => {
 const onKeydown = async (ev: KeyboardEvent) => {
   if (hasActiveOverlay() || ev.isComposing) return
   const isCommandShortcut =
-    ((ev.ctrlKey || ev.metaKey) && ev.code === 'KeyK') ||
-    ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && ev.code === 'KeyP')
+    !ev.altKey &&
+    (((ev.ctrlKey || ev.metaKey) && ev.code === 'KeyK') ||
+      ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && ev.code === 'KeyP'))
 
   if (isCommandShortcut) {
+    if (!showCommandPanel.value && appStore.modalStack.length > 0) return
     ev.preventDefault()
     if (showCommandPanel.value) {
       closePanel()
@@ -86,24 +103,27 @@ const onKeydown = async (ev: KeyboardEvent) => {
     closePanel()
     return
   }
+  if (ev.key === 'Tab') {
+    ev.preventDefault()
+    inputRef.value?.focus()
+    return
+  }
   if (loading.value) return
-  if (ev.code === 'ArrowUp') {
+  if (ev.key === 'ArrowUp') {
     ev.preventDefault()
     if (!hitCommand.value.length) return
     selected.value = selected.value <= 0 ? hitCommand.value.length - 1 : selected.value - 1
-    const target = hitCommand.value[selected.value]
-    target && commandsRefMap[target.label]?.scrollIntoView({ block: 'nearest' })
+    commandEls.get(selected.value)?.scrollIntoView({ block: 'nearest' })
     return
   }
-  if (ev.code === 'ArrowDown') {
+  if (ev.key === 'ArrowDown') {
     ev.preventDefault()
     if (!hitCommand.value.length) return
     selected.value = selected.value + 1 >= hitCommand.value.length ? 0 : selected.value + 1
-    const target = hitCommand.value[selected.value]
-    target && commandsRefMap[target.label]?.scrollIntoView({ block: 'nearest' })
+    commandEls.get(selected.value)?.scrollIntoView({ block: 'nearest' })
     return
   }
-  if (ev.code === 'Enter') {
+  if (ev.key === 'Enter') {
     ev.preventDefault()
     if (hitCommand.value.length) {
       await handleExecCommand(selected.value)
@@ -120,7 +140,12 @@ const updateCommands = debounce(() => {
 }, 200)
 
 watch(
-  [() => appSettings.app.lang, () => pluginsStore.plugins, () => appStore.locales],
+  [
+    () => appSettings.app.lang,
+    () => appSettings.app.customFontPresets,
+    () => pluginsStore.plugins,
+    () => appStore.locales,
+  ],
   updateCommands,
   { deep: true },
 )
@@ -133,6 +158,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   updateCommands.cancel()
+  commandEls.clear()
   window.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('open-command-palette', onOpenCommandPalette)
 })
@@ -141,17 +167,18 @@ onUnmounted(() => {
 <template>
   <Transition name="cmd-fade">
     <div
-      v-show="showCommandPanel"
-      class="command-mask fixed inset-0 z-9999 flex justify-center items-start backdrop-blur-sm"
+      v-if="showCommandPanel"
+      class="command-mask fixed inset-0 flex justify-center items-start backdrop-blur-sm"
       @click.self="closePanel"
     >
       <div
+        ref="panelRef"
         role="dialog"
         aria-modal="true"
         :aria-label="t('common.commandPalette')"
-        class="command-panel rounded-12 overflow-hidden flex flex-col"
+        class="command-panel overflow-hidden flex flex-col"
       >
-        <div class="command-panel__header p-10">
+        <div class="command-panel__header p-10 shrink-0">
           <Input
             ref="inputRef"
             v-model="userInput"
@@ -169,19 +196,23 @@ onUnmounted(() => {
             </template>
           </Input>
         </div>
-        <div class="overflow-y-auto p-8 flex flex-col gap-6" style="max-height: calc(100dvh - 216px)">
+        <div role="listbox" class="command-list flex-1 min-h-0 overflow-y-auto p-8 flex flex-col gap-6">
           <div
             v-for="(c, index) in hitCommand"
             :key="`${c.cmd}-${index}`"
-            :ref="(el: any) => (commandsRefMap[c.label] = el)"
+            :ref="(el) => setCommandEl(index, el)"
+            role="option"
+            :aria-selected="index === selected"
             :class="{ 'is-selected': index === selected }"
             class="command-item rounded-8 px-12 py-8 cursor-pointer"
-            @mouseenter="selected = index"
+            @mousemove="selected !== index && (selected = index)"
             @click="handleExecCommand(index)"
           >
-            <div class="flex items-center justify-between gap-8">
-              <span class="font-bold text-13">{{ c.label }}</span>
-              <span class="text-12 text-muted font-mono">{{ c.cmd }}</span>
+            <div class="flex items-center justify-between gap-8 min-w-0">
+              <span class="font-bold text-13 line-clamp-1 min-w-0">{{ c.label }}</span>
+              <span class="command-item__cmd text-12 text-muted font-mono shrink-0">{{
+                c.cmd
+              }}</span>
             </div>
             <div v-if="c.desc" class="text-12 text-muted mt-2">{{ c.desc }}</div>
           </div>
@@ -189,7 +220,9 @@ onUnmounted(() => {
             {{ t('commands.noMatching') }}
           </div>
         </div>
-        <div class="command-panel__footer px-12 py-8 text-12 text-muted flex items-center justify-between">
+        <div
+          class="command-panel__footer px-12 py-8 text-12 text-muted flex items-center justify-between shrink-0"
+        >
           <span>{{ t('common.commandHints') }}</span>
           <span class="font-mono">{{ hitCommand.length }}</span>
         </div>
@@ -200,24 +233,29 @@ onUnmounted(() => {
 
 <style lang="less" scoped>
 .command-mask {
+  z-index: var(--z-command, 9500);
   background: var(--modal-mask-bg);
   padding: 56px 12px 16px;
 }
 
 .command-panel {
   width: min(580px, 100%);
-  background: var(--modal-bg);
-  border: 1px solid var(--border-color);
-  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+  max-height: calc(100dvh - 80px);
+  background: var(--surface-elevated-bg, var(--modal-bg));
+  border: 1px solid var(--surface-border, var(--border-color));
+  border-radius: var(--modal-radius, 14px);
+  box-shadow: var(--modal-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
 }
 
 .command-panel__header {
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--surface-border, var(--border-color));
 }
 
 .command-panel__footer {
-  border-top: 1px solid var(--border-color);
-  background: var(--bg-color);
+  border-top: 1px solid var(--surface-border, var(--border-color));
+  background: var(--surface-active-bg, var(--bg-color));
 }
 
 .command-item {
@@ -231,6 +269,13 @@ onUnmounted(() => {
     background: var(--accent-soft);
     border-color: color-mix(in srgb, var(--accent-text) 45%, transparent);
   }
+}
+
+.command-item__cmd {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cmd-fade-enter-active,

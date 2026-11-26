@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onActivated, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { GetSystemProxy, ProcessMemory } from '@/bridge'
@@ -9,6 +9,10 @@ import { formatBytes, handleChangeMode, message, modal } from '@/utils'
 
 import CommonController from './CommonController.vue'
 import CurrentNodeCard from './CurrentNodeCard.vue'
+
+const props = withDefaults(defineProps<{ active?: boolean }>(), {
+  active: true,
+})
 
 const emit = defineEmits<{
   'open-groups': []
@@ -31,6 +35,7 @@ const statistics = ref({
 const { t } = useI18n()
 const appSettings = useAppSettingsStore()
 const kernelApiStore = useKernelApiStore()
+let disposed = false
 
 const openSettings = () =>
   modal({
@@ -46,7 +51,6 @@ const setTun = async (enable: boolean) => {
   try {
     await kernelApiStore.updateConfig('tun', { enable })
   } catch (error) {
-    if (kernelApiStore.running) kernelApiStore.config.tun.enable = !enable
     message.error(error)
   }
 }
@@ -59,27 +63,47 @@ const onModeChange = async (mode: 'direct' | 'global' | 'rule') => {
     message.error(error)
   }
 }
+
+let latestCoreMemoryUsageTime = 0
+let memoryPending = false
+const getCoreMemoryUsage = async (fallback: number, force = false) => {
+  if (
+    memoryPending ||
+    (!force && latestCoreMemoryUsageTime && Date.now() - latestCoreMemoryUsageTime < 30_000)
+  ) {
+    return fallback
+  }
+  memoryPending = true
+  latestCoreMemoryUsageTime = Date.now()
+  try {
+    return await ProcessMemory(kernelApiStore.pid).catch(() => fallback)
+  } finally {
+    memoryPending = false
+  }
+}
+
 const handleToggleRealMemoryUsage = () => {
   appSettings.app.kernel.realMemoryUsage = !appSettings.app.kernel.realMemoryUsage
+  if (appSettings.app.kernel.realMemoryUsage && kernelApiStore.pid) {
+    void getCoreMemoryUsage(statistics.value.memUsage || statistics.value.inuse, true).then(
+      (usage) => {
+        if (!disposed) statistics.value.memUsage = usage
+      },
+    )
+  }
 }
 
 const hasSystemProxy = ref<boolean>()
-onMounted(async () => {
+const refreshSystemProxy = async () => {
   try {
-    hasSystemProxy.value = Boolean(await GetSystemProxy())
+    const enabled = Boolean(await GetSystemProxy())
+    if (!disposed) hasSystemProxy.value = enabled
   } catch {
     /* The host may not report a proxy. */
   }
-})
-let latestCoreMemoryUsageTime: number
-const getCoreMemoryUsage = async (fallback: number) => {
-  if (latestCoreMemoryUsageTime && Date.now() - latestCoreMemoryUsageTime < 30_000) {
-    return fallback
-  }
-  const useage = await ProcessMemory(kernelApiStore.pid).catch(() => fallback)
-  latestCoreMemoryUsageTime = Date.now()
-  return useage
 }
+onMounted(refreshSystemProxy)
+onActivated(refreshSystemProxy)
 
 const updateDisplayedMemoryUsage = (usage: number) => {
   if (usage > 0) {
@@ -90,9 +114,8 @@ const updateDisplayedMemoryUsage = (usage: number) => {
 const unregisterMemoryHandler = kernelApiStore.onMemory(async (data) => {
   updateDisplayedMemoryUsage(data.inuse)
   if (appSettings.app.kernel.realMemoryUsage) {
-    getCoreMemoryUsage(statistics.value.memUsage || data.inuse).then((usage) => {
-      statistics.value.memUsage = usage
-    })
+    const usage = await getCoreMemoryUsage(statistics.value.memUsage || data.inuse)
+    if (!disposed) statistics.value.memUsage = usage
   }
 })
 
@@ -119,6 +142,7 @@ const unregisterConnectionsHandler = kernelApiStore.onConnections((data) => {
 })
 
 onUnmounted(() => {
+  disposed = true
   unregisterMemoryHandler()
   unregisterTrafficHandler()
   unregisterConnectionsHandler()
@@ -128,7 +152,7 @@ onUnmounted(() => {
 <template>
   <div class="home-overview pb-16">
     <div class="hero-grid mb-16">
-      <CurrentNodeCard />
+      <CurrentNodeCard :active="props.active" />
       <Card :title="t('kernel.mode')">
         <Radio
           :key="kernelApiStore.config.mode + '-' + modeKey"
@@ -137,22 +161,23 @@ onUnmounted(() => {
           @change="onModeChange"
         />
         <div class="flex flex-wrap items-center gap-8 mt-12">
-          <Switch v-model="kernelApiStore.config.tun.enable" @change="setTun">{{
-            t('home.overview.tunMode')
-          }}</Switch>
-          <span v-if="hasSystemProxy !== undefined" class="text-secondary text-12"
-            >{{ t('settings.systemProxy') }} ·
-            {{ t(hasSystemProxy ? 'common.enabled' : 'common.disabled') }}</span
+          <Switch
+            :model-value="kernelApiStore.config.tun.enable"
+            :disabled="kernelApiStore.restarting || kernelApiStore.stopping"
+            @update:model-value="setTun"
+            >{{ t('home.overview.tunMode') }}</Switch
           >
-          <Button size="small" icon="settings" @click="openSettings">{{
+          <Tag
+            v-if="hasSystemProxy !== undefined"
+            size="small"
+            :color="hasSystemProxy ? 'green' : 'default'"
+          >
+            {{ t('settings.systemProxy') }} ·
+            {{ t(hasSystemProxy ? 'common.enabled' : 'common.disabled') }}
+          </Tag>
+          <Button size="small" icon="settings" class="ml-auto" @click="openSettings">{{
             t('home.overview.settings')
           }}</Button>
-        </div>
-        <div class="flex flex-wrap gap-6 mt-12">
-          <Button size="small" @click="emit('open-groups')">{{
-            t('home.overview.allGroups')
-          }}</Button>
-          <Button size="small" @click="emit('open-logs')">{{ t('home.overview.logs') }}</Button>
         </div>
       </Card>
     </div>
@@ -188,13 +213,14 @@ onUnmounted(() => {
       </Card>
       <Card
         :title="t('home.overview.memory')"
+        :aria-pressed="appSettings.app.kernel.realMemoryUsage"
         interactive
         class="home-stat-card home-stat-card--memory"
         @click="handleToggleRealMemoryUsage"
       >
         <template #extra>
           <Tag size="small" :color="appSettings.app.kernel.realMemoryUsage ? 'green' : 'default'">
-            {{ t(appSettings.app.kernel.realMemoryUsage ? 'common.enabled' : 'common.disabled') }}
+            RSS · {{ t(appSettings.app.kernel.realMemoryUsage ? 'common.enabled' : 'common.disabled') }}
           </Tag>
         </template>
         <div class="home-stat-card__value py-4 font-mono">
@@ -210,23 +236,21 @@ onUnmounted(() => {
       </Card>
     </div>
 
-    <div class="home-dashboard flex gap-16 mt-16">
-      <div class="traffic-panel flex-1 min-w-0">
-        <div class="flex items-center justify-between pb-10">
-          <div class="font-bold" style="color: var(--card-color)">
-            {{ t('home.overview.traffic') }}
-          </div>
+    <div class="traffic-panel mt-16">
+      <div class="flex items-center justify-between pb-10">
+        <div class="font-bold" style="color: var(--card-color)">
+          {{ t('home.overview.traffic') }}
         </div>
-        <TrafficChart
-          :series="trafficHistory"
-          :legend="[t('home.overview.transmit'), t('home.overview.receive')]"
-        />
-        <div class="flex items-center justify-between text-12 text-secondary mt-6">
-          {{ t('workspace.trafficSamples', [60]) }}
-          <Button size="small" type="text" icon="reset" @click="trafficHistory = [[], []]">{{
-            t('common.reset')
-          }}</Button>
-        </div>
+      </div>
+      <TrafficChart
+        :series="trafficHistory"
+        :legend="[t('home.overview.transmit'), t('home.overview.receive')]"
+      />
+      <div class="flex items-center justify-between text-12 text-secondary mt-6">
+        {{ t('workspace.trafficSamples', [60]) }}
+        <Button size="small" type="text" icon="reset" @click="trafficHistory = [[], []]">{{
+          t('common.reset')
+        }}</Button>
       </div>
     </div>
   </div>

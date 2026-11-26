@@ -91,12 +91,16 @@ const actions = (group: App.NodeGroup) => [
   >
     <Button type="primary" icon="add" @click="openForm()">{{ t('common.add') }}</Button>
   </ResourcePageShell>
-  <Empty v-if="!nodeGroupsStore.nodeGroups.length" description="nodeGroups.empty">
-    <template #description>
-      <div class="text-12 text-muted">{{ t('nodeGroups.empty') }}</div>
-      <Button type="primary" icon="add" @click="openForm()">{{ t('common.add') }}</Button>
-    </template>
-  </Empty>
+  <div v-if="!nodeGroupsStore.nodeGroups.length" class="grid-list-empty">
+    <Empty description="nodeGroups.empty">
+      <template #description>
+        <div class="text-12 text-muted mt-8">{{ t('nodeGroups.empty') }}</div>
+        <Button type="primary" icon="add" class="mt-12" @click="openForm()">{{
+          t('common.add')
+        }}</Button>
+      </template>
+    </Empty>
+  </div>
   <VueDraggable
     v-if="groupCards.length"
     v-model="nodeGroupsStore.nodeGroups"
@@ -138,6 +142,7 @@ const actions = (group: App.NodeGroup) => [
                 params: { id: dep.profileId },
                 query: { step: 3, outbound: dep.outboundId },
               }"
+              @dblclick.stop
               ><Tag size="small">{{ dep.profileName }} / {{ dep.outboundName }}</Tag></RouterLink
             >
           </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { deepClone } from '@/utils'
@@ -35,6 +35,15 @@ const emit = defineEmits(['change', 'update:modelValue'])
 const model = ref(props.multiple ? deepClone(props.modelValue || []) : props.modelValue)
 const searchQuery = ref('')
 const highlightedIndex = ref(-1)
+const listboxRef = useTemplateRef<HTMLElement>('listboxRef')
+
+const scrollHighlightedIntoView = () => {
+  nextTick(() => {
+    if (highlightedIndex.value < 0) return
+    const items = listboxRef.value?.querySelectorAll<HTMLElement>('[role="option"]')
+    items?.[highlightedIndex.value]?.scrollIntoView({ block: 'nearest' })
+  })
+}
 
 const { t } = useI18n()
 
@@ -174,6 +183,7 @@ const handleTriggerKeydown = (
     } else if (filteredOptions.value.length) {
       highlightedIndex.value = (highlightedIndex.value + 1) % filteredOptions.value.length
     }
+    scrollHighlightedIntoView()
     return
   }
   if (event.key === 'ArrowUp') {
@@ -185,12 +195,41 @@ const handleTriggerKeydown = (
       highlightedIndex.value =
         (highlightedIndex.value - 1 + filteredOptions.value.length) % filteredOptions.value.length
     }
+    scrollHighlightedIntoView()
+  }
+}
+
+const handleSearchKeydown = (event: KeyboardEvent, close: () => void) => {
+  if (event.key === 'ArrowDown' && filteredOptions.value.length) {
+    event.preventDefault()
+    highlightedIndex.value = (highlightedIndex.value + 1) % filteredOptions.value.length
+    scrollHighlightedIntoView()
+    return
+  }
+  if (event.key === 'ArrowUp' && filteredOptions.value.length) {
+    event.preventDefault()
+    highlightedIndex.value =
+      (highlightedIndex.value - 1 + filteredOptions.value.length) % filteredOptions.value.length
+    scrollHighlightedIntoView()
+    return
+  }
+  if (event.key === 'Enter' && !event.isComposing && filteredOptions.value.length) {
+    event.preventDefault()
+    const target = filteredOptions.value[highlightedIndex.value >= 0 ? highlightedIndex.value : 0]
+    if (target) {
+      handleSelect(target.value)
+      if (!props.multiple) close()
+    }
   }
 }
 </script>
 
 <template>
-  <Dropdown :trigger="disabled ? [] : ['click']" @update:show="onDropdownVisibilityChange">
+  <Dropdown
+    :trigger="disabled ? [] : ['click']"
+    :class="{ 'w-full': autoSize }"
+    @update:show="onDropdownVisibilityChange"
+  >
     <template #default="{ toggle, close, open, show }">
       <div
         role="combobox"
@@ -218,6 +257,7 @@ const handleTriggerKeydown = (
           :icon="innerClearable ? 'close' : 'arrowDown'"
           :icon-size="14"
           :aria-label="innerClearable ? t('common.clear') : t('common.select')"
+          tabindex="-1"
           type="text"
           size="small"
           class="ml-auto shrink-0"
@@ -238,7 +278,12 @@ const handleTriggerKeydown = (
     </template>
 
     <template #overlay="{ close }">
-      <div role="listbox" class="gui-select__listbox flex flex-col gap-2 min-w-128 p-6">
+      <div
+        ref="listboxRef"
+        role="listbox"
+        :aria-multiselectable="multiple || undefined"
+        class="gui-select__listbox flex flex-col gap-2 min-w-128 p-6"
+      >
         <div v-if="shouldShowSearch" class="pb-4">
           <Input
             v-model="searchQuery"
@@ -247,6 +292,7 @@ const handleTriggerKeydown = (
             clearable
             :placeholder="t('common.search')"
             class="w-full"
+            @keydown="handleSearchKeydown($event, close)"
           />
         </div>
         <slot v-if="filteredOptions.length === 0" name="empty">

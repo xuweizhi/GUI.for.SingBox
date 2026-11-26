@@ -2,7 +2,7 @@
 import { computed, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { delayColor } from '@/views/HomeView/nodeController'
+import { delayColor } from '@/utils/nodeDelay'
 
 import NodeCard from '@/components/_common/NodeCard.vue'
 
@@ -17,9 +17,27 @@ const props = defineProps<{
   runtimeUnavailable?: boolean
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+const renderText = (value?: string) => {
+  if (!value) return ''
+  return typeof te === 'function' ? (te(value) ? t(value) : value) : t(value)
+}
 const nodeFilter = ref('')
 const operationError = ref('')
+const readonlyNotice = computed(() => {
+  if (props.controller.readonlyMode?.value) return t('home.nodes.directReadonly')
+  if (
+    props.controller.selectedGroup.value &&
+    props.controller.selectedGroup.value.type !== 'Selector'
+  ) {
+    return t('home.nodes.urlTestReadonly')
+  }
+  return ''
+})
+const batchPercent = computed(() => {
+  const { completed, total } = props.controller.batch.value
+  return total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0
+})
 watch(
   () => props.controller.selectedGroupName.value,
   () => {
@@ -97,7 +115,14 @@ watchEffect(() => {
     <template v-else>
       <div class="node-diag-summary rounded-8 p-12 mb-12">
         <div class="flex flex-wrap items-center justify-between gap-8">
-          <div class="font-bold text-15 line-clamp-1">
+          <div
+            class="font-bold text-15 line-clamp-1"
+            :title="
+              controller.primary.value.leafName ||
+              controller.primary.value.groupName ||
+              t('home.nodes.noSelectableNode')
+            "
+          >
             {{
               controller.primary.value.leafName ||
               controller.primary.value.groupName ||
@@ -115,10 +140,15 @@ watchEffect(() => {
         <div
           v-if="controller.primary.value.groupName"
           class="text-12 text-muted mt-4 line-clamp-1"
+          :title="controller.primary.value.groupName"
         >
-          {{ t('router.nodeGroups') }}: {{ controller.primary.value.groupName }}
+          {{ t('home.overview.tabGroups') }}: {{ controller.primary.value.groupName }}
         </div>
-        <div v-if="displayChain" class="text-12 text-muted mt-4 font-mono line-clamp-1">
+        <div
+          v-if="displayChain"
+          class="text-12 text-muted mt-4 font-mono line-clamp-1"
+          :title="displayChain"
+        >
           {{ displayChain }}
         </div>
         <div v-if="runtimeDetails" data-runtime-node class="text-12 mt-8 flex flex-col gap-4">
@@ -149,9 +179,33 @@ watchEffect(() => {
 
       <div
         v-if="controller.stale.value && controller.refreshError.value"
-        class="mb-12 text-12 text-danger"
+        class="mb-12 flex flex-wrap items-center justify-between gap-8 text-12 text-danger"
       >
-        {{ controller.refreshError.value }}
+        <span>{{ renderText(controller.refreshError.value) }}</span>
+        <Button size="small" type="text" @click="controller.refresh?.()">
+          {{ t('home.nodes.retry') }}
+        </Button>
+      </div>
+
+      <div
+        v-if="controller.batch.value.running"
+        class="node-diag-progress rounded-8 px-10 py-8 mb-12 flex flex-col gap-6"
+      >
+        <div class="text-12 text-secondary">
+          {{
+            t('home.nodes.testingProgress', [
+              controller.batch.value.completed,
+              controller.batch.value.total,
+              controller.batch.value.success,
+              controller.batch.value.failure,
+            ])
+          }}
+        </div>
+        <Progress :percent="batchPercent" />
+      </div>
+
+      <div v-if="readonlyNotice" class="text-12 text-muted mb-10">
+        {{ readonlyNotice }}
       </div>
 
       <div class="flex flex-wrap items-center gap-8 mb-12">
@@ -174,9 +228,25 @@ watchEffect(() => {
       </div>
 
       <div v-if="operationError" class="mb-8 text-12 text-danger" role="alert">
-        {{ t(operationError) }}
+        {{ renderText(operationError) }}
       </div>
-      <Empty v-if="filteredNodes.length === 0" />
+      <div
+        v-if="filteredNodes.length === 0"
+        class="flex flex-col items-center gap-8 py-12"
+      >
+        <Empty
+          :description="
+            nodeFilter.trim() ? t('home.nodes.noFilterMatches') : undefined
+          "
+        />
+        <Button
+          v-if="nodeFilter.trim()"
+          size="small"
+          @click="nodeFilter = ''"
+        >
+          {{ t('workspace.clearFilters') }}
+        </Button>
+      </div>
       <div v-else class="node-list flex flex-col gap-8">
         <NodeCard
           v-for="node in filteredNodes"
@@ -206,5 +276,14 @@ watchEffect(() => {
   border: 1px solid var(--surface-border);
   user-select: text;
   -webkit-user-select: text;
+}
+.node-diag-progress {
+  background: var(--surface-bg);
+  border: 1px solid var(--surface-border);
+}
+.node-list {
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 </style>

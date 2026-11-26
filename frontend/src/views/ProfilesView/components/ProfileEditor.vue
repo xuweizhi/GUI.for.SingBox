@@ -17,6 +17,7 @@ const props = defineProps<Props>()
 const loading = ref(false)
 const profileText = ref('')
 const ready = ref(false)
+const loadError = ref('')
 let baseline: Recordable | undefined
 
 const { t } = useI18n()
@@ -57,22 +58,33 @@ const handleSave = async () => {
   } catch (error: any) {
     console.log(error)
     message.error(error.message || error)
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
-onMounted(() => {
-  generateConfig(props.profile, {
-    enableStableConfigCompat: false,
-    enablePluginProcessing: false,
-    enableMixinProcessing: false,
-    enableScriptProcessing: false,
-  }).then((text) => {
+const loadConfig = async () => {
+  loadError.value = ''
+  ready.value = false
+  try {
+    const text = await generateConfig(props.profile, {
+      enableStableConfigCompat: false,
+      enablePluginProcessing: false,
+      enableMixinProcessing: false,
+      enableScriptProcessing: false,
+    })
     baseline = JSON.parse(JSON.stringify(text))
     profileText.value = JSON.stringify(text, null, 2)
     ready.value = true
     resetBaseline()
-  }).catch((error) => message.error(error))
+  } catch (error: any) {
+    loadError.value = error?.message || String(error)
+    message.error(error)
+  }
+}
+
+onMounted(() => {
+  void loadConfig()
 })
 
 const modalSlots = {
@@ -102,7 +114,14 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div ref="formRoot" class="h-full">
+  <div ref="formRoot" class="h-full flex flex-col">
     <CodeEditor v-if="ready" v-model="profileText" lang="json" editable class="h-full" />
+    <div v-else-if="loadError" class="flex-1 flex flex-col items-center justify-center gap-12 p-16">
+      <div class="text-13 text-danger text-center break-all" role="alert">{{ loadError }}</div>
+      <Button type="primary" size="small" @click="loadConfig">{{ t('common.retry') }}</Button>
+    </div>
+    <div v-else class="flex-1 flex items-center justify-center">
+      <Icon icon="loading" :size="24" class="rotation" />
+    </div>
   </div>
 </template>

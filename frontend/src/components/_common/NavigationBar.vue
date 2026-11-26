@@ -5,9 +5,7 @@ import { useRoute } from 'vue-router'
 
 import logo from '@/assets/logo'
 import rawRoutes from '@/router/routes'
-import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
-
-import CoreControls from './CoreControls.vue'
+import { useAppSettingsStore } from '@/stores'
 
 const props = withDefaults(defineProps<{ topnav?: boolean }>(), {
   topnav: false,
@@ -20,8 +18,6 @@ const { t } = useI18n()
 const route = useRoute()
 
 const appSettings = useAppSettingsStore()
-const kernelApiStore = useKernelApiStore()
-const profilesStore = useProfilesStore()
 
 const visibleRoutes = computed(() =>
   rawRoutes.filter(
@@ -42,8 +38,6 @@ const groupedRoutes = computed(() =>
     }))
     .filter((section) => section.items.length > 0),
 )
-
-const activeProfileName = computed(() => profilesStore.currentProfile?.name || '')
 
 const closeMobile = () => {
   mobileOpen.value = false
@@ -140,31 +134,6 @@ const toggleCollapsed = () => {
         </RouterLink>
       </div>
     </nav>
-
-    <Dropdown class="sidebar-footer" placement="top" align="start">
-      <button
-        type="button"
-        class="sidebar-core-card"
-        :class="kernelApiStore.running ? 'is-running' : 'is-stopped'"
-        :title="
-          (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped')) +
-          (activeProfileName ? ' · ' + activeProfileName : '')
-        "
-      >
-        <span class="sidebar-core-card__dot" aria-hidden="true"></span>
-        <span class="sidebar-core-card__info">
-          <span class="sidebar-core-card__state">
-            {{ kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped') }}
-          </span>
-          <span v-if="activeProfileName" class="sidebar-core-card__profile">
-            {{ activeProfileName }}
-          </span>
-        </span>
-      </button>
-      <template #overlay="{ show, close }"
-        ><CoreControls v-if="show" @close="close"
-      /></template>
-    </Dropdown>
   </aside>
 </template>
 
@@ -183,7 +152,7 @@ const toggleCollapsed = () => {
   backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  z-index: 40;
+  z-index: var(--z-sidebar, 40);
   overflow: hidden;
 
   &.is-topnav-mode {
@@ -194,32 +163,20 @@ const toggleCollapsed = () => {
     width: 64px;
 
     .sidebar-header {
-      flex-direction: column;
       justify-content: center;
-      padding: 2px 8px;
-      gap: 2px;
+      padding: 0 8px;
     }
 
-    .sidebar-brand {
-      justify-content: center;
-
-      img {
-        width: 18px;
-        height: 18px;
-      }
-    }
-
+    .sidebar-brand,
     .sidebar-brand__name,
     .sidebar-group__label,
-    .sidebar-link__text,
-    .sidebar-core-card__info {
+    .sidebar-link__text {
       display: none;
     }
 
     .sidebar-collapse-btn {
-      position: static;
-      width: 20px;
-      height: 20px;
+      width: 34px;
+      height: 34px;
     }
 
     .sidebar-group.has-divider::before {
@@ -241,16 +198,11 @@ const toggleCollapsed = () => {
         display: none;
       }
     }
-
-    .sidebar-core-card {
-      justify-content: center;
-      padding: 10px 0;
-    }
   }
 }
 
 .sidebar-header {
-  height: var(--topbar-height, 54px);
+  height: var(--topbar-height, 48px);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -298,10 +250,6 @@ const toggleCollapsed = () => {
     background: var(--btn-text-hover-bg);
     color: var(--color);
   }
-}
-
-.app-sidebar.is-collapsed .sidebar-brand {
-  display: inline-flex;
 }
 
 .sidebar-close-btn {
@@ -451,7 +399,7 @@ const toggleCollapsed = () => {
     display: block;
     position: fixed;
     inset: 0;
-    z-index: 900;
+    z-index: var(--z-drawer-backdrop, 900);
     background: var(--modal-mask-bg);
     backdrop-filter: blur(2px);
   }
@@ -465,7 +413,7 @@ const toggleCollapsed = () => {
     bottom: 0;
     left: 0;
     width: min(272px, 82vw);
-    z-index: 910;
+    z-index: var(--z-drawer, 910);
     transform: translateX(-100%);
     transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     box-shadow: 0 16px 48px rgba(15, 23, 42, 0.24);

@@ -8,7 +8,7 @@ import { DefaultRouteRuleset } from '@/constant/profile'
 import { RulesetFormat, RulesetType } from '@/enums/kernel'
 import { useBool } from '@/hooks'
 import { useRulesetsStore } from '@/stores'
-import { deepClone, message } from '@/utils'
+import { deepClone, isValidJson, message } from '@/utils'
 
 interface Props {
   outboundOptions: { label: string; value: string }[]
@@ -34,6 +34,23 @@ const handleAdd = () => {
 defineExpose({ handleAdd })
 
 const handleAddEnd = () => {
+  fields.value.tag = fields.value.tag.trim()
+  if (!fields.value.tag) {
+    message.warn('workspace.required')
+    return false
+  }
+  if (fields.value.type === RulesetType.Local && !fields.value.path) {
+    message.warn('workspace.required')
+    return false
+  }
+  if (fields.value.type === RulesetType.Remote && !fields.value.url.trim()) {
+    message.warn('workspace.required')
+    return false
+  }
+  if (fields.value.type === RulesetType.Inline && !isValidJson(fields.value.rules)) {
+    message.error('kernel.route.rules.invalid')
+    return false
+  }
   if (rulesetId !== -1) {
     model.value[rulesetId] = fields.value
   } else {

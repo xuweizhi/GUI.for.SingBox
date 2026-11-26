@@ -165,13 +165,13 @@ const selectFont = (key: string) => {
     <div class="flex flex-wrap gap-6 items-center">
       <Select
         class="font-select flex-1"
+        auto-size
         :model-value="activeFontKey"
         :options="options"
         @change="selectFont"
       />
       <Button
         class="font-add"
-        icon="add"
         size="small"
         :disabled="atLimit && !creatorOpen"
         :aria-expanded="creatorOpen"
@@ -209,19 +209,31 @@ const selectFont = (key: string) => {
         >{{ t('settings.font.saveAsPreset') }}</Button
       >
     </div>
-    <div class="font-preset-list" :class="{ 'is-compact': !isSettings }">
+    <div
+      v-if="customPresets.length"
+      class="font-preset-list flex flex-col gap-4"
+      :class="{ 'is-compact': !isSettings }"
+    >
       <div
         v-for="preset in customPresets"
         :key="preset.id"
         class="flex gap-6 items-center text-12 text-secondary"
       >
-        <span :style="{ fontFamily: preset.fontFamily }">{{ preset.label }}</span>
-        <span v-if="preset.stylesheetUrl">{{ t('settings.font.webFont') }}</span>
+        <button
+          type="button"
+          class="font-preset-item__btn"
+          :class="{ 'is-active': activeFontKey === 'preset:' + preset.id }"
+          :style="{ fontFamily: preset.fontFamily }"
+          @click="selectFontPreset(preset.fontFamily)"
+        >
+          {{ preset.label }}
+        </button>
+        <span v-if="preset.stylesheetUrl" class="text-muted">{{ t('settings.font.webFont') }}</span>
         <Button
           type="text"
           size="small"
           icon="delete"
-          class="font-remove"
+          class="font-remove ml-auto"
           :aria-label="t('settings.font.deletePreset', [preset.label])"
           @click="removePreset(preset)"
         />
@@ -237,30 +249,33 @@ const selectFont = (key: string) => {
         >{{ t('settings.font.presetName') }}
         <Input
           v-model="draftLabel"
-          class="font-creator-input"
+          class="font-creator-input w-full"
           :label="t('settings.font.presetNameAria')"
           :placeholder="t('settings.font.presetNamePlaceholder')"
           @update:model-value="clearError"
+          @keydown.enter.prevent="submitPreset"
         />
       </label>
       <label class="flex flex-col gap-4"
         >{{ t('settings.font.presetFamily') }}
         <Input
           v-model="draftFamily"
-          class="font-creator-input"
+          class="font-creator-input w-full"
           :label="t('settings.font.presetFamilyAria')"
           :placeholder="t('settings.font.presetFamilyPlaceholder')"
           @update:model-value="clearError"
+          @keydown.enter.prevent="submitPreset"
         />
       </label>
       <label class="flex flex-col gap-4"
         >{{ t('settings.font.presetUrl') }}
         <Input
           v-model="draftUrl"
-          class="font-creator-input"
+          class="font-creator-input w-full"
           :label="t('settings.font.presetUrlAria')"
           :placeholder="t('settings.font.presetUrlPlaceholder')"
           @update:model-value="clearError"
+          @keydown.enter.prevent="submitPreset"
         />
       </label>
       <div class="font-preset-preview" :style="{ fontFamily: draftFamily.trim() || fontFamily }">
@@ -285,6 +300,21 @@ const selectFont = (key: string) => {
 <style scoped>
 .font-preset-error {
   color: var(--danger-color);
+}
+.font-preset-item__btn {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--control-radius, 6px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.font-preset-item__btn:hover,
+.font-preset-item__btn.is-active {
+  color: var(--accent-text);
+  background: var(--accent-soft);
 }
 .font-preset-list.is-compact {
   max-height: 120px;

@@ -1,6 +1,6 @@
 @spacing-values: 0, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 36;
 @spacing-types: m, p;
-@directions: '', t, r, b, l, x, y;
+@directions: '', x, y, t, r, b, l;
 
 .generate-spacing(@typeIndex: 1) when (@typeIndex <= length(@spacing-types)) {
   @type: extract(@spacing-types, @typeIndex);

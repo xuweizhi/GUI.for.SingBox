@@ -83,13 +83,18 @@ export const useCoreBranch = (isAlpha = false) => {
     let downloadCacheFile = ''
     let extractedPath = ''
     let candidatePath = ''
+    let userCancelled = false
     try {
       const { body } = await HttpGet<Record<string, any>>(releaseUrl, {
         Authorization: getGitHubApiAuthorization(),
       })
-      if (body.message) throw body.message
+      if (body?.message) throw body.message
 
-      const release = isAlpha ? body.find((v: any) => v.prerelease === true) : body
+      const release = isAlpha
+        ? Array.isArray(body)
+          ? body.find((v: any) => v.prerelease === true)
+          : undefined
+        : body
       if (!release) throw 'Not Found'
       const { assets, tag_name } = release
       const releaseVersion = String(tag_name).replace(/^v/, '')
@@ -98,16 +103,24 @@ export const useCoreBranch = (isAlpha = false) => {
       if (!asset) throw 'Asset Not Found:' + assetName
       const sha256 = parseReleaseSha256(asset.digest)
       if (asset.uploader?.login !== 'github-actions[bot]') {
-        await confirm('common.warning', 'settings.kernel.risk', {
+        const confirmed = await confirm('common.warning', 'settings.kernel.risk', {
           type: 'text',
           okText: 'settings.kernel.stillDownload',
-        })
+        }).then(
+          () => true,
+          () => false,
+        )
+        if (!confirmed) {
+          userCancelled = true
+          return
+        }
       }
 
       downloadCacheFile = `data/.cache/${assetName}`
       candidatePath = `${downloadCacheFile}.candidate${CoreFilePath.endsWith('.exe') ? '.exe' : ''}`
 
       cancelDownload.value = () => {
+        userCancelled = true
         HttpCancel(downloadCacheFile)
         cancelDownload.value = undefined
       }
@@ -186,8 +199,12 @@ export const useCoreBranch = (isAlpha = false) => {
       downloadCompleted.value = true
       message.success('common.success')
     } catch (error: any) {
-      console.log(error)
-      message.error(error.message || error)
+      if (userCancelled) {
+        message.info('common.canceled')
+      } else {
+        console.log(error)
+        message.error(error.message || error)
+      }
       downloadCompleted.value = false
     } finally {
       cancelDownload.value = undefined
@@ -221,10 +238,15 @@ export const useCoreBranch = (isAlpha = false) => {
       const { body } = await HttpGet<Record<string, any>>(releaseUrl, {
         Authorization: getGitHubApiAuthorization(),
       })
-      const release = isAlpha ? body.find((v: any) => v.prerelease === true) : body
-      if (!release) throw 'Not Found'
+      if (body?.message) throw body.message
+      const release = isAlpha
+        ? Array.isArray(body)
+          ? body.find((v: any) => v.prerelease === true)
+          : undefined
+        : body
+      if (!release?.tag_name) throw 'Not Found'
       const { tag_name } = release
-      return tag_name.replace(/^v/, '') as string
+      return String(tag_name).replace(/^v/, '')
     } catch (error: any) {
       console.log(error)
       showTips && message.error(error)

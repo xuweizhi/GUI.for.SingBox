@@ -199,6 +199,17 @@ const onKeydownEnter = () => {
   }
 }
 
+const onKeydownEsc = (event: KeyboardEvent) => {
+  if (props.editable && showEdit.value) {
+    event.stopPropagation()
+    event.preventDefault()
+    cancelPending()
+    isFocused.value = false
+    draftValue.value = props.modelValue === undefined || props.modelValue === null ? '' : String(props.modelValue)
+    showEdit.value = false
+  }
+}
+
 onMounted(() => props.autofocus && !props.editable && inputRef.value?.focus())
 
 defineExpose({
@@ -276,7 +287,7 @@ defineExpose({
         @input="onInput"
         @blur="onSubmit"
         @keydown.enter="onKeydownEnter"
-        @keydown.esc.stop.prevent="inputRef?.blur"
+        @keydown.esc="onKeydownEsc"
       />
       <Button
         v-if="canTogglePassword"
@@ -347,7 +358,7 @@ defineExpose({
   border-radius: 4px;
   padding-left: 6px;
   padding-right: 6px;
-  &:hover {
+  &:hover:not(.disabled) {
     background: var(--btn-text-hover-bg);
     border-bottom-color: var(--accent-text);
     .gui-input__edit-icon {
@@ -385,19 +396,19 @@ defineExpose({
   }
 }
 
+.small {
+  input {
+    font-size: calc(12px * var(--font-scale, 1));
+  }
+}
+
 @media (max-width: 640px) {
   .gui-input:not(.auto-size) {
     min-width: 0;
     width: 100%;
   }
   .gui-input input {
-    font-size: 16px;
-  }
-}
-
-.small {
-  input {
-    font-size: calc(12px * var(--font-scale, 1));
+    font-size: max(16px, calc(14px * var(--font-scale, 1)));
   }
 }
 </style>

@@ -140,18 +140,27 @@ const onKeydown = (e: KeyboardEvent) => {
     parentItem?.focus()
   }
   if (e.key === 'Escape') {
-    e.stopPropagation()
+    e.preventDefault()
+    e.stopImmediatePropagation()
     closeMenu()
   }
+}
+
+const onViewportChange = () => {
+  if (model.value) closeMenu()
 }
 
 onMounted(() => {
   document.addEventListener('click', onClick)
   document.addEventListener('keydown', onKeydown, true)
+  window.addEventListener('scroll', onViewportChange, true)
+  window.addEventListener('resize', onViewportChange)
 })
 onUnmounted(() => {
   document.removeEventListener('click', onClick)
   document.removeEventListener('keydown', onKeydown, true)
+  window.removeEventListener('scroll', onViewportChange, true)
+  window.removeEventListener('resize', onViewportChange)
 })
 </script>
 
@@ -162,15 +171,16 @@ onUnmounted(() => {
       ref="menuRef"
       role="menu"
       :style="menuPosition"
-      class="gui-menu fixed z-9999 p-6 rounded-8 flex flex-col gap-2 backdrop-blur-sm"
+      class="gui-menu fixed p-6 rounded-8 flex flex-col gap-2"
+      @click.stop
     >
-      <template v-for="menu in menuList">
-        <Divider v-if="menu.separator" :key="menu.label + '_divider'" size="small">
+      <template v-for="(menu, index) in menuList">
+        <Divider v-if="menu.separator" :key="`${menu.label || 'sep'}_${index}_divider`" size="small">
           <template v-if="menu.label" #default>{{ t(menu.label) }}</template>
         </Divider>
         <Button
           v-else
-          :key="menu.label"
+          :key="`${menu.label}_${index}`"
           :disabled="menu.disabled"
           role="menuitem"
           type="text"
@@ -196,15 +206,16 @@ onUnmounted(() => {
       ref="secondaryMenuRef"
       role="menu"
       :style="secondaryMenuPosition"
-      class="gui-menu fixed z-9999 p-6 rounded-8 flex flex-col gap-2 backdrop-blur-sm"
+      class="gui-menu fixed p-6 rounded-8 flex flex-col gap-2"
+      @click.stop
     >
-      <template v-for="m in secondaryMenu">
-        <Divider v-if="m.separator" :key="m.label + '_divider'" size="small">
+      <template v-for="(m, index) in secondaryMenu">
+        <Divider v-if="m.separator" :key="`${m.label || 'sep'}_${index}_divider`" size="small">
           <template v-if="m.label" #default>{{ t(m.label) }}</template>
         </Divider>
         <Button
           v-else
-          :key="m.label"
+          :key="`${m.label}_${index}`"
           :disabled="m.disabled"
           role="menuitem"
           type="text"
@@ -235,9 +246,16 @@ onUnmounted(() => {
 }
 
 .gui-menu {
-  background: var(--menu-bg);
+  z-index: var(--z-menu, 10010);
+  max-height: calc(100dvh - 16px);
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  background: var(--dropdown-bg, var(--menu-bg));
   border: 1px solid var(--surface-border, var(--border-color));
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  border-radius: calc(var(--control-radius, 8px) + 3px);
+  box-shadow: var(--dropdown-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   min-width: 120px;
 }
 </style>

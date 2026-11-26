@@ -139,10 +139,7 @@ if (pluginsStore.pluginHub.length === 0) {
       <div class="text-16 font-bold mt-20 px-4">{{ group.name }}</div>
 
       <div class="plugin-hub__grid py-8">
-        <Card v-for="plugin in group.plugins" :key="plugin.id">
-          <template #title-prefix>
-            <div class="text-14 font-bold">{{ plugin.name }}</div>
-          </template>
+        <Card v-for="plugin in group.plugins" :key="plugin.id" :title="plugin.name">
           <div class="flex items-center gap-8">
             <div v-tips="plugin.description" class="flex-1 line-clamp-2 text-12 text-muted">
               {{ plugin.description || '--' }}
@@ -153,7 +150,7 @@ if (pluginsStore.pluginHub.length === 0) {
               size="small"
               type="text"
               :loading="previewingId === plugin.id"
-              :aria-label="t('common.preview')"
+              :aria-label="t('common.preview') + ' · ' + plugin.name"
               @click="previewPlugin(plugin)"
             />
             <Button v-if="loadingSet.has(plugin.id)" loading type="text" size="small" />
@@ -164,6 +161,7 @@ if (pluginsStore.pluginHub.length === 0) {
                 type="normal"
                 icon="add"
                 size="small"
+                :aria-label="t('common.add') + ' · ' + plugin.name"
                 @click="handleAddPlugin(plugin)"
               />
             </div>
@@ -188,7 +186,13 @@ if (pluginsStore.pluginHub.length === 0) {
 
     <Card v-for="(source, index) in appSettingsStore.app.plugins.sources" :key="index" class="mb-8">
       <template #extra>
-        <Button icon="delete" type="text" size="small" @click="handleRemoveSource(index)" />
+        <Button
+          icon="delete"
+          type="text"
+          size="small"
+          :aria-label="t('common.delete')"
+          @click="handleRemoveSource(index)"
+        />
       </template>
       <template #title-prefix>
         <div class="flex items-center gap-8 font-bold">
@@ -201,7 +205,13 @@ if (pluginsStore.pluginHub.length === 0) {
 
     <Empty v-if="appSettingsStore.app.plugins.sources.length == 0" />
 
-    <Button icon="add" class="w-full" type="primary" @click="handleAddSource" />
+    <Button
+      icon="add"
+      class="w-full"
+      type="primary"
+      :aria-label="t('common.add')"
+      @click="handleAddSource"
+    />
   </Modal>
 </template>
 

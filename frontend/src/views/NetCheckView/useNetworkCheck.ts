@@ -69,6 +69,7 @@ export interface NetworkCheckDeps {
   observeRuleMatch?: (target: ParsedNetworkCheckTarget) => Promise<() => Promise<RuleMatchState | undefined>>
   queryRoute?: (target: ParsedNetworkCheckTarget, resolvedIP?: string) => Promise<string | undefined>
   getRulesetStates?: (running: boolean) => Promise<RulesetState[]>
+  onCancel?: () => void
 }
 
 export interface NetworkCheckResultItem {
@@ -117,9 +118,13 @@ const buildProxyUrl = (endpoint: NetworkCheckProxyEndpoint | undefined) => {
   return `${schema}://${auth}${formatProxyHost(localHost)}:${port}`
 }
 
-const resolveGroupStatus = (items: NetworkCheckResultItem[]): ResultStatus => {
+const resolveGroupStatus = (
+  items: NetworkCheckResultItem[],
+  pending = false,
+): ResultStatus => {
   if (items.some((item) => item.status === 'failed')) return 'failed'
   if (items.some((item) => item.status === 'running')) return 'running'
+  if (pending && items.length === 0) return 'running'
   if (items.some((item) => item.status === 'success')) return 'success'
   return 'skipped'
 }
@@ -149,10 +154,11 @@ const buildGroup = (
   id: NetworkCheckResultGroup['id'],
   title: string,
   items: NetworkCheckResultItem[],
+  pending = false,
 ): NetworkCheckResultGroup => ({
   id,
   title,
-  status: resolveGroupStatus(items),
+  status: resolveGroupStatus(items, pending),
   summary: summarizeGroupStatus(items),
   items,
 })
@@ -181,8 +187,17 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
   const running = ref(false)
   const groups = ref<NetworkCheckResultGroup[]>([])
   const results = computed(() => groups.value.find((group) => group.id === 'overview')?.items ?? [])
+  let runToken = 0
+
+  const cancel = () => {
+    if (!running.value) return
+    runToken += 1
+    running.value = false
+    deps.onCancel?.()
+  }
 
   const clear = () => {
+    cancel()
     groups.value = []
   }
 
@@ -190,8 +205,10 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     if (running.value) return
     const target = parseNetworkCheckTarget(raw)
     input.value = raw
-    clear()
+    groups.value = []
     running.value = true
+    const myToken = ++runToken
+    const isCancelled = () => myToken !== runToken
 
     let coreAvailable = false
     let testedLeaf: string | undefined
@@ -199,283 +216,328 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     const dnsItems: NetworkCheckResultItem[] = []
     const outboundItems: NetworkCheckResultItem[] = []
     const rulesetItems: NetworkCheckResultItem[] = []
-    const syncGroups = () => {
+    const syncGroups = (completedStages = 0) => {
+      if (isCancelled()) return
       groups.value = [
-        buildGroup('overview', 'netCheck.groups.overview', overviewItems),
-        buildGroup('dns', 'netCheck.groups.dns', dnsItems),
-        buildGroup('outbound', 'netCheck.groups.outbound', outboundItems),
-        buildGroup('rulesets', 'netCheck.groups.rulesets', rulesetItems),
+        buildGroup('overview', 'netCheck.groups.overview', overviewItems, completedStages < 1),
+        buildGroup('dns', 'netCheck.groups.dns', dnsItems, completedStages < 2),
+        buildGroup('outbound', 'netCheck.groups.outbound', outboundItems, completedStages < 3),
+        buildGroup('rulesets', 'netCheck.groups.rulesets', rulesetItems, completedStages < 4),
       ]
     }
+    syncGroups(0)
 
     try {
-      const core = await measure(() => deps.probeApiAvailability())
-      coreAvailable = true
-      overviewItems.push({
-        id: 'core',
-        title: 'netCheck.results.core',
-        status: 'success',
-        summary: 'netCheck.summary.coreOk',
-        durationMs: core.durationMs,
-      })
-    } catch (error) {
-      overviewItems.push({
-        id: 'core',
-        title: 'netCheck.results.core',
-        status: 'failed',
-        summary: 'netCheck.summary.coreFailed',
-        detail: normalizeErrorMessage(error),
-      })
-    }
-    syncGroups()
-
-    let match: RuleMatchState | undefined
-    let observationError: unknown
-    let resolvedIP: string | undefined
-    if (!coreAvailable) {
-      overviewItems.push({
-        id: 'proxy-http',
-        title: 'netCheck.results.proxyHttp',
-        status: 'skipped',
-        summary: 'netCheck.summary.proxySkipped',
-      })
-    } else {
-      let finishObservation: (() => Promise<RuleMatchState | undefined>) | undefined
       try {
-        const proxy = buildProxyUrl(await deps.getKernelProxyEndpoint())
-        if (!proxy) {
-          overviewItems.push({
-            id: 'proxy-http',
-            title: 'netCheck.results.proxyHttp',
-            status: 'failed',
-            summary: 'netCheck.summary.proxyMissing',
-          })
-        } else {
-          try {
-            finishObservation = await deps.observeRuleMatch?.(target)
-          } catch (error) {
-            observationError = error
-          }
-          let method: 'HEAD' | 'GET' = 'HEAD'
-          let request
-          try {
-            request = await measure(() =>
-              deps.httpHead(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
-            )
-          } catch (error: any) {
-            const status = Number(error?.status || 0)
-            if (status !== 405 && status !== 501) throw error
-
-            method = 'GET'
-            request = await measure(() =>
-              deps.httpGet(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
-            )
-          }
-
-          overviewItems.push({
-            id: 'proxy-http',
-            title: 'netCheck.results.proxyHttp',
-            status: 'success',
-            summary: `${method} ${target.requestUrl} -> ${request.value.status}`,
-            durationMs: request.durationMs,
-          })
-        }
+        const core = await measure(() => deps.probeApiAvailability())
+        if (isCancelled()) return
+        coreAvailable = true
+        overviewItems.push({
+          id: 'core',
+          title: 'netCheck.results.core',
+          status: 'success',
+          summary: 'netCheck.summary.coreOk',
+          durationMs: core.durationMs,
+        })
       } catch (error) {
+        if (isCancelled()) return
+        overviewItems.push({
+          id: 'core',
+          title: 'netCheck.results.core',
+          status: 'failed',
+          summary: 'netCheck.summary.coreFailed',
+          detail: normalizeErrorMessage(error),
+        })
+      }
+      syncGroups(0)
+
+      let match: RuleMatchState | undefined
+      let observationError: unknown
+      let resolvedIP: string | undefined
+      if (!coreAvailable) {
         overviewItems.push({
           id: 'proxy-http',
           title: 'netCheck.results.proxyHttp',
-          status: 'failed',
-          summary: 'netCheck.summary.proxyFailed',
-          detail: normalizeErrorMessage(error),
+          status: 'skipped',
+          summary: 'netCheck.summary.proxySkipped',
         })
-      } finally {
+      } else {
+        let finishObservation: (() => Promise<RuleMatchState | undefined>) | undefined
         try {
-          match = await finishObservation?.()
+          const proxy = buildProxyUrl(await deps.getKernelProxyEndpoint())
+          if (isCancelled()) return
+          if (!proxy) {
+            overviewItems.push({
+              id: 'proxy-http',
+              title: 'netCheck.results.proxyHttp',
+              status: 'failed',
+              summary: 'netCheck.summary.proxyMissing',
+            })
+          } else {
+            try {
+              finishObservation = await deps.observeRuleMatch?.(target)
+            } catch (error) {
+              observationError = error
+            }
+            if (isCancelled()) return
+            let method: 'HEAD' | 'GET' = 'HEAD'
+            let request
+            try {
+              request = await measure(() =>
+                deps.httpHead(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
+              )
+            } catch (error: any) {
+              if (isCancelled()) return
+              const status = Number(error?.status || 0)
+              if (status !== 405 && status !== 501) throw error
+
+              method = 'GET'
+              request = await measure(() =>
+                deps.httpGet(target.requestUrl, {}, { Proxy: proxy, Timeout: 15 }),
+              )
+            }
+            if (isCancelled()) return
+
+            overviewItems.push({
+              id: 'proxy-http',
+              title: 'netCheck.results.proxyHttp',
+              status: 'success',
+              summary: `${method} ${target.requestUrl} -> ${request.value.status}`,
+              durationMs: request.durationMs,
+            })
+          }
         } catch (error) {
-          observationError = error
+          if (isCancelled()) return
+          overviewItems.push({
+            id: 'proxy-http',
+            title: 'netCheck.results.proxyHttp',
+            status: 'failed',
+            summary: 'netCheck.summary.proxyFailed',
+            detail: normalizeErrorMessage(error),
+          })
+        } finally {
+          try {
+            match = await finishObservation?.()
+          } catch (error) {
+            observationError = error
+          }
         }
       }
-    }
-    syncGroups()
+      if (isCancelled()) return
+      syncGroups(0)
 
-    try {
-      const tcp = await measure(() =>
-        deps.tcpPing(`${formatProxyHost(target.tcpHost)}:${target.tcpPort}`, { Timeout: 15 }),
-      )
-      overviewItems.push({
-        id: 'tcp',
-        title: 'netCheck.results.tcp',
-        status: 'success',
-        summary: `${target.tcpHost}:${target.tcpPort}, ${tcp.value} ms`,
-        durationMs: tcp.durationMs,
-      })
-    } catch (error) {
-      overviewItems.push({
-        id: 'tcp',
-        title: 'netCheck.results.tcp',
-        status: 'failed',
-        summary: 'netCheck.summary.tcpFailed',
-        detail: normalizeErrorMessage(error),
-      })
-    }
-    syncGroups()
-
-    if (target.targetKind === 'ip') {
-      dnsItems.push(
-        createSkippedItem('dns-query', 'netCheck.results.dnsQuery', 'netCheck.summary.ipTarget'),
-      )
-    } else if (!coreAvailable || !deps.dnsQuery) {
-      dnsItems.push(
-        createSkippedItem(
-          'dns-query',
-          'netCheck.results.dnsQuery',
-          'netCheck.summary.dnsUnavailable',
-        ),
-      )
-    } else {
       try {
-        const dns = await deps.dnsQuery(target.dnsLookupHost)
-        const answers = normalizeDnsAnswers(dns)
-        resolvedIP = answers.find((answer) => /^(?:\d{1,3}\.){3}\d{1,3}$/.test(answer) || /^[0-9a-f:]*:[0-9a-f:]+$/i.test(answer))
-        const status = dns.status ?? dns.Status ?? 0
-        dnsItems.push({
-          id: 'dns-query',
-          title: 'netCheck.results.dnsQuery',
-          status: status === 0 ? 'success' : 'failed',
-          summary: answers[0] || `status ${status}`,
-          detail:
-            answers.length > 1
-              ? answers.join(', ')
-              : (dns.server ?? dns.Server) || undefined,
+        const tcp = await measure(() =>
+          deps.tcpPing(`${formatProxyHost(target.tcpHost)}:${target.tcpPort}`, { Timeout: 15 }),
+        )
+        if (isCancelled()) return
+        overviewItems.push({
+          id: 'tcp',
+          title: 'netCheck.results.tcp',
+          status: 'success',
+          summary: `${target.tcpHost}:${target.tcpPort}, ${tcp.value} ms`,
+          durationMs: tcp.durationMs,
         })
       } catch (error) {
-        dnsItems.push({
-          id: 'dns-query',
-          title: 'netCheck.results.dnsQuery',
+        if (isCancelled()) return
+        overviewItems.push({
+          id: 'tcp',
+          title: 'netCheck.results.tcp',
           status: 'failed',
-          summary: 'netCheck.summary.dnsFailed',
+          summary: 'netCheck.summary.tcpFailed',
           detail: normalizeErrorMessage(error),
         })
       }
-    }
-    syncGroups()
+      syncGroups(1)
 
-    if (!coreAvailable || !deps.getPrimaryOutboundState) {
-      outboundItems.push(
-        createSkippedItem(
-          'primary-outbound',
-          'netCheck.results.outboundDelay',
-          'netCheck.summary.outboundUnavailable',
-        ),
-      )
-    } else {
-      try {
-        const outbound = await deps.getPrimaryOutboundState()
-        testedLeaf = outbound?.leafName
-        if (!outbound) {
-          outboundItems.push(
-            createSkippedItem(
-              'primary-outbound',
-              'netCheck.results.outboundDelay',
-              'netCheck.summary.outboundUnavailable',
-            ),
+      if (target.targetKind === 'ip') {
+        dnsItems.push(
+          createSkippedItem('dns-query', 'netCheck.results.dnsQuery', 'netCheck.summary.ipTarget'),
+        )
+      } else if (!coreAvailable || !deps.dnsQuery) {
+        dnsItems.push(
+          createSkippedItem(
+            'dns-query',
+            'netCheck.results.dnsQuery',
+            'netCheck.summary.dnsUnavailable',
+          ),
+        )
+      } else {
+        try {
+          const dnsMeasured = await measure(() => deps.dnsQuery!(target.dnsLookupHost))
+          if (isCancelled()) return
+          const dns = dnsMeasured.value
+          const answers = normalizeDnsAnswers(dns)
+          resolvedIP = answers.find(
+            (answer) =>
+              /^(?:\d{1,3}\.){3}\d{1,3}$/.test(answer) || /^[0-9a-f:]*:[0-9a-f:]+$/i.test(answer),
           )
-        } else if (outbound.mode === 'unavailable') {
+          const status = dns.status ?? dns.Status ?? 0
+          const server = dns.server ?? dns.Server
+          const detailParts = [
+            server || undefined,
+            answers.length > 1 ? answers.join(', ') : undefined,
+          ].filter(Boolean)
+          dnsItems.push({
+            id: 'dns-query',
+            title: 'netCheck.results.dnsQuery',
+            status: status === 0 ? 'success' : 'failed',
+            summary:
+              answers[0] || (status === 0 ? 'diagnostics.noAnswer' : `status ${status}`),
+            detail: detailParts.length ? detailParts.join(' · ') : undefined,
+            durationMs: dnsMeasured.durationMs,
+          })
+        } catch (error) {
+          if (isCancelled()) return
+          dnsItems.push({
+            id: 'dns-query',
+            title: 'netCheck.results.dnsQuery',
+            status: 'failed',
+            summary: 'netCheck.summary.dnsFailed',
+            detail: normalizeErrorMessage(error),
+          })
+        }
+      }
+      syncGroups(2)
+
+      if (!coreAvailable || !deps.getPrimaryOutboundState) {
+        outboundItems.push(
+          createSkippedItem(
+            'primary-outbound',
+            'netCheck.results.outboundDelay',
+            'netCheck.summary.outboundUnavailable',
+          ),
+        )
+      } else {
+        try {
+          const outbound = await deps.getPrimaryOutboundState()
+          if (isCancelled()) return
+          testedLeaf = outbound?.leafName
+          if (!outbound) {
+            outboundItems.push(
+              createSkippedItem(
+                'primary-outbound',
+                'netCheck.results.outboundDelay',
+                'netCheck.summary.outboundUnavailable',
+              ),
+            )
+          } else if (outbound.mode === 'unavailable') {
+            outboundItems.push({
+              id: 'primary-outbound',
+              title: 'netCheck.results.outboundDelay',
+              status: 'failed',
+              summary: 'netCheck.summary.outboundUnavailable',
+            })
+          } else {
+            const chain = outbound.chain?.filter(Boolean).join(' -> ')
+            outboundItems.push({
+              id: 'primary-outbound',
+              title: 'netCheck.results.outboundDelay',
+              status: 'success',
+              summary:
+                chain || outbound.leafName || outbound.groupName || 'netCheck.summary.outboundReady',
+              detail: typeof outbound.delay === 'number' ? `${outbound.delay} ms` : outbound.mode,
+            })
+          }
+        } catch (error) {
+          if (isCancelled()) return
           outboundItems.push({
             id: 'primary-outbound',
             title: 'netCheck.results.outboundDelay',
             status: 'failed',
-            summary: 'netCheck.summary.outboundUnavailable',
+            summary: 'netCheck.summary.outboundFailed',
+            detail: normalizeErrorMessage(error),
           })
-        } else {
-          const chain = outbound.chain?.filter(Boolean).join(' -> ')
+        }
+      }
+      syncGroups(2)
+
+      outboundItems.push({
+        id: 'rule-match',
+        title: 'diagnostics.observedConnection',
+        status: observationError ? 'failed' : match ? 'success' : 'skipped',
+        summary: observationError
+          ? 'netCheck.summary.ruleMatchFailed'
+          : match
+            ? `${match.host || target.displayHost}:${match.port ?? target.tcpPort}`
+            : 'diagnostics.noConnection',
+        detail: observationError
+          ? normalizeErrorMessage(observationError)
+          : [match?.rule, match?.chains?.join(' → ')].filter(Boolean).join(' | '),
+      })
+      if (coreAvailable && deps.queryRoute) {
+        try {
+          const route = await deps.queryRoute(target, resolvedIP)
+          if (isCancelled()) return
           outboundItems.push({
-            id: 'primary-outbound',
-            title: 'netCheck.results.outboundDelay',
-            status: 'success',
-            summary: chain || outbound.leafName || outbound.groupName || 'netCheck.summary.outboundReady',
-            detail: typeof outbound.delay === 'number' ? `${outbound.delay} ms` : outbound.mode,
+            id: 'route-query',
+            title: 'diagnostics.routeQuery',
+            status: route ? 'success' : 'skipped',
+            summary: route || 'diagnostics.queryUnsupported',
+            detail: route ? 'diagnostics.routeInputs' : undefined,
+          })
+        } catch (error) {
+          if (isCancelled()) return
+          outboundItems.push({
+            id: 'route-query',
+            title: 'diagnostics.routeQuery',
+            status: 'failed',
+            summary: 'netCheck.summary.ruleMatchFailed',
+            detail: normalizeErrorMessage(error),
           })
         }
-      } catch (error) {
-        outboundItems.push({
-          id: 'primary-outbound',
-          title: 'netCheck.results.outboundDelay',
-          status: 'failed',
-          summary: 'netCheck.summary.outboundFailed',
-          detail: normalizeErrorMessage(error),
-        })
       }
-    }
-    syncGroups()
+      syncGroups(3)
 
-    outboundItems.push({
-      id: 'rule-match',
-      title: 'diagnostics.observedConnection',
-      status: observationError ? 'failed' : match ? 'success' : 'skipped',
-      summary: observationError ? 'netCheck.summary.ruleMatchFailed'
-        : match ? `${match.host || target.displayHost}:${match.port ?? target.tcpPort}`
-          : 'diagnostics.noConnection',
-      detail: observationError ? normalizeErrorMessage(observationError)
-        : [match?.rule, match?.chains?.join(' → ')].filter(Boolean).join(' | '),
-    })
-    if (coreAvailable && deps.queryRoute) {
-      try {
-        const route = await deps.queryRoute(target, resolvedIP)
-        outboundItems.push({
-          id: 'route-query', title: 'diagnostics.routeQuery',
-          status: route ? 'success' : 'skipped',
-          summary: route || 'diagnostics.queryUnsupported',
-          detail: route ? 'diagnostics.routeInputs' : undefined,
-        })
-      } catch (error) {
-        outboundItems.push({
-          id: 'route-query', title: 'diagnostics.routeQuery', status: 'failed',
-          summary: 'netCheck.summary.ruleMatchFailed', detail: normalizeErrorMessage(error),
-        })
-      }
-    }
-    syncGroups()
-
-    if (!deps.getRulesetStates) {
-      rulesetItems.push(
-        createSkippedItem(
-          'rulesets',
-          'netCheck.results.rulesetItem',
-          'netCheck.summary.rulesetsUnavailable',
-        ),
-      )
-    } else {
-      try {
-        const states = await deps.getRulesetStates(coreAvailable)
-        if (states.length === 0) {
-          rulesetItems.push(
-            createSkippedItem('rulesets', 'netCheck.results.rulesetItem', 'netCheck.summary.noRulesets'),
-          )
-        } else {
-          rulesetItems.push(
-            ...states.map((item) => ({
-              id: item.id,
-              title: item.title,
-              status: item.status,
-              summary: item.summary,
-              detail: item.detail,
-            })),
-          )
+      if (!deps.getRulesetStates) {
+        rulesetItems.push(
+          createSkippedItem(
+            'rulesets',
+            'netCheck.results.rulesetItem',
+            'netCheck.summary.rulesetsUnavailable',
+          ),
+        )
+      } else {
+        try {
+          const states = await deps.getRulesetStates(coreAvailable)
+          if (isCancelled()) return
+          if (states.length === 0) {
+            rulesetItems.push(
+              createSkippedItem(
+                'rulesets',
+                'netCheck.results.rulesetItem',
+                'netCheck.summary.noRulesets',
+              ),
+            )
+          } else {
+            rulesetItems.push(
+              ...states.map((item) => ({
+                id: item.id,
+                title: item.title,
+                status: item.status,
+                summary: item.summary,
+                detail: item.detail,
+              })),
+            )
+          }
+        } catch (error) {
+          if (isCancelled()) return
+          rulesetItems.push({
+            id: 'rulesets',
+            title: 'netCheck.results.rulesetItem',
+            status: 'failed',
+            summary: 'netCheck.summary.rulesetsFailed',
+            detail: normalizeErrorMessage(error),
+          })
         }
-      } catch (error) {
-        rulesetItems.push({
-          id: 'rulesets',
-          title: 'netCheck.results.rulesetItem',
-          status: 'failed',
-          summary: 'netCheck.summary.rulesetsFailed',
-          detail: normalizeErrorMessage(error),
-        })
+      }
+      syncGroups(4)
+      return testedLeaf
+    } finally {
+      if (myToken === runToken) {
+        running.value = false
       }
     }
-    syncGroups()
-    running.value = false
-    return testedLeaf
   }
 
   return {
@@ -484,6 +546,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     groups,
     results,
     clear,
+    cancel,
     run,
   }
 }

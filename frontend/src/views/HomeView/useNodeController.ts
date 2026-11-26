@@ -454,7 +454,7 @@ export const useNodeController = (
         Object.assign(progress, {
           cancelled: summary.cancelled,
           total: summary.total,
-          completed: summary.completed,
+          completed: summary.cancelled ? summary.success + summary.failure : summary.completed,
           success: summary.success,
           failure: summary.failure,
         })

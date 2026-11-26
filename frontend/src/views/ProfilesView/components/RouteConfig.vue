@@ -1,6 +1,7 @@
 <script lang="ts" setup>
-import { computed, ref, nextTick, useTemplateRef } from 'vue'
+import { computed, ref, nextTick, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 
 import { useNodeGroupsStore } from '@/stores'
 import { ensureNodeGroupOutlet, message, type NodeGroupOutletBehavior } from '@/utils'
@@ -24,7 +25,17 @@ const primaryProxyOutbound = defineModel<string | undefined>('primaryProxyOutbou
   default: '',
 })
 
-const activeKey = ref('policy')
+const route = useRoute()
+const validTabs = new Set(['policy', 'common', 'rule_set', 'rules'])
+const resolveQueryTab = (value: unknown) =>
+  typeof value === 'string' && validTabs.has(value) ? value : 'policy'
+const activeKey = ref(resolveQueryTab(route.query.tab))
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (typeof tab === 'string' && validTabs.has(tab)) activeKey.value = tab
+  },
+)
 const rulesConfigRef = useTemplateRef('rulesConfigRef')
 const rulesetConfigRef = useTemplateRef('rulesetConfigRef')
 const tabs = [
@@ -100,6 +111,7 @@ const resetTarget = () => {
         v-model:primary-proxy-outbound="primaryProxyOutbound"
         :route="model"
         :outbounds="outbounds"
+        :inbound-options="inboundOptions"
         :dns="dns"
         @edit-outbound="emit('editOutbound', $event)"
         @edit-rule="editRule"

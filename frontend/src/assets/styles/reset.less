@@ -9,6 +9,7 @@ button,
 textarea,
 select {
   font-family: inherit;
+  font-size: inherit;
 }
 
 a {
@@ -22,6 +23,13 @@ a {
 ::view-transition-new(root) {
   mix-blend-mode: normal;
   animation: clip 0.5s ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
 }
 
 ::-webkit-scrollbar {

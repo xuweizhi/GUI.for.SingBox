@@ -52,6 +52,27 @@ const handleAdd = () => {
 defineExpose({ handleAdd })
 
 const handleAddEnd = () => {
+  if (fields.value.type !== RuleType.InsertionPoint) {
+    if (!fields.value.payload.trim()) {
+      message.warn('workspace.required')
+      return false
+    }
+    if (fields.value.type === RuleType.Inline && !isValidJson(fields.value.payload)) {
+      message.error('kernel.route.rules.invalid')
+      return false
+    }
+  }
+  if (fields.value.action === RuleAction.Route && !fields.value.server) {
+    message.warn('workspace.required')
+    return false
+  }
+  if (
+    [RuleAction.RouteOptions, RuleAction.Predefined].includes(fields.value.action as any) &&
+    !isValidJson(fields.value.server)
+  ) {
+    message.error('kernel.route.rules.invalid')
+    return false
+  }
   if (ruleId !== -1) {
     model.value[ruleId] = fields.value
   } else {
@@ -375,13 +396,13 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
           :title="ruleset.tag"
           :selected="isRulesetSelected(ruleset.id)"
           interactive
-          class="text-12 line-clamp-1"
+          class="text-12"
           @click="handleUse(ruleset)"
         >
-          <span class="text-muted">
+          <div class="text-muted line-clamp-1">
             {{ ruleset.type }}
             {{ ruleset.type === RulesetType.Inline ? RulesetFormat.Source : ruleset.format }}
-          </span>
+          </div>
         </Card>
       </div>
     </template>

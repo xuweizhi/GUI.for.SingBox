@@ -5,7 +5,6 @@ import { useI18n, I18nT } from 'vue-i18n'
 
 import { DraggableOptions } from '@/constant/app'
 import { EmptyRuleSet } from '@/constant/kernel'
-import { DefaultRouteRule, DefaultRouteRuleset } from '@/constant/profile'
 import { View } from '@/enums/app'
 import { RulesetFormat, RulesetType, RuleType } from '@/enums/kernel'
 import { useRulesetsStore, useAppSettingsStore, useProfilesStore } from '@/stores'
@@ -16,11 +15,11 @@ import {
   ignoredError,
   formatDate,
   message,
-  picker,
   deepClone,
   modal,
 } from '@/utils'
 import { removeUnusedResourceCache } from '@/utils/configPersistence'
+import { addRulesetToProfile } from '@/utils/profileRuleset'
 
 import ResourceActions from '@/components/_common/ResourceActions.vue'
 import ResourcePageShell from '@/components/_common/ResourcePageShell.vue'
@@ -147,7 +146,37 @@ const handleDeleteRuleset = async (r: App.RuleSet) => {
   }
 
   try {
+    const affectedProfiles = usedBy(r.id)
     await rulesetsStore.deleteRuleset(r.id)
+    for (const profile of affectedProfiles) {
+      const nextProfile = deepClone(profile)
+      const removedIds = new Set(
+        nextProfile.route.rule_set
+          .filter((item) => item.type === RulesetType.Local && item.path === r.id)
+          .map((item) => item.id),
+      )
+      if (!removedIds.size) continue
+      nextProfile.route.rule_set = nextProfile.route.rule_set.filter(
+        (item) => !removedIds.has(item.id),
+      )
+      const stripRulesetRefs = <T extends { type: string; payload: string; enable: boolean }>(
+        rules: T[],
+      ) => {
+        for (const rule of rules) {
+          if (rule.type !== RuleType.RuleSet) continue
+          const remaining = rule.payload
+            .split(',')
+            .filter((entry) => entry && !removedIds.has(entry))
+          if (remaining.join(',') !== rule.payload) {
+            rule.payload = remaining.join(',')
+            if (!rule.payload) rule.enable = false
+          }
+        }
+      }
+      stripRulesetRefs(nextProfile.route.rules)
+      stripRulesetRefs(nextProfile.dns.rules)
+      await profilesStore.editProfile(nextProfile.id, nextProfile)
+    }
     await ignoredError(removeUnusedResourceCache, r, rulesetsStore.rulesets)
     message.success('common.success')
   } catch (error: any) {
@@ -194,70 +223,12 @@ const handleAddRulesetToProfile = async (id: string) => {
   if (!ruleset) return
 
   try {
-    const selected = await picker
-      .resource('profile', 'profiles.select', { max: 1, min: 1 })
-      .catch(() => undefined)
-    const profile = selected?.items[0]
-    if (!profile) return
-
-    const insertionPointIndex = profile.route.rules.findIndex(
-      (rule) => rule.type === RuleType.InsertionPoint,
-    )
-
-    if (insertionPointIndex === -1) {
-      message.warn('kernel.missingInsertionPoint')
-      return
-    }
-
-    const profileRuleset = profile.route.rule_set.find(
-      (item) => item.type === RulesetType.Local && item.path === ruleset.id,
-    )
-    if (
-      profileRuleset &&
-      profile.route.rules.some(
-        (rule) =>
-          rule.type === RuleType.RuleSet && rule.payload.split(',').includes(profileRuleset.id),
-      )
-    ) {
-      message.info('common.added')
-      return
-    }
-
-    const outboundOptions = profile.outbounds.map((outbound) => ({
-      label: outbound.tag,
-      value: outbound.id,
-      description: outbound.type,
-    }))
-    if (!outboundOptions.length) {
-      message.warn('kernel.route.rules.invalid')
-      return
-    }
-    const target = await picker
-      .single('kernel.route.rules.outbound', outboundOptions, [outboundOptions[0]!.value])
-      .catch(() => undefined)
-    if (!target) return
-
-    const nextProfile = deepClone(profile)
-    let rulesetReferenceId = profileRuleset?.id
-    if (!rulesetReferenceId) {
-      const rulesetReference = {
-        ...DefaultRouteRuleset(),
-        tag: ruleset.name,
-        format: ruleset.format,
-        path: ruleset.id,
-      }
-      nextProfile.route.rule_set.unshift(rulesetReference)
-      rulesetReferenceId = rulesetReference.id
-    }
-
-    nextProfile.route.rules.splice(insertionPointIndex + 1, 0, {
-      ...DefaultRouteRule(),
-      payload: rulesetReferenceId,
-      outbound: target,
+    await addRulesetToProfile({
+      kind: 'local',
+      id: ruleset.id,
+      name: ruleset.name,
+      format: ruleset.format,
     })
-
-    await profilesStore.editProfile(nextProfile.id, nextProfile)
-    message.success('common.success')
   } catch (error) {
     message.error(error)
   }
@@ -276,7 +247,7 @@ const generateMenus = (r: App.RuleSet) => {
   return [
     {
       label: 'common.update',
-      disabled: r.disabled || r.updating,
+      disabled: r.disabled || r.updating || updatingAll.value,
       handler: () => handleUpdateRuleset(r),
     },
     ...actions,
@@ -290,8 +261,14 @@ const generateMenus = (r: App.RuleSet) => {
 }
 
 const noUpdateNeeded = computed(() => rulesetsStore.rulesets.every((v) => v.disabled))
+const anyUpdating = computed(
+  () => updatingAll.value || rulesetsStore.rulesets.some((item) => item.updating),
+)
 
-const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
+const onSortUpdate = debounce(
+  () => rulesetsStore.saveRulesets().catch((error) => message.error(error)),
+  1000,
+)
 </script>
 
 <template>
@@ -324,7 +301,7 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
       {{ t('rulesets.hub') }}
     </Button>
     <Button
-      :disabled="noUpdateNeeded"
+      :disabled="noUpdateNeeded || anyUpdating"
       :type="noUpdateNeeded ? 'text' : 'link'"
       :loading="updatingAll"
       @click="handleUpdateRulesets"
@@ -383,9 +360,19 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
         </div>
       </div>
 
+      <div v-if="usedBy(r.id).length" class="flex flex-wrap items-center gap-6 mt-8 text-12">
+        <span class="text-muted">{{ t('nodeGroups.dependencies') }}</span>
+        <RouterLink
+          v-for="p in usedBy(r.id)"
+          :key="p.id"
+          :to="{ name: 'EditProfile', params: { id: p.id }, query: { step: 4, tab: 'rule_set' } }"
+          ><Tag size="small">{{ p.name }}</Tag></RouterLink
+        >
+      </div>
+
       <div class="resource-card-footer">
         <Button
-          :disabled="r.disabled"
+          :disabled="r.disabled || updatingAll"
           :loading="r.updating"
           type="normal"
           size="small"
@@ -405,15 +392,9 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
         <Button v-else type="text" size="small" @click="handleAddRulesetToProfile(r.id)">
           {{ t('rulesets.addToProfile') }}
         </Button>
-      </div>
-      <div v-if="usedBy(r.id).length" class="flex flex-wrap gap-6 mt-8">
-        <span class="text-muted">{{ t('nodeGroups.dependencies') }}</span>
-        <RouterLink
-          v-for="p in usedBy(r.id)"
-          :key="p.id"
-          :to="{ name: 'EditProfile', params: { id: p.id }, query: { step: 4 } }"
-          ><Tag size="small">{{ p.name }}</Tag></RouterLink
-        >
+        <Button type="text" size="small" class="ml-auto" @click="handleShowRulesetForm(r.id, true)">
+          {{ t('common.edit') }}
+        </Button>
       </div>
     </Card>
   </VueDraggable>

@@ -70,5 +70,8 @@ watch(
     </div>
   </SplashView>
   <AppShell v-else />
-  <GlobalOverlays :loading="loading" />
+  <GlobalOverlays
+    :loading="loading"
+    :authenticated="authStore.status === 'authenticated' && !route.meta.public"
+  />
 </template>

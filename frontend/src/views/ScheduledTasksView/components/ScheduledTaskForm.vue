@@ -66,13 +66,27 @@ const handleSave = async () => {
       task.value.subscriptions = task.value.subscriptions.filter((id) =>
         subscribesStore.getSubscribeById(id),
       )
+      if (!task.value.subscriptions.length) {
+        return invalid('target', t('common.selectAtLeast', [1]))
+      }
       break
     case ScheduledTasksType.UpdateRuleset:
       task.value.rulesets = task.value.rulesets.filter((id) => rulesetsStore.getRulesetById(id))
+      if (!task.value.rulesets.length) {
+        return invalid('target', t('common.selectAtLeast', [1]))
+      }
       break
     case ScheduledTasksType.UpdatePlugin:
     case ScheduledTasksType.RunPlugin:
       task.value.plugins = task.value.plugins.filter((id) => pluginsStore.getPluginById(id))
+      if (!task.value.plugins.length) {
+        return invalid('target', t('common.selectAtLeast', [1]))
+      }
+      break
+    case ScheduledTasksType.RunScript:
+      if (!task.value.script.trim()) {
+        return invalid('script')
+      }
       break
   }
 
@@ -84,13 +98,14 @@ const handleSave = async () => {
     } else {
       await scheduledTasksStore.addScheduledTask(task.value)
     }
+    message.success('common.success')
     await handleSubmit()
   } catch (error: any) {
     console.error(error)
     message.error(error)
+  } finally {
+    loading.value = false
   }
-
-  loading.value = false
 }
 
 const handleUse = (list: string[], id: string) => {
@@ -136,7 +151,11 @@ const onNotificationChange = async (v: boolean) => {
       if (!(await IsNotificationAvailable())) {
         throw 'Notifications not available on this platform'
       }
-      await RequestNotificationAuthorization()
+      const granted = await RequestNotificationAuthorization()
+      if (!granted) {
+        task.value.notification = false
+        message.warn('Notification permission was not granted')
+      }
     } catch (error: any) {
       task.value.notification = false
       message.warn(error)
@@ -237,8 +256,14 @@ defineExpose({ modalSlots })
       <Switch v-model="task.notification" @change="onNotificationChange" />
     </div>
 
-    <div v-if="task.type === ScheduledTasksType.UpdateSubscription">
+    <div
+      v-if="task.type === ScheduledTasksType.UpdateSubscription"
+      :data-invalid="errorField === 'target'"
+    >
       <Divider>{{ t('scheduledtask.subscriptions') }}</Divider>
+      <small v-if="errorField === 'target'" class="field-error block mb-8" role="alert">{{
+        errorMessage
+      }}</small>
       <Empty v-if="subscribesStore.subscribes.length === 0" />
       <div class="responsive-card-grid">
         <Card
@@ -254,8 +279,14 @@ defineExpose({ modalSlots })
       </div>
     </div>
 
-    <div v-else-if="task.type === ScheduledTasksType.UpdateRuleset">
+    <div
+      v-else-if="task.type === ScheduledTasksType.UpdateRuleset"
+      :data-invalid="errorField === 'target'"
+    >
       <Divider>{{ t('scheduledtask.rulesets') }}</Divider>
+      <small v-if="errorField === 'target'" class="field-error block mb-8" role="alert">{{
+        errorMessage
+      }}</small>
       <Empty v-if="rulesetsStore.rulesets.length === 0" />
       <div class="responsive-card-grid">
         <Card
@@ -271,8 +302,14 @@ defineExpose({ modalSlots })
       </div>
     </div>
 
-    <div v-else-if="task.type === ScheduledTasksType.UpdatePlugin">
+    <div
+      v-else-if="task.type === ScheduledTasksType.UpdatePlugin"
+      :data-invalid="errorField === 'target'"
+    >
       <Divider>{{ t('scheduledtask.plugins') }}</Divider>
+      <small v-if="errorField === 'target'" class="field-error block mb-8" role="alert">{{
+        errorMessage
+      }}</small>
       <Empty v-if="pluginsStore.plugins.length === 0" />
       <div class="responsive-card-grid">
         <Card
@@ -288,8 +325,14 @@ defineExpose({ modalSlots })
       </div>
     </div>
 
-    <div v-else-if="task.type === ScheduledTasksType.RunPlugin">
+    <div
+      v-else-if="task.type === ScheduledTasksType.RunPlugin"
+      :data-invalid="errorField === 'target'"
+    >
       <Divider>{{ t('scheduledtask.plugins') }}</Divider>
+      <small v-if="errorField === 'target'" class="field-error block mb-8" role="alert">{{
+        errorMessage
+      }}</small>
       <Empty v-if="pluginsStore.plugins.length === 0" />
       <div class="responsive-card-grid">
         <Card
@@ -306,9 +349,22 @@ defineExpose({ modalSlots })
       </div>
     </div>
 
-    <div v-else-if="task.type === ScheduledTasksType.RunScript">
+    <div
+      v-else-if="task.type === ScheduledTasksType.RunScript"
+      :data-invalid="errorField === 'script'"
+    >
       <Divider>{{ t('scheduledtask.script') }}</Divider>
-      <CodeEditor v-model="task.script" editable lang="javascript" />
+      <small v-if="errorField === 'script'" class="field-error block mb-8" role="alert">{{
+        errorMessage
+      }}</small>
+      <CodeEditor v-model="task.script" editable lang="javascript" class="task-script-editor" />
     </div>
   </div>
 </template>
+
+<style scoped>
+.task-script-editor {
+  height: 280px;
+  min-height: 220px;
+}
+</style>

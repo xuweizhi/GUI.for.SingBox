@@ -62,7 +62,7 @@ const currentStyleLabel = computed(
         </div>
 
         <AppearanceControls quick />
-        <RouterLink to="/settings?tab=general" class="text-13" @click="close"
+        <RouterLink to="/settings?tab=general" class="appearance-panel__more text-13" @click="close"
           >{{ t('workspace.moreAppearance') }} →</RouterLink
         >
       </div>
@@ -131,16 +131,31 @@ const currentStyleLabel = computed(
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--font-scale, 1));
   font-weight: 700;
 }
 
 .appearance-panel__badge {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+
+.appearance-panel__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 </style>

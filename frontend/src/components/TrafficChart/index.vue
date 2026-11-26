@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch, onActivated, useTemplateRef } from 'vue'
+import { computed, onMounted, onUnmounted, ref, onActivated, useTemplateRef } from 'vue'
 
 import { formatBytes } from '@/utils'
 
@@ -12,23 +12,21 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   height: undefined,
-  padding: 64,
+  padding: 72,
   legend: () => ['upload', 'download'],
 })
 
 const MAX_HISTORY = 60
 const svgRef = useTemplateRef<SVGSVGElement>('svgRef')
-const containerRef = useTemplateRef<HTMLElement>('containerRef')
 const width = ref(320)
-const points = ref<string[]>([])
 const showLines = ref([true, true])
 const hoverIndex = ref<number | null>(null)
-const fillColors = ['rgba(136, 81, 227, 0.22)', 'rgba(46, 154, 229, 0.22)']
+const fillColors = ['rgba(139, 92, 246, 0.2)', 'rgba(14, 165, 233, 0.2)']
 let resizeObserver: ResizeObserver | undefined
 
 const strokeColors = computed(() => {
-  const upload = showLines.value[0] ? '#8851e3' : 'var(--muted-color)'
-  const download = showLines.value[1] ? '#2e9ae5' : 'var(--muted-color)'
+  const upload = showLines.value[0] ? '#8b5cf6' : 'var(--muted-color)'
+  const download = showLines.value[1] ? '#0ea5e9' : 'var(--muted-color)'
   return [upload, download]
 })
 
@@ -43,8 +41,8 @@ const normalizedSeries = computed(() =>
 )
 
 const maxValue = computed(() => {
-  const maxUpload = Math.max(...(props.series[0] || []), 1024)
-  const maxDownload = Math.max(...(props.series[1] || []), 1024)
+  const maxUpload = Math.max(...(normalizedSeries.value[0] || []), 1024)
+  const maxDownload = Math.max(...(normalizedSeries.value[1] || []), 1024)
   if (showLines.value[0] && showLines.value[1]) return Math.max(maxUpload, maxDownload)
   if (showLines.value[0]) return maxUpload
   if (showLines.value[1]) return maxDownload
@@ -55,33 +53,35 @@ const chartHeight = computed(() => props.height ?? Math.max(156, Math.min(280, w
 const plotHeight = computed(() => chartHeight.value - 20)
 const plotTop = 10
 const plotBottom = computed(() => chartHeight.value - 10)
-const spacing = computed(() => Math.max(1, (width.value - props.padding - 8) / (MAX_HISTORY - 1)))
+const rightPad = 6
+const spacing = computed(() =>
+  Math.max(1, (width.value - props.padding - rightPad) / (MAX_HISTORY - 1)),
+)
 
 const updateSvgWidth = () => {
-  const el = containerRef.value || svgRef.value
-  if (el && el.clientWidth > 0) {
-    width.value = el.clientWidth
-    updateChart()
-  }
+  const el = svgRef.value
+  if (!el) return
+  const nextWidth = Math.floor(el.getBoundingClientRect().width || el.clientWidth)
+  if (nextWidth > 0) width.value = nextWidth
 }
 
-const updateChart = () => {
+const seriesGeometry = computed(() => {
   const { padding } = props
   const h = plotHeight.value
-  points.value = normalizedSeries.value.map((newS, index) => {
-    if (!showLines.value[index]) return ''
-    const point = newS
+  const endX = Math.round((MAX_HISTORY - 1) * spacing.value + padding)
+  return normalizedSeries.value.map((newS, index) => {
+    if (!showLines.value[index]) return { line: '', area: '' }
+    const line = newS
       .map((c, i) => {
         const x = Math.round(i * spacing.value + padding)
         const y = Math.round(plotTop + h - (c / maxValue.value) * h)
         return `${x},${y}`
       })
       .join(' ')
-    const startPos = `${padding},${plotBottom.value}`
-    const endPos = `${Math.round((MAX_HISTORY - 1) * spacing.value + padding)},${plotBottom.value}`
-    return `${startPos} ${point} ${endPos}`
+    const area = `${padding},${plotBottom.value} ${line} ${endX},${plotBottom.value}`
+    return { line, area }
   })
-}
+})
 
 const hoveredData = computed(() => {
   if (hoverIndex.value === null) return null
@@ -92,7 +92,7 @@ const hoveredData = computed(() => {
   return { idx, up, down, x }
 })
 
-const onMouseMove = (event: MouseEvent) => {
+const onPointerMove = (event: PointerEvent) => {
   if (!svgRef.value) return
   const rect = svgRef.value.getBoundingClientRect()
   const relX = event.clientX - rect.left - props.padding
@@ -104,18 +104,16 @@ const onMouseMove = (event: MouseEvent) => {
   hoverIndex.value = Math.max(0, Math.min(MAX_HISTORY - 1, idx))
 }
 
-const onMouseLeave = () => {
+const onPointerLeave = () => {
   hoverIndex.value = null
 }
 
 const toggleUpload = () => {
   showLines.value[0] = !showLines.value[0]
-  updateChart()
 }
 
 const toggleDownload = () => {
   showLines.value[1] = !showLines.value[1]
-  updateChart()
 }
 
 const yTicks = computed(() => {
@@ -131,9 +129,9 @@ const yTicks = computed(() => {
 
 onMounted(() => {
   updateSvgWidth()
-  if (typeof ResizeObserver !== 'undefined' && containerRef.value) {
+  if (typeof ResizeObserver !== 'undefined' && svgRef.value) {
     resizeObserver = new ResizeObserver(updateSvgWidth)
-    resizeObserver.observe(containerRef.value)
+    resizeObserver.observe(svgRef.value)
   } else {
     window.addEventListener('resize', updateSvgWidth)
   }
@@ -145,18 +143,17 @@ onUnmounted(() => {
 })
 
 onActivated(updateSvgWidth)
-
-watch(() => props.series, updateChart, { deep: true })
 </script>
 
 <template>
-  <div ref="containerRef" class="gui-traffic-chart rounded-12 p-12 relative">
-    <div class="flex flex-wrap items-center justify-between gap-8 mb-8 text-12">
+  <div class="gui-traffic-chart rounded-12 p-12 relative">
+    <div class="traffic-chart__header flex flex-wrap items-center justify-between gap-8 mb-8 text-12">
       <div class="flex items-center gap-12">
         <button
           type="button"
           class="traffic-legend-btn"
           :class="{ 'is-off': !showLines[0] }"
+          :aria-pressed="showLines[0]"
           @click="toggleUpload"
         >
           <span class="traffic-legend-dot" :style="{ background: strokeColors[0] }"></span>
@@ -166,25 +163,32 @@ watch(() => props.series, updateChart, { deep: true })
           type="button"
           class="traffic-legend-btn"
           :class="{ 'is-off': !showLines[1] }"
+          :aria-pressed="showLines[1]"
           @click="toggleDownload"
         >
           <span class="traffic-legend-dot" :style="{ background: strokeColors[1] }"></span>
           <span>{{ legend[1] }}</span>
         </button>
       </div>
-      <div v-if="hoveredData" class="traffic-chart__readout flex items-center gap-12 font-mono">
-        <span style="color: #8851e3">↑ {{ formatBytes(hoveredData.up) }}/s</span>
-        <span style="color: #2e9ae5">↓ {{ formatBytes(hoveredData.down) }}/s</span>
+      <div
+        class="traffic-chart__readout flex items-center gap-12 font-mono"
+        :style="{ visibility: hoveredData ? 'visible' : 'hidden' }"
+      >
+        <span class="traffic-readout--upload">↑ {{ formatBytes(hoveredData?.up ?? 0) }}/s</span>
+        <span class="traffic-readout--download">↓ {{ formatBytes(hoveredData?.down ?? 0) }}/s</span>
       </div>
     </div>
 
     <svg
       ref="svgRef"
+      role="img"
+      :aria-label="legend.join(' / ')"
       :height="chartHeight"
       width="100%"
+      class="block"
       xmlns="http://www.w3.org/2000/svg"
-      @mousemove="onMouseMove"
-      @mouseleave="onMouseLeave"
+      @pointermove="onPointerMove"
+      @pointerleave="onPointerLeave"
     >
       <template v-for="(tick, idx) in yTicks" :key="idx">
         <text :y="tick.y + 4" class="traffic-chart__axis-label" x="2" fill="var(--muted-color)">
@@ -192,7 +196,7 @@ watch(() => props.series, updateChart, { deep: true })
         </text>
         <line
           :y1="tick.y"
-          :x2="width - 4"
+          :x2="Math.max(padding, width - rightPad)"
           :y2="tick.y"
           :x1="padding"
           class="traffic-chart__grid-line"
@@ -202,16 +206,22 @@ watch(() => props.series, updateChart, { deep: true })
         />
       </template>
 
-      <template v-for="(point, index) in points">
-        <polyline
-          v-if="showLines[index] && point"
-          :key="index"
-          :points="point"
-          :stroke="strokeColors[index]"
+      <template v-for="(geom, index) in seriesGeometry" :key="index">
+        <polygon
+          v-if="showLines[index] && geom.area"
+          :points="geom.area"
           :fill="fillColors[index]"
+          stroke="none"
+        />
+        <polyline
+          v-if="showLines[index] && geom.line"
+          :points="geom.line"
+          :stroke="strokeColors[index]"
+          fill="none"
           :class="index === 0 ? 'traffic-chart__series--upload' : 'traffic-chart__series--download'"
           stroke-width="2"
           stroke-linejoin="round"
+          stroke-linecap="round"
         />
       </template>
 
@@ -235,8 +245,12 @@ watch(() => props.series, updateChart, { deep: true })
   border: 1px solid var(--surface-border);
 }
 
+.traffic-chart__header {
+  min-height: 24px;
+}
+
 .traffic-chart__axis-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 
 .traffic-legend-btn {
@@ -270,7 +284,21 @@ watch(() => props.series, updateChart, { deep: true })
 }
 
 .traffic-chart__readout {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
+}
+
+.traffic-readout--upload {
+  color: #a78bfa;
+}
+:global(body[theme-mode='light']) .traffic-readout--upload {
+  color: #7c3aed;
+}
+
+.traffic-readout--download {
+  color: #38bdf8;
+}
+:global(body[theme-mode='light']) .traffic-readout--download {
+  color: #0284c7;
 }
 </style>

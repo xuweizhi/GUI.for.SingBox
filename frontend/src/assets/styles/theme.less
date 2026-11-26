@@ -1,11 +1,9 @@
-:root {
-  body[theme-mode='light'] {
-    .set-theme(light);
-  }
+body[theme-mode='light'] {
+  .set-theme(light);
+}
 
-  body[theme-mode='dark'] {
-    .set-theme(dark);
-  }
+body[theme-mode='dark'] {
+  .set-theme(dark);
 }
 
 .set-theme(@theme) {
@@ -15,6 +13,15 @@
   --muted-color: ~'var(--muted-color-@{theme})';
   --accent-text: ~'var(--accent-text-@{theme})';
   --accent-soft: color-mix(in srgb, var(--primary-color) 12%, var(--card-bg));
+
+  // Default surface fallbacks evaluated in body scope
+  --surface-bg: var(--card-bg);
+  --surface-hover-bg: var(--card-hover-bg);
+  --surface-active-bg: var(--card-active-bg);
+  --surface-chrome-bg: var(--card-bg);
+  --surface-elevated-bg: var(--modal-bg);
+  --surface-border: var(--border-color);
+  --card-selected-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-text) 32%, transparent);
 
   // Semantic Status
   --danger-color: ~'var(--danger-color-@{theme})';

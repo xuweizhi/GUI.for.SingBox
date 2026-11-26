@@ -150,7 +150,7 @@ body {
 
 .responsive-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
   gap: 8px;
 }
 
@@ -275,7 +275,8 @@ button,
   user-select: none;
 }
 .app-page,
-.gui-modal-content {
+.gui-modal-content,
+.gui-tabs-content {
   container-type: inline-size;
 }
 .surface-card,
@@ -341,6 +342,12 @@ body {
   .resource-form .form-item {
     grid-template-columns: minmax(0, 1fr);
   }
+  .resource-form .form-item:has(> .gui-switch) {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
 }
 
 /* Shared settings rows: usable both on the settings page and inside
@@ -404,26 +411,19 @@ body {
 
 /* Avoid doubling the vertical padding when a titleless card is used only as
    a container for `.settings-row` entries or compact single-line lists. */
-.gui-card__body:not(.has-title):has(> .settings-row) {
+.gui-card > .gui-card__body:not(.has-title):has(> .settings-row) {
   padding-block: 0;
 }
-.gui-card__body:not(.has-title) > .settings-row:first-child {
-  padding-top: 0;
+.gui-card > .gui-card__body:not(.has-title) > .settings-row:first-child {
+  padding-top: var(--card-pad-y, 14px);
 }
-.gui-card__body:not(.has-title) > .settings-row:last-child {
-  padding-bottom: 0;
+.gui-card > .gui-card__body:not(.has-title) > .settings-row:last-child {
+  padding-bottom: var(--card-pad-y, 14px);
 }
 
-body[ui-style='glass']
-  :is(
-    .gui-card,
-    .gui-table,
-    .group-header,
-    .gui-menu,
-    .node-card,
-    .console-tabs,
-    .gui-dropdown-overlay
-  ) {
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+mark {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-radius: 3px;
+  padding: 0 2px;
 }

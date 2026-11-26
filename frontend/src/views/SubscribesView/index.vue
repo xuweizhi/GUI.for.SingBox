@@ -47,17 +47,26 @@ const menuList: App.Menu[] = [
   {
     label: 'subscribes.copySub',
     handler: async (id: string) => {
-      const sub = subscribeStore.getSubscribeById(id)!
-      if (sub) {
-        await ClipboardSetText(sub.url)
+      const sub = subscribeStore.getSubscribeById(id)
+      if (!sub) return
+      try {
+        const ok = await ClipboardSetText(sub.url)
+        if (!ok) throw 'ClipboardSetText Error'
         message.success('common.copied')
+      } catch (error: any) {
+        message.error(error?.message || error)
       }
     },
   },
   {
     label: 'subscribes.script',
     handler: async (id: string) => {
-      const m = modal({ title: 'common.edit', width: '90' })
+      const sub = subscribeStore.getSubscribeById(id)
+      const m = modal({
+        title: sub ? `${sub.name} · ${t('subscribes.script')}` : 'subscribes.script',
+        width: '90',
+        height: '90',
+      })
       m.setContent(SubscribeScript, { id }).open()
     },
   },
@@ -127,7 +136,7 @@ const generateMenus = (subscription: App.Subscription) => {
       ...v,
       disabled:
         v.label === 'settings.requestProxy.name'
-          ? subscription.disabled || subscription.updating
+          ? subscription.disabled || subscription.updating || updatingAll.value
           : v.disabled,
       handler: () => v.handler?.(subscription.id),
       children: v.children?.map((child) => ({
@@ -175,7 +184,7 @@ const generateMenus = (subscription: App.Subscription) => {
   return [
     {
       label: 'common.update',
-      disabled: subscription.disabled || subscription.updating,
+      disabled: subscription.disabled || subscription.updating || updatingAll.value,
       handler: () => handleUpdateSub(subscription),
     },
     ...builtInMenus,
@@ -290,6 +299,9 @@ const handleDisableSub = async (s: App.Subscription) => {
 }
 
 const noUpdateNeeded = computed(() => subscribeStore.subscribes.every((v) => v.disabled))
+const anyUpdating = computed(
+  () => updatingAll.value || subscribeStore.subscribes.some((item) => item.updating),
+)
 
 const usageKnown = (s: App.Subscription, field: 'upload' | 'download' | 'total') =>
   s[field] > 0 || !!s.usageFields?.includes(field)
@@ -304,7 +316,10 @@ const clacTrafficStatus = (s: App.Subscription) => {
   return 'primary'
 }
 
-const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
+const onSortUpdate = debounce(
+  () => subscribeStore.saveSubscribes().catch((error) => message.error(error)),
+  1000,
+)
 </script>
 
 <template>
@@ -324,7 +339,10 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
   </div>
 
   <template v-else>
-    <div v-if="subscribeStore.pendingReferences" class="surface-inset p-8 flex items-center gap-8">
+    <div
+      v-if="subscribeStore.pendingReferences"
+      class="surface-inset p-8 mb-8 flex flex-wrap items-center gap-8"
+    >
       {{ t('workspace.syncReferences', [subscribeStore.pendingReferences]) }}
       <Button type="link" @click="handleSyncOutboundRefs">{{
         t('subscribes.syncOutboundRefs')
@@ -342,7 +360,7 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
       <div class="subscriptions-actions">
         <CustomAction :actions="appStore.customActions.subscriptions_header" />
         <Button
-          :disabled="noUpdateNeeded"
+          :disabled="noUpdateNeeded || anyUpdating"
           :type="noUpdateNeeded ? 'text' : 'link'"
           :loading="updatingAll"
           @click="handleUpdateSubs"
@@ -378,13 +396,16 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
       </template>
 
       <template #title-suffix>
-        <Icon
+        <Button
           v-if="s.type !== 'File' && s.website"
           v-tips="'subscribe.website'"
+          type="text"
+          size="small"
           icon="link"
-          color="var(--muted-color)"
-          class="mx-4 cursor-pointer shrink-0"
-          @click="BrowserOpenURL(s.website)"
+          icon-color="var(--muted-color)"
+          :aria-label="t('subscribe.website')"
+          class="shrink-0"
+          @click.stop="BrowserOpenURL(s.website)"
         />
       </template>
 
@@ -475,9 +496,19 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         </span>
       </div>
 
+      <div v-if="usedBy(s.id).length" class="flex flex-wrap items-center gap-6 mt-8 text-12">
+        <span class="text-muted">{{ t('nodeGroups.dependencies') }}</span>
+        <RouterLink
+          v-for="p in usedBy(s.id)"
+          :key="p.id"
+          :to="{ name: 'EditProfile', params: { id: p.id }, query: { step: 3 } }"
+          ><Tag size="small">{{ p.name }}</Tag></RouterLink
+        >
+      </div>
+
       <div class="resource-card-footer">
         <Button
-          :disabled="s.disabled"
+          :disabled="s.disabled || updatingAll"
           :loading="s.updating"
           type="normal"
           size="small"
@@ -493,15 +524,6 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
           {{ t('common.edit') }}
         </Button>
       </div>
-      <div v-if="usedBy(s.id).length" class="flex flex-wrap gap-6 mt-8">
-        <span class="text-muted">{{ t('nodeGroups.dependencies') }}</span>
-        <RouterLink
-          v-for="p in usedBy(s.id)"
-          :key="p.id"
-          :to="{ name: 'EditProfile', params: { id: p.id }, query: { step: 3 } }"
-          ><Tag size="small">{{ p.name }}</Tag></RouterLink
-        >
-      </div>
     </Card>
   </VueDraggable>
 </template>
@@ -512,7 +534,7 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--muted-color);
 }
 .traffic-diagram {
@@ -525,12 +547,12 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
   padding-right: 56px;
 }
 .subscription-traffic {
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   font-weight: 600;
   margin-bottom: 10px;
 }
 .subscription-meta {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--muted-color);
   line-height: 1.8;
 }

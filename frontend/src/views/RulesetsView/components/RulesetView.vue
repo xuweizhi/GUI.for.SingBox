@@ -2,9 +2,11 @@
 import { ref, inject, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ReadFile } from '@/bridge'
+import { FileExists, ReadFile } from '@/bridge'
+import { EmptyRuleSet } from '@/constant/kernel'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { useRulesetsStore } from '@/stores'
-import { deepClone, ignoredError, message } from '@/utils'
+import { deepClone, message } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
 
@@ -15,6 +17,8 @@ interface Props {
 const props = defineProps<Props>()
 
 const loading = ref(false)
+const ready = ref(false)
+const loadError = ref('')
 const ruleset = ref<App.RuleSet>()
 const rulesetContent = ref<string>('')
 
@@ -23,9 +27,10 @@ const handleSubmit = inject('submit') as any
 
 const { t } = useI18n()
 const rulesetsStore = useRulesetsStore()
+const { resetBaseline } = useFormDraft(() => rulesetContent.value)
 
 const handleSave = async () => {
-  if (!ruleset.value) return
+  if (!ruleset.value || !ready.value || loading.value) return
   loading.value = true
   try {
     await rulesetsStore.saveLocalRuleset(ruleset.value.id, rulesetContent.value)
@@ -39,15 +44,30 @@ const handleSave = async () => {
 }
 
 const initContent = async () => {
+  loadError.value = ''
+  ready.value = false
   const r = rulesetsStore.getRulesetById(props.id)
-  if (r) {
-    ruleset.value = deepClone(r)
-    const content = (await ignoredError(ReadFile, r.path)) || ''
-    rulesetContent.value = content
+  if (!r) {
+    loadError.value = t('common.empty')
+    return
+  }
+  ruleset.value = deepClone(r)
+  try {
+    const exists = await FileExists(r.path)
+    if (!exists && r.type === 'Manual') {
+      rulesetContent.value = JSON.stringify(EmptyRuleSet, null, 2)
+    } else {
+      rulesetContent.value = await ReadFile(r.path)
+    }
+    ready.value = true
+    resetBaseline()
+  } catch (error: any) {
+    loadError.value = error?.message || String(error)
+    message.error(error)
   }
 }
 
-initContent()
+void initContent()
 
 const modalSlots = {
   cancel: () =>
@@ -65,6 +85,7 @@ const modalSlots = {
       {
         type: 'primary',
         loading: loading.value,
+        disabled: !ready.value,
         onClick: handleSave,
       },
       () => t('common.save'),
@@ -75,5 +96,14 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <CodeEditor v-model="rulesetContent" lang="json" editable class="h-full" />
+  <div ref="formRoot" class="h-full flex flex-col">
+    <CodeEditor v-if="ready" v-model="rulesetContent" lang="json" editable class="h-full" />
+    <div v-else-if="loadError" class="flex-1 flex flex-col items-center justify-center gap-12 p-16">
+      <div class="text-13 text-danger text-center break-all" role="alert">{{ loadError }}</div>
+      <Button type="primary" size="small" @click="initContent">{{ t('common.retry') }}</Button>
+    </div>
+    <div v-else class="flex-1 flex items-center justify-center">
+      <Icon icon="loading" :size="24" class="rotation" />
+    </div>
+  </div>
 </template>

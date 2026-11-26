@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { DefaultNodeGroup } from '@/constant/nodeGroup'
 import { useFormDraft } from '@/hooks/useFormDraft'
 import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
-import { deepClone, message, nodeGroupNodeKey, resolveNodeGroup } from '@/utils'
+import { confirm, deepClone, message, nodeGroupNodeKey, resolveNodeGroup } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
 
@@ -116,16 +116,44 @@ const clearMissing = () => {
   }
 }
 
+const clearMembers = async () => {
+  if (group.value.members.length === 0) return
+  try {
+    await confirm(
+      t('common.clear'),
+      t('common.confirmClear', [group.value.name || t('nodeGroups.title')]),
+      {
+        type: 'text',
+        okText: 'common.clear',
+        danger: true,
+      },
+    )
+    group.value.members = []
+  } catch {
+    return
+  }
+}
+
 const handleSave = async () => {
   if (loading.value) return
   errorField.value = ''
   if (!group.value.name.trim()) {
     return invalid('name')
   }
+  if (group.value.mode === 'filter') {
+    if (group.value.source_scope === 'selected' && group.value.subscription_ids.length === 0) {
+      return invalid('sources', t('common.selectAtLeast', [1]))
+    }
+    const invalidFilter = resolution.value.issues.find((issue) => issue.type === 'invalid-filter')
+    if (invalidFilter) {
+      return invalid('include', t('nodeGroups.issues.invalid-filter'))
+    }
+  }
   loading.value = true
   try {
     if (props.id) await nodeGroupsStore.editNodeGroup(props.id, group.value)
     else await nodeGroupsStore.addNodeGroup(group.value)
+    message.success('common.success')
     await handleSubmit()
   } catch (error: any) {
     message.error(error.message || error)
@@ -180,7 +208,9 @@ defineExpose({ modalSlots })
         />
         <div class="flex gap-6">
           <Button size="small" @click="selectFiltered">{{ t('common.selectAll') }}</Button>
-          <Button size="small" @click="group.members = []">{{ t('common.clear') }}</Button>
+          <Button size="small" :disabled="group.members.length === 0" @click="clearMembers">{{
+            t('common.clear')
+          }}</Button>
         </div>
         <Input v-model="keywords" :placeholder="t('nodeGroups.search')" clearable />
         <div class="node-member-grid grid gap-8 overflow-y-auto min-h-128">
@@ -221,14 +251,24 @@ defineExpose({ modalSlots })
           {{ t('nodeGroups.sources') }}
           <Radio v-model="group.source_scope" :options="sourceOptions" />
         </div>
-        <div v-if="group.source_scope === 'selected'" class="form-item">
-          {{ t('nodeGroups.sources') }}
-          <Select
-            v-model="group.subscription_ids"
-            :options="subscriptionOptions"
-            multiple
-            clearable
-          />
+        <div
+          v-if="group.source_scope === 'selected'"
+          class="form-item"
+          :data-invalid="errorField === 'sources'"
+        >
+          {{ t('nodeGroups.selectedSources') }}
+          <div class="w-full">
+            <Select
+              v-model="group.subscription_ids"
+              :options="subscriptionOptions"
+              multiple
+              clearable
+              auto-size
+            />
+            <small v-if="errorField === 'sources'" class="field-error" role="alert">{{
+              errorMessage
+            }}</small>
+          </div>
         </div>
         <div class="form-item">
           {{ t('nodeGroups.matchField') }}
@@ -241,9 +281,14 @@ defineExpose({ modalSlots })
             <span class="field-hint text-12 opacity-70">{{ t('nodeGroups.matchFieldHint') }}</span>
           </div>
         </div>
-        <div class="form-item">
+        <div class="form-item" :data-invalid="errorField === 'include'">
           {{ t('nodeGroups.include') }}
-          <Input v-model="group.include" placeholder="HK|Hong Kong" />
+          <div class="w-full">
+            <Input v-model="group.include" placeholder="HK|Hong Kong" class="w-full" />
+            <small v-if="errorField === 'include'" class="field-error" role="alert">{{
+              errorMessage
+            }}</small>
+          </div>
         </div>
         <div class="form-item">
           {{ t('nodeGroups.exclude') }}
@@ -321,6 +366,7 @@ defineExpose({ modalSlots })
 
 .node-member-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-height: 55vh;
 }
 .node-member {
   border: 1px solid var(--border-color);

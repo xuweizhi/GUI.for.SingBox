@@ -119,11 +119,20 @@ const handleSwitchProfile = async (profileId: string) => {
   }
 }
 
+const handleStartKernel = async () => {
+  try {
+    await kernelApiStore.startCore()
+    emit('close')
+  } catch (error: any) {
+    console.error(error)
+    message.error(error.message || error)
+  }
+}
+
 const onTunSwitchChange = async (enable: boolean) => {
   try {
     await kernelApiStore.updateConfig('tun', { enable })
   } catch (error: any) {
-    kernelApiStore.config.tun.enable = kernelApiStore.running && !enable
     console.error(error)
     message.error(error.message || error)
   }
@@ -162,9 +171,12 @@ const handleShowSettings = () => {
         :options="ModeOptions"
         @change="onModeChange"
       />
-      <Switch v-model="kernelApiStore.config.tun.enable" @change="onTunSwitchChange">{{
-        t('home.overview.tunMode')
-      }}</Switch>
+      <Switch
+        :model-value="kernelApiStore.config.tun.enable"
+        :disabled="busy"
+        @update:model-value="onTunSwitchChange"
+        >{{ t('home.overview.tunMode') }}</Switch
+      >
       <div @click="emit('close')">
         <CustomAction :actions="appStore.customActions.core_state" />
       </div>
@@ -183,8 +195,9 @@ const handleShowSettings = () => {
     <Button
       v-else
       type="primary"
+      :loading="kernelApiStore.starting"
       :disabled="busy || !profiles.currentProfile"
-      @click="kernelApiStore.startCore().catch(message.error)"
+      @click="handleStartKernel"
       >{{ t('home.overview.start') }}</Button
     >
   </div>

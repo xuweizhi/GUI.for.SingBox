@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch, nextTick, useTemplateRef } from 'vue'
+import { onUnmounted, ref, watch, nextTick, useTemplateRef } from 'vue'
 
 import { debounce } from '@/utils'
 
@@ -37,6 +37,7 @@ const updatePosition = () => {
   const overlayEl = overlayRef.value
 
   overlayEl.style.minWidth = `${triggerRect.width}px`
+  overlayEl.style.maxHeight = 'none'
 
   const overlayHeight = overlayEl.offsetHeight
   const overlayWidth = overlayEl.offsetWidth
@@ -101,7 +102,18 @@ defineExpose({ updatePosition })
 
 const onKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Escape' && show.value) {
-    e.stopPropagation()
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    close()
+    const focusTarget = domRef.value?.querySelector<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"]), a[href], input:not([disabled])',
+    )
+    focusTarget?.focus()
+  }
+}
+
+const onDomClick = (e: MouseEvent) => {
+  if (!domRef.value?.contains(e.target as Node) && !overlayRef.value?.contains(e.target as Node)) {
     close()
   }
 }
@@ -110,14 +122,19 @@ watch(show, async (isVisible) => {
   emit('update:show', isVisible)
   if (isVisible) {
     await nextTick()
+    if (!show.value) return
     updatePosition()
     window.addEventListener('scroll', updatePosition, true)
     window.addEventListener('resize', updatePosition)
     window.addEventListener('keydown', onKeydown, true)
+    if (hasTrigger('click')) {
+      document.addEventListener('click', onDomClick)
+    }
   } else {
     window.removeEventListener('scroll', updatePosition, true)
     window.removeEventListener('resize', updatePosition)
     window.removeEventListener('keydown', onKeydown, true)
+    document.removeEventListener('click', onDomClick)
   }
 })
 
@@ -148,23 +165,10 @@ const onClick = () => {
   }
 }
 
-const onDomClick = (e: MouseEvent) => {
-  if (!domRef.value?.contains(e.target as Node) && !overlayRef.value?.contains(e.target as Node)) {
-    close()
-  }
-}
-
-onMounted(() => {
-  if (hasTrigger('click')) {
-    document.addEventListener('click', onDomClick)
-  }
-})
-
 onUnmounted(() => {
   clearTimeout(hoverLeaveTimer)
-  if (hasTrigger('click')) {
-    document.removeEventListener('click', onDomClick)
-  }
+  debounceOpen.cancel()
+  document.removeEventListener('click', onDomClick)
   window.removeEventListener('scroll', updatePosition, true)
   window.removeEventListener('resize', updatePosition)
   window.removeEventListener('keydown', onKeydown, true)
@@ -183,10 +187,10 @@ onUnmounted(() => {
     <Teleport to="body">
       <Transition name="overlay">
         <div
-          v-show="show"
+          v-if="show"
           ref="overlayRef"
           :style="overlayStyle"
-          class="gui-dropdown-overlay fixed rounded-8 backdrop-blur-sm overflow-y-auto"
+          class="gui-dropdown-overlay fixed rounded-8 overflow-y-auto"
           @mouseenter="onMouseEnter"
           @mouseleave="onMouseLeave"
           @click.stop
@@ -214,14 +218,13 @@ onUnmounted(() => {
 }
 
 .gui-dropdown-overlay {
-  z-index: 10000;
+  z-index: var(--z-popover, 10000);
   max-width: calc(100vw - 16px);
   background: var(--dropdown-bg);
   border: 1px solid var(--surface-border, var(--border-color));
   border-radius: calc(var(--control-radius, 8px) + 3px);
   box-shadow: var(--dropdown-shadow);
-  backdrop-filter: blur(max(var(--surface-blur, 0px), 10px)) saturate(var(--surface-saturate, 130%));
-  -webkit-backdrop-filter: blur(max(var(--surface-blur, 0px), 10px))
-    saturate(var(--surface-saturate, 130%));
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
 }
 </style>

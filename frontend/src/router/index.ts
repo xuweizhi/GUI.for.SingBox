@@ -1,6 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 
-import { useWebuiAuthStore } from '@/stores'
+import { useAppStore, useWebuiAuthStore } from '@/stores'
 import { buildLoginRedirect, resolveRedirectTarget } from '@/utils/webuiAuth'
 
 import routes from './routes'
@@ -28,6 +28,16 @@ router.beforeEach(async (to) => {
   if (ok) return true
 
   return buildLoginRedirect(to.fullPath)
+})
+
+router.afterEach(() => {
+  try {
+    const appStore = useAppStore()
+    appStore.menuShow = false
+    appStore.tipsShow = false
+  } catch {
+    // Pinia may not be active in isolated router tests.
+  }
 })
 
 export default router

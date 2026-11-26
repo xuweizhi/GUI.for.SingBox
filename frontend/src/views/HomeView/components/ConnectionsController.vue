@@ -2,6 +2,7 @@
 import {
   ref,
   computed,
+  onActivated,
   onDeactivated,
   onUnmounted,
   watch,
@@ -117,12 +118,14 @@ const columns = computed(() => [
       {
         title: 'home.connections.processPath',
         key: 'metadata.processPath',
+        ellipsis: true,
         hidden: !appSettingsStore.app.connections.visibility['metadata.processPath'],
         sort: (a, b) => (a.metadata.processPath || '').localeCompare(b.metadata.processPath || ''),
       },
       {
         title: 'home.connections.host',
         key: 'metadata.host',
+        ellipsis: true,
         hidden: !appSettingsStore.app.connections.visibility['metadata.host'],
         sort: (a, b) =>
           (a.metadata.host || a.metadata.destinationIP || '').localeCompare(
@@ -156,6 +159,7 @@ const columns = computed(() => [
         title: 'home.connections.rule',
         align: 'center',
         key: 'rule',
+        ellipsis: true,
         hidden: !appSettingsStore.app.connections.visibility['rule'],
         sort: (a, b) => (a.rule || '').localeCompare(b.rule || ''),
         customRender: ({ value, record }) => {
@@ -165,6 +169,7 @@ const columns = computed(() => [
       {
         title: 'home.connections.chains',
         key: 'chains',
+        ellipsis: true,
         hidden: !appSettingsStore.app.connections.visibility['chains'],
         sort: (a, b) => (a.chains.at(-1) || '').localeCompare(b.chains.at(-1) || ''),
         customRender: ({ value }) => value.slice().reverse().join(' :: '),
@@ -175,8 +180,9 @@ const columns = computed(() => [
         key: 'up',
         minWidth: '90px',
         hidden: !appSettingsStore.app.connections.visibility['up'],
-        sort: (a, b) => a.upload - a.up - (b.upload - b.up),
-        customRender: ({ value, record }) => formatBytes(record.upload - value) + '/s',
+        sort: (a, b) => Math.max(0, a.upload - a.up) - Math.max(0, b.upload - b.up),
+        customRender: ({ value, record }) =>
+          formatBytes(Math.max(0, (record.upload || 0) - (value ?? record.upload ?? 0))) + '/s',
       },
       {
         title: 'home.connections.downSpeed',
@@ -184,8 +190,9 @@ const columns = computed(() => [
         key: 'down',
         minWidth: '90px',
         hidden: !appSettingsStore.app.connections.visibility['down'],
-        sort: (a, b) => a.download - a.down - (b.download - b.down),
-        customRender: ({ value, record }) => formatBytes(record.download - value) + '/s',
+        sort: (a, b) => Math.max(0, a.download - a.down) - Math.max(0, b.download - b.down),
+        customRender: ({ value, record }) =>
+          formatBytes(Math.max(0, (record.download || 0) - (value ?? record.download ?? 0))) + '/s',
       },
       {
         title: 'home.connections.upload',
@@ -255,8 +262,10 @@ const menu = computed<App.Menu[]>(() => [
 const details = ref<Record<string, any>>({})
 const isActive = ref(true)
 const keywords = ref('')
+type ClosedConnectionRecord = CoreApiConnectionsData['connections'][0] &
+  TrafficCacheType & { closedAt?: number }
 const dataSource = ref<(CoreApiConnectionsData['connections'][0] & TrafficCacheType)[]>([])
-const disconnectedData = ref<CoreApiConnectionsData['connections']>([])
+const disconnectedData = ref<ClosedConnectionRecord[]>([])
 const [showDetails, toggleDetails] = useBool(false)
 const [showSettings, toggleSettings] = useBool(false)
 const [isPause, togglePause] = useBool(false)
@@ -277,7 +286,7 @@ const detailEntries = computed(() => {
     return value ?? '-'
   }
   for (const [key, value] of Object.entries(details.value)) {
-    if (['metadata', 'up', 'down'].includes(key)) continue
+    if (['metadata', 'up', 'down', 'closedAt'].includes(key)) continue
     entries.push({ key, label: labelOf(key), value: formatValue(key, value) })
   }
   for (const [key, value] of Object.entries(details.value.metadata ?? {})) {
@@ -289,7 +298,8 @@ const detailEntries = computed(() => {
   }
   const started = details.value.start ? new Date(details.value.start).getTime() : 0
   if (started) {
-    const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000))
+    const endTime = typeof details.value.closedAt === 'number' ? details.value.closedAt : Date.now()
+    const seconds = Math.max(0, Math.floor((endTime - started) / 1000))
     entries.push({
       key: 'duration',
       label: t('home.connections.duration'),
@@ -314,11 +324,8 @@ const currentConnections = computed(() =>
   isActive.value ? dataSource.value : disconnectedData.value,
 )
 const hovering = ref(false)
-const menuOpen = ref(false)
 const snapshot = ref<CoreApiConnectionsData['connections']>([])
-const frozen = computed(
-  () => hovering.value || menuOpen.value || appStore.menuShow || isPause.value,
-)
+const frozen = computed(() => hovering.value || appStore.menuShow || isPause.value)
 watch(
   [frozen, isActive],
   () => {
@@ -336,30 +343,85 @@ const filterOptions = computed(() => connectionOptions(visibleSource.value, filt
 const filteredConnections = computed(() =>
   filterConnections(visibleSource.value, keywords.value, filters.value),
 )
+const compactConnections = computed(() =>
+  filteredConnections.value
+    .slice()
+    .sort((a, b) => new Date(b.start || 0).getTime() - new Date(a.start || 0).getTime()),
+)
 const root = useTemplateRef<HTMLElement>('root')
 const compact = ref(false)
 let observer: ResizeObserver | undefined
+let unregisterConnectionsHandler: (() => void) | undefined
+
+const archiveClosed = (row: CoreApiConnectionsData['connections'][0] & Partial<TrafficCacheType>) => ({
+  ...row,
+  up: row.upload ?? 0,
+  down: row.download ?? 0,
+  closedAt: Date.now(),
+})
+
+const startStream = () => {
+  if (unregisterConnectionsHandler) return
+  unregisterConnectionsHandler = kernelApiStore.onConnections((data) => {
+    const connections = data.connections || []
+    const activeIds = new Set(connections.map((v) => v.id))
+
+    dataSource.value.forEach((connection) => {
+      const exist = activeIds.has(connection.id)
+      if (!exist) {
+        disconnectedData.value.push(archiveClosed(connection))
+        delete TrafficCache[connection.id]
+      }
+    })
+    trimDisconnected()
+
+    dataSource.value = connections.map((connection) => {
+      const result = { ...connection, up: 0, down: 0 }
+      const cache = TrafficCache[connection.id]
+      result.up = cache?.up ?? connection.upload
+      result.down = cache?.down ?? connection.download
+      TrafficCache[connection.id] = {
+        down: connection.download,
+        up: connection.upload,
+      }
+      return result
+    })
+  })
+}
+
+const stopStream = () => {
+  unregisterConnectionsHandler?.()
+  unregisterConnectionsHandler = undefined
+}
+
 onMounted(() => {
+  startStream()
   if (root.value && typeof ResizeObserver !== 'undefined') {
     observer = new ResizeObserver(([entry]) => {
-      if (entry) compact.value = entry.contentRect.width <= 640
+      if (entry && entry.contentRect.width > 0) {
+        compact.value = entry.contentRect.width <= 640
+      }
     })
     observer.observe(root.value)
   }
 })
+onActivated(() => {
+  startStream()
+})
 onUnmounted(() => {
+  stopStream()
   observer?.disconnect()
 })
 onDeactivated(() => {
+  stopStream()
   hovering.value = false
-  menuOpen.value = false
 })
 const handleCloseAll = async () => {
   const selected = [...filteredConnections.value]
   if (!selected.length) return
   try {
     await confirm(
-      t('home.connections.closeVisible'),
+      'home.connections.closeVisible',
       t('common.confirmCloseConnections', [selected.length]),
       { type: 'text', okText: 'home.connections.close', danger: true },
     )
@@ -390,7 +452,7 @@ const closeConnections = async (selected: string[]) => {
 const removeClosedConnections = (ids: Set<string>) => {
   const closedIds = new Set(disconnectedData.value.map((row) => row.id))
   for (const row of dataSource.value) {
-    if (ids.has(row.id) && !closedIds.has(row.id)) disconnectedData.value.push(row)
+    if (ids.has(row.id) && !closedIds.has(row.id)) disconnectedData.value.push(archiveClosed(row))
   }
   ids.forEach((id) => delete TrafficCache[id])
   dataSource.value = dataSource.value.filter((row) => !ids.has(row.id))
@@ -414,37 +476,12 @@ const handleResetConnections = () => {
   message.success('common.success')
 }
 
-const unregisterConnectionsHandler = kernelApiStore.onConnections((data) => {
-  const connections = data.connections || []
-  const activeIds = new Set(connections.map((v) => v.id))
+const rulesetActions = (record: Record<string, any>): App.Menu[] => [
+  { label: 'home.connections.addToDirect', handler: () => addRecordToRuleset('direct', record) },
+  { label: 'home.connections.addToProxy', handler: () => addRecordToRuleset('proxy', record) },
+  { label: 'home.connections.addToReject', handler: () => addRecordToRuleset('reject', record) },
+]
 
-  dataSource.value.forEach((connection) => {
-    // Record Disconnected Connections
-    const exist = activeIds.has(connection.id)
-    if (!exist) {
-      disconnectedData.value.push(connection)
-      delete TrafficCache[connection.id]
-    }
-  })
-  trimDisconnected()
-
-  dataSource.value = connections.map((connection) => {
-    // Record Previous Traffic Information
-    const result = { ...connection, up: 0, down: 0 }
-    const cache = TrafficCache[connection.id]
-    result.up = cache?.up ?? connection.upload
-    result.down = cache?.down ?? connection.download
-    TrafficCache[connection.id] = {
-      down: connection.download,
-      up: connection.upload,
-    }
-    return result
-  })
-})
-
-onUnmounted(() => {
-  unregisterConnectionsHandler()
-})
 const onRowClick = (record: Record<string, any>) => {
   openDetails(record)
 }
@@ -484,17 +521,18 @@ const clearFilters = () => {
       </Button>
       <Button
         v-tips="isPause ? 'common.resume' : 'common.pause'"
-        :aria-label="t(isPause ? 'common.resume' : 'common.pause')"
+        :aria-pressed="isPause"
         :icon="isPause ? 'play' : 'pause'"
         size="small"
         :type="isPause ? 'primary' : 'text'"
         @click="togglePause"
-        >{{ t('workspace.freeze') }}</Button
+        >{{ isPause ? t('common.resume') : t('workspace.freeze') }}</Button
       >
       <Button
         v-if="isActive"
         v-tips="'home.connections.closeVisible'"
         :aria-label="t('home.connections.closeVisible')"
+        :disabled="!filteredConnections.length"
         icon="close"
         icon-color="var(--danger-color)"
         size="small"
@@ -505,6 +543,7 @@ const clearFilters = () => {
         v-else
         v-tips="'home.connections.clearVisible'"
         :aria-label="t('home.connections.clearVisible')"
+        :disabled="!filteredConnections.length"
         icon="clear"
         size="small"
         type="text"
@@ -533,6 +572,7 @@ const clearFilters = () => {
           :options="filterOptions[field]"
           placeholder="home.connections.any"
           size="small"
+          auto-size
           clearable
           @update:model-value="filters[field] = $event"
         />
@@ -541,10 +581,13 @@ const clearFilters = () => {
         {{ t('common.reset') }}
       </Button>
     </div>
-    <div class="flex items-center gap-6">
+    <div class="flex flex-wrap items-center gap-6 mt-8">
       <span class="text-12 text-muted"
         >{{ filteredConnections.length }} / {{ visibleSource.length }}</span
       >
+      <Tag v-if="frozen && isActive" size="small" color="orange">
+        {{ t('common.pause') }}
+      </Tag>
       <span v-if="newConnections" class="text-12 text-secondary">{{
         t('workspace.newConnections', [newConnections])
       }}</span>
@@ -556,19 +599,23 @@ const clearFilters = () => {
         >{{ t('workspace.clearFilters') }}</Button
       >
     </div>
-    <div v-if="compact" class="flex-1 overflow-y-auto">
-      <Empty v-if="!filteredConnections.length" />
+    <div v-if="compact" class="flex-1 overflow-y-auto mt-8">
+      <Empty v-if="!compactConnections.length" />
       <Card
-        v-for="record in filteredConnections"
+        v-for="record in compactConnections"
         :key="record.id"
         :title="record.metadata.host || record.metadata.destinationIP"
         class="mb-6"
       >
-        <div>{{ record.rule }} · {{ record.chains.slice().reverse().join(' → ') }}</div>
-        <div class="font-mono text-12">
-          ↑ {{ formatBytes(record.upload) }} · ↓ {{ formatBytes(record.download) }}
+        <div class="break-all text-12">
+          {{ record.rule }}{{ record.rulePayload ? '::' + record.rulePayload : '' }} ·
+          {{ record.chains.slice().reverse().join(' → ') }}
         </div>
-        <div class="flex gap-4 mt-4">
+        <div class="font-mono text-12 text-muted mt-2">
+          ↑ {{ formatBytes(record.upload) }} · ↓ {{ formatBytes(record.download) }}
+          <span v-if="record.start"> · {{ formatRelativeTime(record.start) }}</span>
+        </div>
+        <div class="flex gap-4 mt-6">
           <Button size="small" @click="openDetails(record)">{{ t('common.details') }}</Button>
           <ResourceActions
             :name="record.metadata.host || record.metadata.destinationIP"
@@ -617,58 +664,10 @@ const clearFilters = () => {
             type="text"
             @click.stop="closeSingleConnection(record)"
           />
-          <Dropdown align="end" @update:show="menuOpen = $event">
-            <Button
-              :aria-label="t('common.more')"
-              icon="more"
-              :icon-size="14"
-              size="small"
-              type="text"
-            />
-            <template #overlay="{ close }">
-              <div class="flex flex-col gap-2 min-w-128 p-6">
-                <Button
-                  type="text"
-                  size="small"
-                  class="justify-start"
-                  @click="
-                    () => {
-                      addRecordToRuleset('direct', record)
-                      close()
-                    }
-                  "
-                >
-                  {{ t('home.connections.addToDirect') }}
-                </Button>
-                <Button
-                  type="text"
-                  size="small"
-                  class="justify-start"
-                  @click="
-                    () => {
-                      addRecordToRuleset('proxy', record)
-                      close()
-                    }
-                  "
-                >
-                  {{ t('home.connections.addToProxy') }}
-                </Button>
-                <Button
-                  type="text"
-                  size="small"
-                  class="justify-start"
-                  @click="
-                    () => {
-                      addRecordToRuleset('reject', record)
-                      close()
-                    }
-                  "
-                >
-                  {{ t('home.connections.addToReject') }}
-                </Button>
-              </div>
-            </template>
-          </Dropdown>
+          <ResourceActions
+            :name="record.metadata.host || record.metadata.destinationIP"
+            :items="rulesetActions(record)"
+          />
         </div>
       </template>
     </Table>

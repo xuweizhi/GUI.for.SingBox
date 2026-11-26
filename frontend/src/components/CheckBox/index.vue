@@ -57,7 +57,6 @@ const handleSelect = (val: string) => {
       type="button"
       role="checkbox"
       :aria-checked="isActive(o.value)"
-      :aria-pressed="isActive(o.value)"
       :class="{ active: isActive(o.value) }"
       class="gui-checkbox-button cursor-pointer inline-flex items-center gap-6 px-10 py-6 transition-all duration-200"
       @click="handleSelect(o.value)"
@@ -118,7 +117,7 @@ const handleSelect = (val: string) => {
 
 .small {
   .gui-checkbox-button {
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     padding: 4px 8px;
   }
 }

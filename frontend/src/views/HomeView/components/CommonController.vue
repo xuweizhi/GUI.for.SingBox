@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { TunStackOptions } from '@/constant/kernel'
@@ -8,45 +9,71 @@ import { message } from '@/utils'
 const { t } = useI18n()
 const kernelApiStore = useKernelApiStore()
 
-const createValueWatcher = (
-  initialValue: number | string | boolean,
-  callback: (value: number | string | boolean) => Promise<void>,
+const busy = computed(
+  () => kernelApiStore.starting || kernelApiStore.stopping || kernelApiStore.restarting,
+)
+
+const draft = reactive({
+  port: kernelApiStore.config.port,
+  socksPort: kernelApiStore.config['socks-port'],
+  mixedPort: kernelApiStore.config['mixed-port'],
+  allowLan: kernelApiStore.config['allow-lan'],
+  tunStack: kernelApiStore.config.tun.stack,
+  tunDevice: kernelApiStore.config.tun.device,
+  interfaceName: kernelApiStore.config['interface-name'],
+})
+
+const syncDraftFromStore = () => {
+  if (busy.value) return
+  draft.port = kernelApiStore.config.port
+  draft.socksPort = kernelApiStore.config['socks-port']
+  draft.mixedPort = kernelApiStore.config['mixed-port']
+  draft.allowLan = kernelApiStore.config['allow-lan']
+  draft.tunStack = kernelApiStore.config.tun.stack
+  draft.tunDevice = kernelApiStore.config.tun.device
+  draft.interfaceName = kernelApiStore.config['interface-name']
+}
+
+watch([() => kernelApiStore.config, busy], syncDraftFromStore, { deep: true })
+
+const applyRuntimeSetting = async <K extends keyof typeof draft>(
+  key: K,
+  newValue: (typeof draft)[K],
+  callback: (value: (typeof draft)[K]) => Promise<void>,
 ) => {
-  let lastValue = initialValue
-  return (newValue: number | boolean) => {
-    if (newValue !== lastValue) {
-      callback(newValue)
-        .then(() => {
-          lastValue = newValue
-          message.success('common.success')
-        })
-        .catch((e) => message.error(e.message || e))
-    }
+  const previous = draft[key]
+  if (newValue === previous || busy.value) return
+  draft[key] = newValue
+  try {
+    await callback(newValue)
+    message.success('common.success')
+  } catch (e: any) {
+    draft[key] = previous
+    syncDraftFromStore()
+    message.error(e?.message || e)
   }
 }
 
-const onPortSubmit = createValueWatcher(kernelApiStore.config.port, (port) =>
-  kernelApiStore.updateConfig('http', port),
-)
-const onSocksPortSubmit = createValueWatcher(kernelApiStore.config['socks-port'], (port) =>
-  kernelApiStore.updateConfig('socks', port),
-)
-const onMixedPortSubmit = createValueWatcher(kernelApiStore.config['mixed-port'], (port) =>
-  kernelApiStore.updateConfig('mixed', port),
-)
-const onAllowLanChange = createValueWatcher(kernelApiStore.config['allow-lan'], (allow) =>
-  kernelApiStore.updateConfig('allow-lan', allow),
-)
-const conStackChange = createValueWatcher(kernelApiStore.config.tun.stack, (stack) =>
-  kernelApiStore.updateConfig('tun-stack', { stack }),
-)
-const onTunDeviceSubmit = createValueWatcher(kernelApiStore.config.tun.device, (device) =>
-  kernelApiStore.updateConfig('tun-device', { device }),
-)
-const onInterfaceChange = createValueWatcher(
-  kernelApiStore.config['interface-name'],
-  (interface_name) => kernelApiStore.updateConfig('interface-name', { interface_name }),
-)
+const onPortSubmit = (port: number) =>
+  applyRuntimeSetting('port', port, (val) => kernelApiStore.updateConfig('http', val))
+const onSocksPortSubmit = (port: number) =>
+  applyRuntimeSetting('socksPort', port, (val) => kernelApiStore.updateConfig('socks', val))
+const onMixedPortSubmit = (port: number) =>
+  applyRuntimeSetting('mixedPort', port, (val) => kernelApiStore.updateConfig('mixed', val))
+const onAllowLanChange = (allow: boolean) =>
+  applyRuntimeSetting('allowLan', allow, (val) => kernelApiStore.updateConfig('allow-lan', val))
+const onStackChange = (stack: string) =>
+  applyRuntimeSetting('tunStack', stack, (val) =>
+    kernelApiStore.updateConfig('tun-stack', { stack: val }),
+  )
+const onTunDeviceSubmit = (device: string) =>
+  applyRuntimeSetting('tunDevice', device, (val) =>
+    kernelApiStore.updateConfig('tun-device', { device: val }),
+  )
+const onInterfaceChange = (interface_name: string) =>
+  applyRuntimeSetting('interfaceName', interface_name, (val) =>
+    kernelApiStore.updateConfig('interface-name', { interface_name: val }),
+  )
 </script>
 
 <template>
@@ -57,7 +84,8 @@ const onInterfaceChange = createValueWatcher(
     <div class="common-settings-grid pb-16">
       <Card :title="t('kernel.inbounds.mixedPort')">
         <Input
-          v-model="kernelApiStore.config['mixed-port']"
+          :model-value="draft.mixedPort"
+          :disabled="busy"
           :min="0"
           :max="65535"
           type="number"
@@ -69,7 +97,8 @@ const onInterfaceChange = createValueWatcher(
       </Card>
       <Card :title="t('kernel.inbounds.httpPort')">
         <Input
-          v-model="kernelApiStore.config.port"
+          :model-value="draft.port"
+          :disabled="busy"
           :min="0"
           :max="65535"
           type="number"
@@ -81,7 +110,8 @@ const onInterfaceChange = createValueWatcher(
       </Card>
       <Card :title="t('kernel.inbounds.socksPort')">
         <Input
-          v-model="kernelApiStore.config['socks-port']"
+          :model-value="draft.socksPort"
+          :disabled="busy"
           :min="0"
           :max="65535"
           type="number"
@@ -92,19 +122,25 @@ const onInterfaceChange = createValueWatcher(
         />
       </Card>
       <Card :title="t('kernel.allow-lan')">
-        <Switch v-model="kernelApiStore.config['allow-lan']" @change="onAllowLanChange" />
+        <Switch
+          :model-value="draft.allowLan"
+          :disabled="busy"
+          @update:model-value="onAllowLanChange"
+        />
       </Card>
       <Card :title="t('kernel.inbounds.tun.stack')">
         <Select
-          v-model="kernelApiStore.config.tun.stack"
+          :model-value="draft.tunStack"
+          :disabled="busy"
           :options="TunStackOptions"
           auto-size
-          @change="conStackChange"
+          @change="onStackChange"
         />
       </Card>
       <Card :title="t('kernel.inbounds.tun.interface_name')">
         <Input
-          v-model="kernelApiStore.config.tun.device"
+          :model-value="draft.tunDevice"
+          :disabled="busy"
           auto-size
           class="w-full"
           submit-on-enter
@@ -113,7 +149,8 @@ const onInterfaceChange = createValueWatcher(
       </Card>
       <Card :title="t('kernel.route.default_interface')">
         <InterfaceSelect
-          v-model="kernelApiStore.config['interface-name']"
+          :model-value="draft.interfaceName"
+          :disabled="busy"
           auto-size
           @change="onInterfaceChange"
         />

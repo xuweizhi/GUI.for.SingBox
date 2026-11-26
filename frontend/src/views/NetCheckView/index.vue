@@ -54,21 +54,34 @@ const syncNodeController = async (running: boolean) => {
   await Promise.resolve(nodeController.prepareModal()).catch(() => undefined)
 }
 
+const runCancelled = ref(false)
+
 const handleRun = async () => {
   if (networkCheck.running.value) return
   runError.value = ''
+  runCancelled.value = false
+  checkedAt.value = undefined
+  testedNode.value = ''
 
   const initialNode = currentNode.value
   try {
-    testedNode.value = (await networkCheck.run()) ?? initialNode
+    const measuredLeaf = await networkCheck.run()
+    if (runCancelled.value) return
+    testedNode.value = measuredLeaf ?? initialNode
     checkedAt.value = new Date()
     if (kernelApiStore.running) {
       await Promise.resolve(nodeController.refresh()).catch(() => undefined)
       await runtimeNode.refresh()
     }
   } catch (error) {
+    if (runCancelled.value) return
     runError.value = error instanceof Error ? error.message : String(error)
   }
+}
+
+const handleCancel = () => {
+  runCancelled.value = true
+  networkCheck.cancel?.()
 }
 
 const applyPreset = (target: string) => {
@@ -77,6 +90,7 @@ const applyPreset = (target: string) => {
 }
 
 const clearResults = () => {
+  runCancelled.value = true
   runError.value = ''
   testedNode.value = ''
   checkedAt.value = undefined
@@ -87,6 +101,15 @@ const verdictColor = computed(() => {
   if (totals.value.failed || !totals.value.passed) return 'red'
   return 'green'
 })
+const verdictLabel = computed(() =>
+  t(
+    networkCheck.running.value
+      ? 'netCheck.status.running'
+      : totals.value.failed || !totals.value.passed
+        ? 'workspace.issues'
+        : 'workspace.passed',
+  ),
+)
 
 const active = ref(false)
 const activate = () => {
@@ -130,6 +153,13 @@ onUnmounted(() => nodeController.stopPolling())
             {{ t('netCheck.actions.run') }}
           </Button>
           <Button
+            v-if="networkCheck.running.value"
+            data-action="cancel-check"
+            @click="handleCancel"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
             :disabled="networkCheck.running.value || networkCheck.groups.value.length === 0"
             @click="clearResults"
           >
@@ -156,35 +186,20 @@ onUnmounted(() => nodeController.stopPolling())
     </Card>
 
     <section
-      v-if="checkedAt && networkCheck.groups.value.length"
+      v-if="(networkCheck.running.value || checkedAt) && networkCheck.groups.value.length"
       class="net-check__verdict surface-panel p-12"
       aria-live="polite"
     >
       <div class="flex flex-wrap items-center gap-8">
         <Tag size="small" :color="verdictColor">
-          {{
-            t(
-              networkCheck.running.value
-                ? 'netCheck.status.running'
-                : totals.failed || !totals.passed
-                  ? 'workspace.issues'
-                  : 'workspace.passed',
-            )
-          }}
+          {{ verdictLabel }}
         </Tag>
-        <strong>{{
-          t(
-            networkCheck.running.value
-              ? 'netCheck.status.running'
-              : totals.failed || !totals.passed
-                ? 'workspace.issues'
-                : 'workspace.passed',
-          )
-        }}</strong>
-        <span class="text-12 text-muted"
-          >{{ t('workspace.tested') }} {{ testedNode || t('common.none') }} ·
-          {{ checkedAt.toLocaleTimeString() }}</span
-        >
+        <strong class="text-13">
+          {{ t('workspace.tested') }}: {{ testedNode || currentNode || t('common.none') }}
+        </strong>
+        <span v-if="checkedAt" class="text-12 text-muted">
+          · {{ checkedAt.toLocaleTimeString() }}
+        </span>
       </div>
       <div class="text-12 text-secondary mt-4">
         {{ t('netCheck.summary.groupCountSuccess', [totals.passed]) }} ·
@@ -202,8 +217,7 @@ onUnmounted(() => nodeController.stopPolling())
       </div>
     </section>
     <div class="net-check__grid">
-      <section class="net-check__results">
-        <div class="text-16 font-bold mb-12">{{ t('netCheck.results.title') }}</div>
+      <Card :title="t('netCheck.results.title')" class="net-check__results">
         <div
           v-if="networkCheck.groups.value.length === 0"
           class="py-24 text-center text-13 text-muted"
@@ -218,7 +232,7 @@ onUnmounted(() => nodeController.stopPolling())
             :running="networkCheck.running.value"
           />
         </div>
-      </section>
+      </Card>
 
       <NodeDiagnosticsPanel
         :controller="nodeController"

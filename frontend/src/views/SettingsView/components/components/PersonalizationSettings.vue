@@ -19,7 +19,7 @@ const appSettings = useAppSettingsStore()
 </script>
 
 <template>
-  <div class="px-8 py-12 text-16 font-bold">{{ $t('settings.personalization') }}</div>
+  <div class="px-4 py-8 text-16 font-bold">{{ $t('settings.personalization') }}</div>
 
   <Card>
     <AppearanceControls />

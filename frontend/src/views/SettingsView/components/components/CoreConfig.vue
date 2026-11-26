@@ -5,7 +5,9 @@ import { useI18n } from 'vue-i18n'
 
 import { DraggableOptions } from '@/constant/app'
 import { DefaultCoreConfig } from '@/constant/kernel'
-import { useAppSettingsStore } from '@/stores'
+import { Branch } from '@/enums/app'
+import { useFormDraft } from '@/hooks/useFormDraft'
+import { useAppSettingsStore, useKernelApiStore } from '@/stores'
 import { deepClone, message, processMagicVariables } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
@@ -27,13 +29,24 @@ const handleSubmit = inject('submit') as any
 
 const { t } = useI18n()
 const appSettings = useAppSettingsStore()
+const kernelApiStore = useKernelApiStore()
 
 const source = props.isAlpha ? appSettings.app.kernel.alpha : appSettings.app.kernel.main
 
 const model = ref(deepClone(source))
+const { isDirty } = useFormDraft(() => model.value)
 
 const handleSave = () => {
-  Object.assign(source, model.value)
+  const changed = isDirty()
+  Object.assign(source, deepClone(model.value))
+  if (
+    changed &&
+    kernelApiStore.running &&
+    (appSettings.app.kernel.branch === Branch.Alpha) === props.isAlpha
+  ) {
+    kernelApiStore.needRestart = true
+  }
+  message.success('common.success')
   handleSubmit()
 }
 
@@ -48,7 +61,6 @@ const modalSlots = {
           const { env, args } = DefaultCoreConfig()
           model.value.env = env
           model.value.args = args
-          message.success('common.success')
         },
       },
       () => t('common.reset'),
@@ -76,29 +88,25 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div>
+  <div ref="formRoot">
     <Tabs v-model:active-key="activeKey" :items="tabs">
       <template #env>
         <Empty v-if="Object.keys(model.env).length === 0" />
         <Card v-else :title="t('common.preview')">
-          <div class="flex flex-col gap-4">
+          <div class="flex flex-col gap-6">
             <div
               v-for="[key, value] in Object.entries(model.env)"
               :key="key"
-              class="flex items-center"
+              class="env-preview-row"
             >
-              <Tag class="w-[25%] self-stretch">
-                <div
-                  class="h-full flex items-center justify-center py-2 break-all whitespace-pre-wrap"
-                >
+              <Tag class="env-preview-cell">
+                <div class="h-full flex items-center py-2 break-all whitespace-pre-wrap">
                   {{ key }}
                 </div>
               </Tag>
-              :
-              <Tag class="w-[75%] self-stretch">
-                <div
-                  class="h-full flex items-center justify-center py-2 break-all whitespace-pre-wrap"
-                >
+              <span class="self-center text-muted">:</span>
+              <Tag class="env-preview-cell">
+                <div class="h-full flex items-center py-2 break-all whitespace-pre-wrap">
                   {{ processMagicVariables(value) }}
                 </div>
               </Tag>
@@ -114,7 +122,7 @@ defineExpose({ modalSlots })
           <VueDraggable
             v-model="model.args"
             v-bind="DraggableOptions"
-            class="flex flex-wrap items-center"
+            class="flex flex-wrap items-center gap-6"
           >
             <div v-for="(item, index) in model.args" :key="index">
               <Tag size="small">
@@ -130,3 +138,16 @@ defineExpose({ modalSlots })
     </Tabs>
   </div>
 </template>
+
+<style scoped>
+.env-preview-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) auto minmax(0, 2.5fr);
+  gap: 6px;
+  align-items: stretch;
+}
+.env-preview-cell {
+  margin: 0;
+  min-width: 0;
+}
+</style>

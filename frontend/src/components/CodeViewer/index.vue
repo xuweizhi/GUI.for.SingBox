@@ -120,7 +120,7 @@ const onCopy = async () => {
 
 .code-block-code {
   font-family: monaco, Consolas, Menlo, Courier, monospace;
-  font-size: 14px;
+  font-size: calc(13.5px * var(--font-scale, 1));
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -191,5 +191,48 @@ const onCopy = async () => {
 
 :deep(.token.italic) {
   font-style: italic;
+}
+
+:global(body[theme-mode='dark']) .code-block-viewer {
+  :deep(.token.comment),
+  :deep(.token.prolog),
+  :deep(.token.doctype),
+  :deep(.token.cdata) {
+    color: #8b9bb4;
+  }
+  :deep(.token.property),
+  :deep(.token.tag),
+  :deep(.token.boolean),
+  :deep(.token.number),
+  :deep(.token.constant),
+  :deep(.token.symbol),
+  :deep(.token.deleted),
+  :deep(.token.atrule),
+  :deep(.token.attr-value),
+  :deep(.token.keyword) {
+    color: #f87171;
+  }
+  :deep(.token.selector),
+  :deep(.token.attr-name),
+  :deep(.token.string),
+  :deep(.token.char),
+  :deep(.token.builtin),
+  :deep(.token.inserted) {
+    color: #4ade80;
+  }
+  :deep(.token.operator),
+  :deep(.token.entity),
+  :deep(.token.url) {
+    color: #60a5fa;
+  }
+  :deep(.token.function),
+  :deep(.token.class-name) {
+    color: #c084fc;
+  }
+  :deep(.token.regex),
+  :deep(.token.important),
+  :deep(.token.variable) {
+    color: #fbbf24;
+  }
 }
 </style>

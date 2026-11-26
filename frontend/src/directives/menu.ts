@@ -4,14 +4,18 @@ import { useAppStore } from '@/stores'
 
 const updateMenus = (el: any, binding: DirectiveBinding) => {
   const appStore = useAppStore()
+  const items = Array.isArray(binding.value) ? binding.value : []
+
+  if (!items.length) {
+    el.oncontextmenu = null
+    return
+  }
 
   el.oncontextmenu = (e: MouseEvent) => {
     e.preventDefault()
-    if (binding.value.length) {
-      appStore.menuPosition = { x: e.clientX, y: e.clientY }
-      appStore.menuList = binding.value
-      appStore.menuShow = true
-    }
+    appStore.menuPosition = { x: e.clientX, y: e.clientY }
+    appStore.menuList = items
+    appStore.menuShow = true
   }
 }
 
@@ -21,5 +25,8 @@ export default {
   },
   updated(el: any, binding: DirectiveBinding) {
     updateMenus(el, binding)
+  },
+  beforeUnmount(el: any) {
+    el.oncontextmenu = null
   },
 } as Directive

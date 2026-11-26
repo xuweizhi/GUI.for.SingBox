@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 import * as Stores from '@/stores'
 import { message } from '@/utils'
 
@@ -6,12 +8,17 @@ import { CommandView } from '@/components'
 
 interface Props {
   loading: boolean
+  authenticated?: boolean
 }
 
-defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  authenticated: true,
+})
 
 const appStore = Stores.useAppStore()
 const kernelApiStore = Stores.useKernelApiStore()
+
+const hasMaximizedModal = computed(() => (appStore.modalMaximized?.size ?? 0) > 0)
 
 const handleRestartCore = async () => {
   try {
@@ -30,6 +37,18 @@ const minimizeAll = () => {
     .reverse()
     .forEach((minimize) => minimize())
 }
+
+const handleCloseMinimized = async (
+  modalItem: (typeof appStore.modalMinimized)[number],
+  closeDropdown: () => void,
+) => {
+  try {
+    await modalItem.closeFn()
+    if (!appStore.modalMinimized.length) closeDropdown()
+  } catch (error: unknown) {
+    message.error(error instanceof Error ? error.message : String(error))
+  }
+}
 </script>
 
 <template>
@@ -45,22 +64,24 @@ const minimizeAll = () => {
     :message="appStore.tipsMessage"
   />
 
-  <CommandView v-if="!loading" />
+  <CommandView v-if="!props.loading && props.authenticated" />
 
   <div
     v-if="
-      appStore.modalMinimizers.size ||
-      appStore.modalMinimized.length ||
-      kernelApiStore.needRestart ||
-      kernelApiStore.restarting
+      props.authenticated &&
+      !hasMaximizedModal &&
+      (appStore.modalMinimizers.size ||
+        appStore.modalMinimized.length ||
+        kernelApiStore.needRestart ||
+        kernelApiStore.restarting)
     "
-    class="fixed right-32 bottom-32 flex flex-col gap-8 z-9999"
+    class="global-dock fixed right-32 bottom-32 flex flex-col items-end gap-8"
   >
     <Dropdown
       v-if="appStore.modalMinimizers.size || appStore.modalMinimized.length"
       placement="top"
       align="end"
-      :trigger="['hover', 'click']"
+      :trigger="['click']"
     >
       <div class="modal-dock-trigger">
         <Button
@@ -68,7 +89,8 @@ const minimizeAll = () => {
           :aria-label="$t('common.modalList')"
           class="shadow"
           :title="
-            appStore.modalMinimized.map((m) => $t(m.title())).join(', ') || $t('common.modalList')
+            appStore.modalMinimized.map((m) => $t(m.title() || 'common.modalList')).join(', ') ||
+            $t('common.modalList')
           "
         />
         <span v-if="appStore.modalMinimized.length" class="modal-dock-badge">{{
@@ -81,6 +103,7 @@ const minimizeAll = () => {
             <Button
               size="small"
               type="link"
+              :disabled="!appStore.modalMinimized.length"
               @click="
                 () => {
                   openAll()
@@ -90,11 +113,27 @@ const minimizeAll = () => {
             >
               {{ $t('common.openAll') }}
             </Button>
-            <Button size="small" type="link" @click="minimizeAll">
+            <Button
+              size="small"
+              type="link"
+              :disabled="!appStore.modalMinimizers.size"
+              @click="
+                () => {
+                  minimizeAll()
+                  close()
+                }
+              "
+            >
               {{ $t('common.minimizeAll') }}
             </Button>
           </template>
-          <div class="flex flex-col gap-4 p-4 min-w-128">
+          <div class="flex flex-col gap-4 p-4 min-w-160">
+            <div
+              v-if="!appStore.modalMinimized.length"
+              class="text-12 text-muted text-center py-8 px-6"
+            >
+              {{ $t('common.none') }}
+            </div>
             <div
               v-for="modal in appStore.modalMinimized"
               :key="modal.id"
@@ -110,14 +149,14 @@ const minimizeAll = () => {
                   }
                 "
               >
-                {{ $t(modal.title()) }}
+                {{ $t(modal.title() || 'common.modalList') }}
               </Button>
               <Button
                 icon="close"
                 type="text"
                 size="small"
                 :aria-label="$t('common.close')"
-                @click="modal.closeFn"
+                @click="handleCloseMinimized(modal, close)"
               />
             </div>
           </div>
@@ -140,6 +179,9 @@ const minimizeAll = () => {
 </template>
 
 <style scoped>
+.global-dock {
+  z-index: var(--z-dock, 9000);
+}
 .restart-pill {
   border-radius: 999px;
   padding: 8px 16px;
@@ -158,7 +200,7 @@ const minimizeAll = () => {
   border-radius: 999px;
   background: var(--accent-text);
   color: var(--btn-primary-color);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 16px;
   text-align: center;

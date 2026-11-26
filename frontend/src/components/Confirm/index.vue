@@ -60,8 +60,8 @@ useOverlayFocus(dialog, () => props.cancel ? handleCancel() : handleConfirm())
   >
     <Transition name="dialog-pop" appear>
       <div
-        role="alertdialog"
         ref="dialog"
+        role="alertdialog"
         tabindex="-1"
         aria-modal="true"
         :aria-label="t(title)"
@@ -72,7 +72,7 @@ useOverlayFocus(dialog, () => props.cancel ? handleCancel() : handleConfirm())
         </div>
         <div
           v-if="options.type === 'markdown'"
-          class="gui-confirm__body flex-1 overflow-y-auto text-13 leading-relaxed px-16 py-12 break-all whitespace-pre-wrap select-text"
+          class="gui-confirm__body flex-1 overflow-y-auto text-13 leading-relaxed px-16 py-12 select-text"
         >
           <MarkdownViewer :content="content" />
         </div>
@@ -101,17 +101,20 @@ useOverlayFocus(dialog, () => props.cancel ? handleCancel() : handleConfirm())
 
 <style lang="less" scoped>
 .gui-overlay-mask {
-  z-index: 99999;
+  z-index: var(--z-dialog, 99999);
   background: var(--modal-mask-bg);
 }
 
 .gui-confirm {
   width: min(460px, 100%);
   max-height: min(76dvh, 640px);
-  background: var(--modal-bg);
+  background: var(--surface-elevated-bg, var(--modal-bg));
   color: var(--color);
   border: 1px solid var(--surface-border, var(--border-color));
-  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+  border-radius: var(--modal-radius, 14px);
+  box-shadow: var(--modal-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   overflow: hidden;
 }
 

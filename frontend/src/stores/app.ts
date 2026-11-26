@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
 
 import {
   Download,
@@ -13,7 +12,7 @@ import {
   FileExists,
 } from '@/bridge'
 import { LanguageOptions, LocalesFilePath } from '@/constant/app'
-import { loadLocale } from '@/lang'
+import i18n, { loadLocale } from '@/lang'
 import {
   APP_TITLE,
   APP_VERSION,
@@ -51,9 +50,10 @@ export const useAppStore = defineStore('app', () => {
   })
 
   /* Modal Stack */
-  const modalStack: (() => MaybePromise<void>)[] = []
-  const modalZIndexCounter = 999
+  const modalStack = ref<(() => MaybePromise<void>)[]>([])
+  const modalZIndexCounter = ref(999)
   const modalMinimizers = ref(new Set<() => void>())
+  const modalMaximized = ref(new Set<string>())
   const modalMinimized = ref<
     {
       id: string
@@ -72,9 +72,9 @@ export const useAppStore = defineStore('app', () => {
     try {
       const dirs = await ReadDir(LocalesFilePath).catch(() => [])
       const localLanguage = dirs.flatMap((file) => {
-        if (file.isDir) return []
-        const [name, ext] = file.name.split('.')
-        return name && ext === 'json' ? { label: name, value: name } : []
+        if (file.isDir || !file.name.endsWith('.json')) return []
+        const name = file.name.slice(0, -'.json'.length)
+        return name ? { label: name, value: name } : []
       })
       locales.value = [...LanguageOptions, ...localLanguage]
       reload && (await loadLocale())
@@ -112,7 +112,7 @@ export const useAppStore = defineStore('app', () => {
     customActions.value[target] = customActions.value[target].filter((a) => !ids.includes(a.id!))
   }
 
-  const { t } = useI18n()
+  const t = (key: string) => i18n?.global?.t?.(key) ?? key
   const envStore = useEnvStore()
 
   /* About Page */
@@ -124,23 +124,23 @@ export const useAppStore = defineStore('app', () => {
   const downloadUrl = ref('')
   const downloadDigest = ref('')
   const remoteVersion = ref(APP_VERSION)
-  const updatable = computed(() => downloadUrl.value && APP_VERSION !== remoteVersion.value)
+  const updatable = computed(() => Boolean(downloadUrl.value && APP_VERSION !== remoteVersion.value))
 
   const downloadApp = async () => {
     if (downloading.value || checkForUpdatesLoading.value || !updatable.value) return
     downloading.value = true
+    const { appName, os, arch } = envStore.env
+    const archiveName = `${APP_TITLE}-${os}-${arch}.tar.gz`
+    const downloadCacheFile = `data/.cache/${archiveName}`
+    const extractedDirectory = `data/.cache/${APP_TITLE}-${os}-${arch}`
+    const extractedBinary = `${extractedDirectory}/${APP_TITLE}`
+    const backupBinary = `${appName}.bak`
     try {
       const sha256 = parseReleaseSha256(downloadDigest.value)
-      const { appName, os, arch } = envStore.env
-      const archiveName = `${APP_TITLE}-${os}-${arch}.tar.gz`
-      const downloadCacheFile = `data/.cache/${archiveName}`
-      const extractedDirectory = `data/.cache/${APP_TITLE}-${os}-${arch}`
-      const extractedBinary = `${extractedDirectory}/${APP_TITLE}`
-      const backupBinary = `${appName}.bak`
 
       const { update, destroy } = message.info('common.downloading', 10 * 60 * 1_000, () => {
         HttpCancel(downloadCacheFile)
-        setTimeout(() => RemoveFile(downloadCacheFile), 1000)
+        setTimeout(() => void RemoveFile(downloadCacheFile).catch(() => undefined), 1000)
       })
 
       await Download(
@@ -170,15 +170,16 @@ export const useAppStore = defineStore('app', () => {
         await MoveFile(backupBinary, appName).catch(() => undefined)
         throw error
       }
-      await RemoveFile(downloadCacheFile)
-      await RemoveFile(extractedDirectory)
       message.success('about.updateSuccessfulRestart')
       restartable.value = true
     } catch (error: any) {
-      console.log(error)
+      console.error(error)
       message.error(error.message || error, 5_000)
+    } finally {
+      await RemoveFile(downloadCacheFile).catch(() => undefined)
+      await RemoveFile(extractedDirectory).catch(() => undefined)
+      downloading.value = false
     }
-    downloading.value = false
   }
 
   const checkForUpdates = async (showTips = false) => {
@@ -202,40 +203,56 @@ export const useAppStore = defineStore('app', () => {
       if (!asset) throw 'Asset Not Found:' + assetName
       parseReleaseSha256(asset.digest)
       if (asset.uploader?.login !== 'github-actions[bot]') {
-        await confirm('common.warning', 'settings.kernel.risk', {
-          type: 'text',
-          okText: 'settings.kernel.stillDownload',
-        })
+        try {
+          await confirm('common.warning', 'settings.kernel.risk', {
+            type: 'text',
+            okText: 'settings.kernel.stillDownload',
+          })
+        } catch {
+          return
+        }
       }
 
       remoteVersion.value = tag_name
       downloadUrl.value = asset.browser_download_url
       downloadDigest.value = asset.digest
+      lastCheckTime.value = Date.now()
 
       if (showTips) {
         message.info(updatable.value ? 'about.newVersion' : 'about.latestVersion')
       }
     } catch (error: any) {
       console.error(error)
-      message.error(error.message || error)
+      if (showTips) {
+        message.error(error.message || error)
+      }
+    } finally {
+      checkForUpdatesLoading.value = false
     }
-    lastCheckTime.value = Date.now()
-    checkForUpdatesLoading.value = false
   }
 
+  let aboutModal: ReturnType<typeof modal> | undefined
   watch(showAbout, (v) => {
     if (v) {
+      if (aboutModal) return
       const m = modal({
         title: 'router.about',
+        size: 'sm',
+        footer: false,
         cancel: false,
         submit: false,
         maskClosable: true,
-        minWidth: '50',
         afterDestroy() {
+          aboutModal = undefined
           showAbout.value = false
         },
       })
+      aboutModal = m
       m.setContent(AboutView).open()
+    } else if (aboutModal) {
+      const current = aboutModal
+      aboutModal = undefined
+      void current.destroy?.()
     }
   })
 
@@ -250,6 +267,7 @@ export const useAppStore = defineStore('app', () => {
     modalStack,
     modalMinimized,
     modalMinimizers,
+    modalMaximized,
     modalZIndexCounter,
     showAbout,
     lastCheckTime,

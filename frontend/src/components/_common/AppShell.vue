@@ -4,16 +4,16 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import logo from '@/assets/logo'
-import { ModeOptions } from '@/constant/kernel'
 import { NavLayout } from '@/enums/app'
 import rawRoutes from '@/router/routes'
 import {
   useAppSettingsStore,
+  useAppStore,
   useKernelApiStore,
   useProfilesStore,
   useWebuiAuthStore,
 } from '@/stores'
-import { confirm, handleChangeMode, message } from '@/utils'
+import { confirm } from '@/utils'
 
 import AppearancePopover from './AppearancePopover.vue'
 import CoreControls from './CoreControls.vue'
@@ -33,6 +33,7 @@ const { t } = useI18n()
 const route = useRoute()
 
 const appSettings = useAppSettingsStore()
+const appStore = useAppStore()
 const authStore = useWebuiAuthStore()
 const kernelApiStore = useKernelApiStore()
 const profilesStore = useProfilesStore()
@@ -69,22 +70,11 @@ const pageTitle = computed(() => {
   if (tabTitles[homeTab.value]) return t(tabTitles[homeTab.value]!)
   return route.meta.name ? t(route.meta.name) : String(route.name || '')
 })
-const isFluid = computed(
-  () => route.meta.fluid === true || ['groups', 'connections', 'logs'].includes(homeTab.value),
-)
+const isFluid = computed(() => route.meta.fluid === true)
 const overflowActive = computed(() => {
   const overflow = visibleRoutes.value.slice(visibleCount.value)
   return overflow.some((r) => r.path === activePath.value)
 })
-const modeKey = ref(0)
-const onModeChange = async (mode: 'direct' | 'global' | 'rule') => {
-  try {
-    await handleChangeMode(mode)
-  } catch (error) {
-    modeKey.value++
-    message.error(error)
-  }
-}
 const isMac = computed(
   () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || ''),
 )
@@ -138,7 +128,7 @@ const openCommandPalette = () => {
 
 const handleLogout = async () => {
   try {
-    await confirm(t('auth.signOut'), t('common.confirmSignOut'), {
+    await confirm('auth.signOut', 'common.confirmSignOut', {
       type: 'text',
       okText: 'auth.signOut',
       danger: true,
@@ -150,7 +140,14 @@ const handleLogout = async () => {
 }
 
 const onKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && mobileNavOpen.value) {
+  if (
+    event.key === 'Escape' &&
+    mobileNavOpen.value &&
+    !event.defaultPrevented &&
+    !event.isComposing &&
+    appStore.modalStack.length === 0
+  ) {
+    event.preventDefault()
     mobileNavOpen.value = false
   }
 }
@@ -188,15 +185,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             </RouterLink>
 
             <h1 class="topbar-title" :class="{ 'is-mobile-only': isTopnav }">{{ pageTitle }}</h1>
-            <Radio
-              v-if="kernelApiStore.running && !isTopnav"
-              :key="kernelApiStore.config.mode + '-' + modeKey"
-              class="header-mode"
-              size="small"
-              :model-value="kernelApiStore.config.mode"
-              :options="ModeOptions"
-              @change="onModeChange"
-            />
           </div>
 
           <nav v-if="isTopnav" ref="nav" class="topbar-nav" :aria-label="t('navigation.main')">
@@ -262,10 +250,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               <button
                 type="button"
                 class="topbar-core-pill"
-                :class="[
-                  kernelApiStore.running ? 'is-running' : 'is-stopped',
-                  { 'is-desktop-visible': sidebarCollapsed || isTopnav },
-                ]"
+                :class="kernelApiStore.running ? 'is-running' : 'is-stopped'"
                 :title="
                   (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped')) +
                   (activeProfileName ? ' · ' + activeProfileName : '')
@@ -350,12 +335,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 .app-topbar {
   flex-shrink: 0;
-  height: var(--topbar-height, 54px);
+  height: var(--topbar-height, 48px);
   background: var(--surface-chrome-bg, var(--card-bg));
   border-bottom: 1px solid var(--surface-border, var(--border-color));
   backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
-  z-index: 30;
+  z-index: var(--z-chrome, 30);
 }
 
 .app-topbar__inner {
@@ -379,7 +364,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   align-items: center;
   gap: 10px;
   min-width: 0;
-  flex-shrink: 0;
+  flex-shrink: 1;
 }
 
 .topbar-brand {
@@ -407,12 +392,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 }
 
 .topbar-nav {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 4px;
-  overflow-x: auto;
+  overflow: hidden;
   scrollbar-width: none;
   padding: 2px;
 
@@ -531,7 +517,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   border: 1px solid var(--border-color);
   background: var(--surface-bg, var(--card-bg));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.3;
   color: var(--muted-color);
 }
@@ -611,10 +597,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   pointer-events: none;
   width: max-content;
 }
-.topbar-nav {
-  position: relative;
-  overflow: hidden;
-}
 .app-page--fluid {
   max-width: none;
 }
@@ -623,21 +605,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .app-page:has(.settings-tabs) {
   overflow: hidden;
 }
-.app-topbar__left {
-  min-width: 0;
-  flex-shrink: 1;
-}
 .topbar-more.is-active {
   color: var(--accent-text);
   background: var(--accent-soft);
-}
-@media (min-width: 1025px) {
-  .app-shell:not(.is-topnav) .topbar-core-pill {
-    display: none;
-  }
-  .app-shell:not(.is-topnav) .topbar-core-pill.is-desktop-visible {
-    display: inline-flex;
-  }
 }
 @media (max-width: 1024px) {
   .topbar-brand__name {
@@ -648,10 +618,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     display: inline-flex;
   }
 
-  .topbar-core-pill {
-    display: inline-flex;
-  }
-
   .topbar-brand,
   .topbar-nav {
     display: none;
@@ -659,10 +625,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
   .topbar-title.is-mobile-only {
     display: block;
-  }
-
-  .header-mode {
-    display: none;
   }
 }
 
@@ -676,7 +638,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   }
 
   .topbar-title {
-    font-size: 16px;
+    font-size: calc(16px * var(--font-scale, 1));
   }
 
   .topbar-cmd-btn__label,

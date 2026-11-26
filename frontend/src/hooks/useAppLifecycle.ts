@@ -6,11 +6,13 @@ export const useAppLifecycle = () => {
   const appStore = Stores.useAppStore()
 
   const handleKeydown = (event: KeyboardEvent) => {
-    if (event.key !== 'Escape') return
+    if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return
 
     const closeFn = appStore.modalStack.at(-1)
+    if (!closeFn) return
+    event.preventDefault()
     void Promise.resolve()
-      .then(() => closeFn?.())
+      .then(() => closeFn())
       .catch((error) => console.error(error))
   }
 

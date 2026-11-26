@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -20,6 +20,9 @@ const router = useRouter()
 const authStore = useWebuiAuthStore()
 
 const input = ref(authStore.token)
+watch(input, () => {
+  if (authStore.lastError) authStore.lastError = ''
+})
 const loading = computed(() => authStore.status === 'checking')
 const languageOptions = computed(() =>
   appStore.locales.length
@@ -63,10 +66,17 @@ const switchLanguage = () => {
   appearance.previewLoginAppearance({ lang: next.value }, true)
   persistPreference(LANG_KEY, next.value)
 }
-const switchTheme = () => {
+const switchTheme = (event: MouseEvent) => {
+  document.documentElement.style.setProperty('--x', event.clientX + 'px')
+  document.documentElement.style.setProperty('--y', event.clientY + 'px')
   const next = appearance.themeMode === Theme.Dark ? Theme.Light : Theme.Dark
   appearance.previewLoginAppearance({ theme: next }, true)
   persistPreference(THEME_KEY, next)
+}
+
+const onEnterKey = (event: KeyboardEvent) => {
+  if (event.isComposing) return
+  void submit()
 }
 
 onMounted(applyPreferences)
@@ -118,7 +128,7 @@ const submit = async () => {
           autofocus
           class="w-full"
           autocomplete="current-password"
-          @keydown.enter="submit"
+          @keydown.enter="onEnterKey"
         />
 
         <div v-if="authStore.lastError" role="alert" class="login-error mt-12">

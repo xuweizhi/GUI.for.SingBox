@@ -16,6 +16,8 @@ import {
   picker,
 } from '@/utils'
 
+import ResourceActions from '@/components/_common/ResourceActions.vue'
+
 import type { PickerItem } from '@/components/Picker/index.vue'
 import type { CoreApiLogsData } from '@/types/kernel'
 
@@ -152,10 +154,28 @@ const { t } = useI18n()
 const [pause, togglePause] = useBool(false)
 const kernelApiStore = useKernelApiStore()
 const logsStore = useLogsStore()
+const refreshingCore = ref(false)
+let programmaticScroll = false
 
 const handleClear = () => {
   pausedLogs.value.splice(0)
+  pause.value = false
   logsStore.clearSource(source.value)
+}
+
+const clearFilters = () => {
+  keywords.value = ''
+  logType.value = 'info'
+}
+
+const handleRefreshCoreLogs = async () => {
+  if (refreshingCore.value) return
+  refreshingCore.value = true
+  try {
+    await kernelApiStore.refreshKernelLogs(true)
+  } finally {
+    refreshingCore.value = false
+  }
 }
 
 watch([pause, source], () => {
@@ -164,7 +184,13 @@ watch([pause, source], () => {
 const scrollToBottom = () => {
   if (!follow.value) return
   nextTick(() => {
-    if (follow.value && viewport.value) viewport.value.scrollTop = viewport.value.scrollHeight
+    if (follow.value && viewport.value) {
+      programmaticScroll = true
+      viewport.value.scrollTop = viewport.value.scrollHeight
+      requestAnimationFrame(() => {
+        programmaticScroll = false
+      })
+    }
   })
 }
 watch([filteredLogs, follow], scrollToBottom, { flush: 'post', immediate: true })
@@ -177,9 +203,12 @@ watch(
   { immediate: true },
 )
 const onScroll = () => {
+  if (programmaticScroll) return
   const el = viewport.value
-  if (!el || !follow.value) return
-  if (el.scrollHeight - el.scrollTop - el.clientHeight > 24) follow.value = false
+  if (!el) return
+  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+  if (follow.value && distanceFromBottom > 24) follow.value = false
+  else if (!follow.value && distanceFromBottom <= 16) follow.value = true
 }
 onActivated(scrollToBottom)
 const copyLogs = async () => {
@@ -194,6 +223,8 @@ const copyLogs = async () => {
   }
 }
 
+const rowMenus = (log: CoreApiLogsData) =>
+  menus.map((v) => ({ ...v, handler: () => v.handler?.(log) }))
 </script>
 
 <template>
@@ -217,6 +248,7 @@ const copyLogs = async () => {
       />
       <Switch v-model="follow" size="small" label="workspace.follow" />
       <Button
+        v-tips="'common.copy'"
         size="small"
         type="text"
         icon="copy"
@@ -226,22 +258,27 @@ const copyLogs = async () => {
       />
       <Button
         v-if="source === 'core'"
+        v-tips="'common.refresh'"
         size="small"
+        type="text"
         icon="refresh"
+        :loading="refreshingCore"
         :aria-label="t('common.refresh')"
-        @click="kernelApiStore.refreshKernelLogs(true)"
+        @click="handleRefreshCoreLogs"
       />
       <Button
         v-tips="pause ? 'common.resume' : 'common.pause'"
         :aria-label="t(pause ? 'common.resume' : 'common.pause')"
+        :aria-pressed="pause"
         :icon="pause ? 'play' : 'pause'"
-        type="text"
+        :type="pause ? 'primary' : 'text'"
         size="small"
         @click="togglePause"
       />
       <Button
         v-tips="'common.clear'"
         :aria-label="t('common.clear')"
+        :disabled="!sourceLogs.length && !pausedLogs.length"
         icon="clear"
         size="small"
         type="text"
@@ -249,15 +286,33 @@ const copyLogs = async () => {
       />
     </div>
 
-    <Empty v-if="filteredLogs.length === 0" />
+    <div class="flex items-center gap-8 mt-6 text-12 text-muted">
+      <span>{{ filteredLogs.length }} / {{ sourceLogs.length }}</span>
+      <Tag v-if="pause" size="small" color="orange">{{ t('common.pause') }}</Tag>
+      <Button
+        v-if="keywords.trim() || logType !== 'info'"
+        type="link"
+        size="small"
+        @click="clearFilters"
+      >
+        {{ t('workspace.clearFilters') }}
+      </Button>
+    </div>
+
+    <Empty v-if="filteredLogs.length === 0">
+      <template v-if="keywords.trim() || logType !== 'info'" #description>
+        <div class="text-12 text-muted">{{ t('workspace.noMatches', [keywords.trim() || logType]) }}</div>
+        <Button type="link" size="small" @click="clearFilters">
+          {{ t('workspace.clearFilters') }}
+        </Button>
+      </template>
+    </Empty>
 
     <div v-else ref="viewport" class="mt-8 overflow-y-auto flex-1" @scroll.passive="onScroll">
       <div
         v-for="log in filteredLogs"
         :key="logKey(log)"
-        v-menu="
-          log.type === 'info' ? menus.map((v) => ({ ...v, handler: () => v.handler?.(log) })) : []
-        "
+        v-menu="log.type === 'info' ? rowMenus(log) : []"
         class="log select-text font-mono text-12 py-2 px-8 flex items-start gap-8"
       >
         <time
@@ -270,58 +325,12 @@ const copyLogs = async () => {
           {{ log.type }}
         </Tag>
         <span class="flex-1 min-w-0 break-all leading-relaxed">{{ log.payload }}</span>
-        <Dropdown v-if="log.type === 'info'" align="end" class="log-actions shrink-0">
-          <Button
-            :aria-label="t('common.more')"
-            icon="more"
-            :icon-size="14"
-            size="small"
-            type="text"
-          />
-          <template #overlay="{ close }">
-            <div class="flex flex-col gap-2 min-w-128 p-6">
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    addLogToRuleset('direct', log)
-                    close()
-                  }
-                "
-              >
-                {{ t('home.connections.addToDirect') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    addLogToRuleset('proxy', log)
-                    close()
-                  }
-                "
-              >
-                {{ t('home.connections.addToProxy') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    addLogToRuleset('reject', log)
-                    close()
-                  }
-                "
-              >
-                {{ t('home.connections.addToReject') }}
-              </Button>
-            </div>
-          </template>
-        </Dropdown>
+        <ResourceActions
+          v-if="log.type === 'info'"
+          :name="log.payload.slice(0, 32)"
+          :items="rowMenus(log)"
+          class="log-actions shrink-0"
+        />
       </div>
     </div>
   </div>

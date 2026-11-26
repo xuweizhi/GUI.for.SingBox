@@ -2,9 +2,7 @@ import { ref } from 'vue'
 
 import { IsStartup } from '@/bridge'
 import * as Stores from '@/stores'
-import { message, sleep } from '@/utils'
-
-const MIN_SPLASH_DURATION = 1000
+import { message } from '@/utils'
 
 export const useAppBootstrap = () => {
   const loading = ref(false)
@@ -61,8 +59,7 @@ export const useAppBootstrap = () => {
       await scheduledTasksStore.setupScheduledTasks()
 
       if (revision !== session) return false
-      const startTime = performance.now()
-      percent.value = 20
+      percent.value = 30
 
       const startup = await IsStartup()
       if (revision !== session) return false
@@ -71,14 +68,11 @@ export const useAppBootstrap = () => {
       }
 
       if (revision !== session) return false
-      percent.value = 40
+      percent.value = 65
       await pluginsStore.onReadyTrigger().catch(showError)
 
       if (revision !== session) return false
-      const duration = performance.now() - startTime
-      percent.value = duration < 500 ? 80 : 100
-      await sleep(Math.max(0, MIN_SPLASH_DURATION - duration))
-      if (revision !== session) return false
+      percent.value = 90
       try {
         await kernelApiStore.initCoreState()
       } catch (error) {
@@ -86,6 +80,7 @@ export const useAppBootstrap = () => {
       }
 
       if (revision !== session) return false
+      percent.value = 100
       initialized.value = true
       return true
     } catch (error) {

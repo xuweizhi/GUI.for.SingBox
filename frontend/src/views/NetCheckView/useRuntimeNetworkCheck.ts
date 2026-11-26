@@ -1,4 +1,5 @@
 import * as Bridge from '@/bridge/browser/go/bridge/App'
+import { EventsEmit } from '@/bridge/browser/runtime/runtime'
 
 import {
   dnsQuery,
@@ -28,6 +29,7 @@ type RequestMethod = 'GET' | 'HEAD'
 type RequestOptions = {
   Proxy?: string
   Timeout?: number
+  CancelId?: string
 }
 
 type BridgeHttpResult = {
@@ -80,7 +82,7 @@ const requestWithoutBody = async (
     Redirect: true,
     FreshConnection: true,
     Timeout: options.Timeout ?? 15,
-    CancelId: '',
+    CancelId: options.CancelId || '',
     FileField: 'file',
     Sha256: '',
     Stream: '',
@@ -128,6 +130,17 @@ export const useRuntimeNetworkCheck = () => {
   const kernelApiStore = useKernelApiStore()
   const profilesStore = useProfilesStore()
   const rulesetsStore = useRulesetsStore()
+  let activeCancelId = ''
+
+  const withCancel = async <T>(fn: (cancelId: string) => Promise<T>) => {
+    const cancelId = `netcheck-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    activeCancelId = cancelId
+    try {
+      return await fn(cancelId)
+    } finally {
+      if (activeCancelId === cancelId) activeCancelId = ''
+    }
+  }
 
   return useNetworkCheck({
     probeApiAvailability: async () => {
@@ -135,8 +148,16 @@ export const useRuntimeNetworkCheck = () => {
       await kernelApiStore.refreshConfig()
     },
     getKernelProxyEndpoint: async () => kernelApiStore.getProxyEndpoint(),
-    httpHead,
-    httpGet,
+    httpHead: (url, headers = {}, options = {}) =>
+      withCancel((cancelId) => httpHead(url, headers, { ...options, CancelId: cancelId })),
+    httpGet: (url, headers = {}, options = {}) =>
+      withCancel((cancelId) => httpGet(url, headers, { ...options, CancelId: cancelId })),
+    onCancel: () => {
+      if (activeCancelId) {
+        EventsEmit(activeCancelId)
+        activeCancelId = ''
+      }
+    },
     tcpPing,
     dnsQuery: async (host: string) => {
       const response = await dnsQuery(host)
@@ -213,11 +234,14 @@ export const useRuntimeNetworkCheck = () => {
           if (!latest) throw error
         }
         if (!latest) return
+        const parsedPort = latest.metadata.destinationPort
+          ? Number(latest.metadata.destinationPort)
+          : undefined
         return {
           host: latest.metadata.host || latest.metadata.destinationIP,
-          port: Number(latest.metadata.destinationPort),
+          port: parsedPort && Number.isFinite(parsedPort) ? parsedPort : undefined,
           rule: [latest.rule, latest.rulePayload].filter(Boolean).join(' · '),
-          chains: latest.chains,
+          chains: latest.chains?.slice().reverse(),
         }
       }
     },

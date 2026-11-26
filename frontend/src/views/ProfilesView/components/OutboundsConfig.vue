@@ -29,7 +29,8 @@ const SubscribesNameMap = ref<Record<string, string>>({})
 
 const fields = ref<App.Outbound>(DefaultOutbound())
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+const renderLabel = (label: string) => (te(label) ? t(label) : label)
 const subscribesStore = useSubscribesStore()
 const nodeGroupsStore = useNodeGroupsStore()
 const proxyGroup = ref([
@@ -66,15 +67,22 @@ const proxyGroup = ref([
 
 const filteredProxyGroups = computed(() => {
   const q = proxySearch.value.trim().toLowerCase()
-  if (!q) return proxyGroup.value
   return proxyGroup.value
-    .map((group) => ({
-      ...group,
-      proxies: group.proxies.filter(
-        (p) => p.tag.toLowerCase().includes(q) || p.type.toLowerCase().includes(q),
-      ),
-    }))
-    .filter((group) => group.proxies.length > 0)
+    .map((group) => {
+      const visible =
+        group.id === 'Built-in'
+          ? group.proxies.filter((p) => p.id !== fields.value.id)
+          : group.proxies
+      return {
+        ...group,
+        proxies: q
+          ? visible.filter(
+              (p) => p.tag.toLowerCase().includes(q) || p.type.toLowerCase().includes(q),
+            )
+          : visible,
+      }
+    })
+    .filter((group) => !q || group.proxies.length > 0)
 })
 
 const preProxyOptions = computed(() => [
@@ -138,7 +146,16 @@ const handleClearGroup = async (outbound: App.Outbound) => {
 }
 
 const handleAddEnd = () => {
+  fields.value.tag = fields.value.tag.trim()
   const { id, tag, type } = fields.value
+  if (!tag) {
+    message.warn('workspace.required')
+    return false
+  }
+  if (model.value.some((outbound) => outbound.id !== id && outbound.tag.trim() === tag)) {
+    message.error(t('common.duplicateKey'))
+    return false
+  }
   if (type === Outbound.Direct || type === Outbound.Block) {
     fields.value.pre_proxy = ''
     fields.value.outbounds = []
@@ -156,6 +173,10 @@ const handleAddEnd = () => {
   })
   if (cycle?.type === 'reserved-tag') {
     message.error(t('kernel.outbounds.reservedTag'))
+    return false
+  }
+  if (cycle?.type === 'missing-node-group') {
+    message.error(t('kernel.outbounds.missingNodeGroup', [cycle.targetId]))
     return false
   }
   if (cycle) {
@@ -499,10 +520,10 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
       <div v-for="group in filteredProxyGroups" :key="group.id" class="group mb-6">
         <Button
           :type="isExpanded(group.id) ? 'link' : 'text'"
-          class="sticky top-0 backdrop-blur-sm w-full justify-start"
+          class="outbound-group-toggle sticky top-0 w-full justify-start"
           @click="toggleExpanded(group.id)"
         >
-          {{ t(group.name) }}
+          {{ renderLabel(group.name) }}
           <div class="ml-auto mr-8 text-muted">{{ group.proxies.length }}</div>
           <Icon
             :class="{ 'rotate-z': isExpanded(group.id) }"
@@ -558,5 +579,10 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
   width: 100%;
   justify-content: flex-start;
   padding: 6px 10px;
+}
+.outbound-group-toggle {
+  z-index: 1;
+  background: var(--surface-elevated-bg, var(--modal-bg));
+  backdrop-filter: blur(var(--surface-blur, 8px));
 }
 </style>

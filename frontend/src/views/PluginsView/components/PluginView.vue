@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 
 import { ReadFile, WriteFile } from '@/bridge'
 import { PluginTriggerEvent } from '@/enums/app'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { usePluginsStore } from '@/stores'
 import { deepClone, message } from '@/utils'
 
@@ -21,12 +22,14 @@ const plugin = ref<App.Plugin>()
 const metadata = ref<Record<string, any>>()
 const code = ref('')
 const ready = ref(false)
+const loadError = ref('')
 
 const { t } = useI18n()
 const pluginsStore = usePluginsStore()
 
 const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
+const { resetBaseline } = useFormDraft(() => code.value)
 
 const handleSave = async () => {
   if (!plugin.value || !ready.value || loading.value) return
@@ -34,12 +37,13 @@ const handleSave = async () => {
   try {
     await WriteFile(plugin.value.path, code.value)
     await pluginsStore.reloadPlugin(plugin.value, code.value, false)
-    handleSubmit()
+    await handleSubmit()
   } catch (error: any) {
     message.error(error)
     console.log(error)
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 const testing = ref(false)
@@ -69,15 +73,20 @@ const handleTest = async (event: PluginTriggerEvent, arg1?: any, arg2?: any) => 
     message.success('common.success')
   } catch (error: any) {
     message.error(error.message || error)
+  } finally {
+    testing.value = false
   }
-  testing.value = false
 }
 
 const initPluginCode = async (p: App.Plugin) => {
+  loadError.value = ''
+  ready.value = false
   try {
-    code.value = pluginsStore.getPluginCodefromCache(p.id) ?? await ReadFile(p.path)
+    code.value = pluginsStore.getPluginCodefromCache(p.id) ?? (await ReadFile(p.path))
     ready.value = true
-  } catch (error) {
+    resetBaseline()
+  } catch (error: any) {
+    loadError.value = error?.message || String(error)
     message.error(error)
   }
 }
@@ -175,5 +184,23 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <CodeEditor v-if="ready" v-model="code" :plugin="metadata" lang="javascript" editable />
+  <div ref="formRoot" class="h-full flex flex-col">
+    <CodeEditor
+      v-if="ready"
+      v-model="code"
+      :plugin="metadata"
+      lang="javascript"
+      editable
+      class="h-full"
+    />
+    <div v-else-if="loadError" class="flex-1 flex flex-col items-center justify-center gap-12 p-16">
+      <div class="text-13 text-danger text-center break-all" role="alert">{{ loadError }}</div>
+      <Button v-if="plugin" type="primary" size="small" @click="initPluginCode(plugin)">{{
+        t('common.retry')
+      }}</Button>
+    </div>
+    <div v-else class="flex-1 flex items-center justify-center">
+      <Icon icon="loading" :size="24" class="rotation" />
+    </div>
+  </div>
 </template>

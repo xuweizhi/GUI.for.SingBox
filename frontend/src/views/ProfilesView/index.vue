@@ -64,17 +64,18 @@ const filteredProfiles = computed(() => {
   return sort.value === 'name' ? records.sort((a, b) => a.name.localeCompare(b.name)) : records
 })
 
+const coreBusy = computed(
+  () =>
+    Boolean(switchingProfileId.value) ||
+    kernelApiStore.starting ||
+    kernelApiStore.stopping ||
+    kernelApiStore.restarting,
+)
+
 const selectProfile = async (id: string, start = false) => {
   const previous = appSettingsStore.app.kernel.profile
   const wasRunning = kernelApiStore.running
-  if (
-    switchingProfileId.value ||
-    kernelApiStore.starting ||
-    kernelApiStore.stopping ||
-    kernelApiStore.restarting ||
-    (id === previous && (wasRunning || !start))
-  )
-    return
+  if (coreBusy.value || (id === previous && (wasRunning || !start))) return
 
   switchingProfileId.value = id
   appSettingsStore.app.kernel.profile = id
@@ -97,9 +98,14 @@ const handleStartWithProfile = (id: string) => selectProfile(id, true)
 const handleUseProfile = (profile: App.Profile) => selectProfile(profile.id)
 
 const handleDuplicateProfile = async (id: string) => {
-  const p = deepClone(profilesStore.getProfileById(id)!)
+  const source = profilesStore.getProfileById(id)
+  if (!source) return
+  const p = deepClone(source)
   p.id = sampleID()
   p.name = p.name + '(Copy)'
+  if (p.experimental?.cache_file?.cache_id) {
+    p.experimental.cache_file.cache_id = sampleID()
+  }
   try {
     await profilesStore.addProfile(p)
     message.success('common.success')
@@ -109,7 +115,8 @@ const handleDuplicateProfile = async (id: string) => {
 }
 
 const handleCopyGeneratedConfig = async (id: string) => {
-  const p = profilesStore.getProfileById(id)!
+  const p = profilesStore.getProfileById(id)
+  if (!p) return
   try {
     const config = await generateConfig(p)
     const str = JSON.stringify(config, null, 2)
@@ -122,7 +129,8 @@ const handleCopyGeneratedConfig = async (id: string) => {
 }
 
 const handlePreviewGeneratedConfig = async (id: string) => {
-  const p = profilesStore.getProfileById(id)!
+  const p = profilesStore.getProfileById(id)
+  if (!p) return
   try {
     const config = await generateConfig(p)
     previewCode(p.name, JSON.stringify(config, null, 2))
@@ -132,7 +140,8 @@ const handlePreviewGeneratedConfig = async (id: string) => {
 }
 
 const handleEditProfileSource = (id: string) => {
-  const profile = profilesStore.getProfileById(id)!
+  const profile = profilesStore.getProfileById(id)
+  if (!profile) return
   const m = modal({ title: profile.name, width: '90', height: '90' })
   m.setContent(ProfileEditor, { profile }).open()
 }
@@ -180,6 +189,7 @@ const secondaryMenusList: App.Menu[] = [
 const generateMenus = (profile: App.Profile) => {
   const moreMenus: App.Menu[] = secondaryMenusList.map((v) => ({
     ...v,
+    disabled: v.label === 'profiles.start' ? coreBusy.value : v.disabled,
     handler: () => v.handler?.(profile.id),
   }))
   const builtInMenus: App.Menu[] = [
@@ -228,7 +238,11 @@ const generateMenus = (profile: App.Profile) => {
   }
 
   return [
-    { label: 'common.use', handler: () => handleUseProfile(profile) },
+    {
+      label: 'common.use',
+      disabled: appSettingsStore.app.kernel.profile === profile.id || coreBusy.value,
+      handler: () => handleUseProfile(profile),
+    },
     ...builtInMenus,
     { label: 'common.delete', handler: () => handleDeleteProfile(profile) },
   ]
@@ -243,7 +257,11 @@ const handleShowProfileForm = (id?: string, step = 1) =>
 
 const handleDeleteProfile = async (p: App.Profile) => {
   const { profile } = appSettingsStore.app.kernel
-  if (profile === p.id && kernelApiStore.running) {
+  if (
+    (profile === p.id &&
+      (kernelApiStore.running || kernelApiStore.starting || kernelApiStore.restarting)) ||
+    switchingProfileId.value === p.id
+  ) {
     message.warn('profiles.shouldStop')
     return
   }
@@ -260,6 +278,9 @@ const handleDeleteProfile = async (p: App.Profile) => {
 
   try {
     await profilesStore.deleteProfile(p.id)
+    if (appSettingsStore.app.kernel.profile === p.id) {
+      appSettingsStore.app.kernel.profile = ''
+    }
     message.success('common.success')
   } catch (error: any) {
     console.error('deleteProfile: ', error)
@@ -326,7 +347,7 @@ const onSortUpdate = debounce(
       :title="p.name"
       :selected="appSettingsStore.app.kernel.profile === p.id"
       class="grid-list-item"
-      @dblclick="handleUseProfile(p)"
+      @dblclick="handleShowProfileForm(p.id)"
     >
       <template #title-prefix>
         <Tag
@@ -368,7 +389,7 @@ const onSortUpdate = debounce(
         <Button
           :type="appSettingsStore.app.kernel.profile === p.id ? 'text' : 'normal'"
           size="small"
-          :disabled="appSettingsStore.app.kernel.profile === p.id"
+          :disabled="appSettingsStore.app.kernel.profile === p.id || coreBusy"
           :loading="switchingProfileId === p.id"
           @click="handleUseProfile(p)"
         >

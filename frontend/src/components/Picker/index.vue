@@ -69,16 +69,17 @@ const handleCancel = () => {
   emit('finish')
 }
 
-const isSelected = (option: ValueType) => selected.value.has(option)
+const isSelected = (option: ValueType) => selected.value.has(toRaw(option))
 
 const handleSelect = (option: PickerItem<ValueType>) => {
-  if (isSelected(option.value)) {
-    if (props.type === 'multi') selected.value.delete(option.value)
+  const raw = toRaw(option.value)
+  if (isSelected(raw)) {
+    if (props.type === 'multi') selected.value.delete(raw)
   } else {
     if (props.type === 'single') selected.value.clear()
-    selected.value.add(option.value)
+    selected.value.add(raw)
     option.onSelect?.({
-      value: option.value,
+      value: raw,
       option,
       options: props.options,
       selected: Array.from(selected.value).map((v) => toRaw(v)),
@@ -87,10 +88,10 @@ const handleSelect = (option: PickerItem<ValueType>) => {
 }
 
 const handleSelectAll = () => {
-  if (filteredOptions.value.some((v) => !selected.value.has(v.value))) {
-    filteredOptions.value.forEach((v) => selected.value.add(v.value))
+  if (filteredOptions.value.some((v) => !selected.value.has(toRaw(v.value)))) {
+    filteredOptions.value.forEach((v) => selected.value.add(toRaw(v.value)))
   } else {
-    filteredOptions.value.forEach((v) => selected.value.delete(v.value))
+    filteredOptions.value.forEach((v) => selected.value.delete(toRaw(v.value)))
   }
 }
 
@@ -105,8 +106,8 @@ useOverlayFocus(dialog, handleCancel)
   >
     <Transition name="dialog-pop" appear>
       <div
-        role="dialog"
         ref="dialog"
+        role="dialog"
         tabindex="-1"
         aria-modal="true"
         :aria-label="t(title)"
@@ -124,15 +125,19 @@ useOverlayFocus(dialog, handleCancel)
           />
         </div>
 
-        <div class="flex-1 overflow-auto px-16 py-12 flex flex-col gap-6">
+        <div
+          role="listbox"
+          :aria-multiselectable="type === 'multi' || undefined"
+          class="flex-1 overflow-auto px-16 py-12 flex flex-col gap-6"
+        >
           <Empty v-if="filteredOptions.length === 0" :icon-size="42" />
           <div
             v-for="(o, i) in filteredOptions"
-            :key="i"
+            :key="`${o.label}-${i}`"
             role="option"
             tabindex="0"
             :aria-selected="isSelected(o.value)"
-            :style="{ background: o.background }"
+            :style="isSelected(o.value) ? undefined : { background: o.background }"
             :class="{ 'is-selected': isSelected(o.value) }"
             class="item py-8 px-12 break-all rounded-8 cursor-pointer"
             @click="handleSelect(o)"
@@ -174,17 +179,20 @@ useOverlayFocus(dialog, handleCancel)
 
 <style lang="less" scoped>
 .gui-overlay-mask {
-  z-index: 99999;
+  z-index: var(--z-dialog, 99999);
   background: var(--modal-mask-bg);
 }
 
 .gui-picker {
   width: min(520px, 100%);
   max-height: min(76dvh, 640px);
-  background: var(--modal-bg);
+  background: var(--surface-elevated-bg, var(--modal-bg));
   color: var(--color);
-  border: 1px solid var(--border-color);
-  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+  border: 1px solid var(--surface-border, var(--border-color));
+  border-radius: var(--modal-radius, 14px);
+  box-shadow: var(--modal-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   overflow: hidden;
 
   .item {
@@ -207,11 +215,11 @@ useOverlayFocus(dialog, handleCancel)
 }
 
 .gui-picker__header {
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--surface-border, var(--border-color));
 }
 
 .gui-picker__footer {
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--surface-border, var(--border-color));
 }
 
 .dialog-pop-enter-active,

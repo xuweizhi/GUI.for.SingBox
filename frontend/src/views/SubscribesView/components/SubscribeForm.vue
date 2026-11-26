@@ -97,6 +97,7 @@ const handleSave = async () => {
     } else {
       await subscribeStore.addSubscribe(sub.value)
     }
+    message.success('common.success')
     await handleSubmit()
   } catch (error: any) {
     console.error(error)
@@ -219,9 +220,9 @@ defineExpose({ modalSlots })
         type="text"
         :aria-expanded="showMore"
         :aria-controls="advancedId"
-        icon="arrowDown"
         @click="toggleShowMore"
       >
+        <Icon icon="arrowDown" :size="14" class="advanced-chevron mr-4" :class="{ 'is-open': showMore }" />
         {{ t('common.advancedSettings') }}
       </Button>
     </Divider>
@@ -331,7 +332,7 @@ defineExpose({ modalSlots })
           </div>
           <div class="form-item">
             {{ t('settings.requestProxy.name') }}
-            <div class="flex items-center gap-4">
+            <div class="flex flex-wrap items-center gap-6">
               <Button
                 v-if="showProxyTest"
                 :loading="proxyTesting"
@@ -387,5 +388,11 @@ defineExpose({ modalSlots })
   border: 1px solid var(--surface-border, var(--border-color));
   background: var(--surface-bg, var(--card-bg));
   resize: vertical;
+}
+.advanced-chevron {
+  transition: transform 0.2s ease;
+}
+.advanced-chevron.is-open {
+  transform: rotate(180deg);
 }
 </style>

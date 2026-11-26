@@ -42,7 +42,7 @@ const processCommands = (commands: Command[], parentLabel = '', parentCmd = '') 
     if (item.children) {
       result.push(...processCommands(item.children, label, cmd))
     } else {
-      result.push({ label, cmd, handler: item.handler })
+      result.push({ label, cmd, desc: item.desc, handler: item.handler })
     }
   })
 
@@ -266,6 +266,7 @@ export const getCommands = () => {
       label: 'commands.plugins',
       cmd: 'Plugins',
       children: pluginsStore.plugins.flatMap((plugin) => {
+        if (plugin.disabled) return []
         const hasTrigger = !!plugin.triggers.find((trigger) => trigger === PluginTrigger.OnManual)
         const hasMenus = !!Object.keys(plugin.menus).length
         if (!hasTrigger && !hasMenus) return []

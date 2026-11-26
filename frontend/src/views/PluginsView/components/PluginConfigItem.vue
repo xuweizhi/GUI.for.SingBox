@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { ref, watch } from 'vue'
 
-import { deepClone, message } from '@/utils'
+import { deepClone } from '@/utils'
 
 interface Props {
   plugin: App.Plugin
@@ -12,7 +12,7 @@ const props = withDefaults(defineProps<Props>(), {
   modelValue: () => ({}),
 })
 
-const emit = defineEmits(['change', 'update:modelValue'])
+const emit = defineEmits(['change', 'reset', 'update:modelValue'])
 
 const model = ref(deepClone(props.modelValue ?? {}))
 
@@ -31,10 +31,11 @@ const getOptions = (val: string[]) => {
   })
 }
 
-const emitUpdate = () => {
+const emitUpdate = (isReset = false) => {
   const val = deepClone(model.value)
   emit('update:modelValue', val)
-  emit('change', val)
+  if (isReset) emit('reset', val)
+  else emit('change', val)
 }
 
 const onChange = (key: string, originalValue: any, value: any) => {
@@ -49,20 +50,19 @@ const onChange = (key: string, originalValue: any, value: any) => {
 
 const handleReset = (key: string) => {
   delete model.value[key]
-  emitUpdate()
+  emitUpdate(true)
 }
 
 const handleResetAll = () => {
   model.value = {}
-  emitUpdate()
-  message.success('common.success')
+  emitUpdate(true)
 }
 
 defineExpose({ reset: handleResetAll })
 </script>
 
 <template>
-  <div class="flex flex-col gap-8 pr-8">
+  <div class="flex flex-col gap-8">
     <slot name="header" v-bind="{ handleResetAll }"></slot>
     <Card
       ><div
@@ -79,7 +79,9 @@ defineExpose({ reset: handleResetAll })
           <div class="flex items-start justify-between gap-8">
             <div class="min-w-0">
               <strong>{{ conf.title }}</strong>
-              <p class="text-12 text-secondary">{{ conf.description }}</p>
+              <p v-if="conf.description" class="text-12 text-secondary m-0 mt-2">
+                {{ conf.description }}
+              </p>
             </div>
             <Button
               v-if="model[conf.key] !== undefined"
@@ -98,8 +100,10 @@ defineExpose({ reset: handleResetAll })
             :model-value="model[conf.key] ?? conf.value"
             :options="getOptions(conf.options)"
             :autofocus="false"
+            auto-size
             editable
             lang="yaml"
+            :class="conf.component === 'Switch' || conf.component === 'ColorPicker' ? '' : 'w-full'"
             @update:model-value="(val: any) => onChange(conf.key, conf.value, val)"
           />
         </div></div

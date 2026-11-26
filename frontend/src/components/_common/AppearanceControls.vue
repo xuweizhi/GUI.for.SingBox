@@ -199,7 +199,7 @@ const onThemeClick = (e: MouseEvent) => {
         />
       </div>
 
-      <div v-if="!quick" class="appearance-section">
+      <div class="appearance-section">
         <div class="appearance-section__label">{{ t('settings.appearance.density') }}</div>
         <Radio v-model="appSettings.app.uiDensity" :options="UiDensityOptions" size="small" />
       </div>
@@ -214,7 +214,7 @@ const onThemeClick = (e: MouseEvent) => {
 }
 
 .appearance-section__label {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--muted-color);
   letter-spacing: 0.02em;
@@ -224,6 +224,12 @@ const onThemeClick = (e: MouseEvent) => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+@container (min-width: 560px) {
+  .style-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .style-option {
@@ -264,7 +270,7 @@ const onThemeClick = (e: MouseEvent) => {
 }
 
 .style-option__name {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
 }
 
@@ -378,11 +384,11 @@ const onThemeClick = (e: MouseEvent) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border-radius: 999px;
-  border: 2px solid rgba(255, 255, 255, 0.4);
+  border: 2px solid color-mix(in srgb, var(--color) 18%, transparent);
   cursor: pointer;
   transition:
     transform 0.14s ease,
@@ -422,7 +428,7 @@ const onThemeClick = (e: MouseEvent) => {
   background: color-mix(in srgb, var(--bg-color) 65%, var(--surface-bg));
   color: var(--color);
   font: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--font-scale, 1));
   font-weight: 500;
   cursor: pointer;
   transition:
@@ -502,7 +508,7 @@ const onThemeClick = (e: MouseEvent) => {
 }
 
 .appearance-section__value {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--accent-text);
 }
@@ -522,14 +528,14 @@ const onThemeClick = (e: MouseEvent) => {
 
 .size-step-btn,
 .size-preset-btn {
-  height: 28px;
-  padding: 0 6px;
+  min-height: 28px;
+  padding: 4px 6px;
   border-radius: var(--control-radius, 8px);
   border: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--bg-color) 65%, var(--surface-bg));
   color: var(--color);
   font: inherit;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 500;
   cursor: pointer;
   transition:

@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 import { useAppStore } from '@/stores'
+
 const props = defineProps<{ items: App.Menu[]; name: string }>()
+const { t } = useI18n()
 const app = useAppStore()
 let openedPosition: typeof app.menuPosition | undefined
 const open = (event: MouseEvent) => {
@@ -22,7 +26,7 @@ const open = (event: MouseEvent) => {
     size="small"
     icon="more"
     aria-haspopup="menu"
-    :aria-label="$t('common.more') + ' · ' + name"
+    :aria-label="t('common.more') + ' · ' + name"
     @click.stop="open"
   />
 </template>

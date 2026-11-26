@@ -7,14 +7,18 @@ import { message } from '@/utils'
 import CodeEditor from '@/components/CodeEditor/index.vue'
 import CodeViewer from '@/components/CodeViewer/index.vue'
 const props = defineProps<{ content: string; lang: 'json' | 'javascript' | 'yaml' | 'text' }>()
+const MAX_SEARCH_RESULTS = 500
 const query = ref('')
 const search = computed(() => query.value.trim())
-const lines = computed(() =>
-  props.content
+const matchedLines = computed(() => {
+  const needle = search.value.toLowerCase()
+  if (!needle) return []
+  return props.content
     .split('\n')
     .map((text, i) => ({ text, number: i + 1 }))
-    .filter((line) => line.text.toLowerCase().includes(search.value.toLowerCase())),
-)
+    .filter((line) => line.text.toLowerCase().includes(needle))
+})
+const visibleLines = computed(() => matchedLines.value.slice(0, MAX_SEARCH_RESULTS))
 const escapeHtml = (text: string) =>
   text
     .replaceAll('&', '&amp;')
@@ -48,15 +52,28 @@ const copy = async () => {
 }
 </script>
 <template>
-  <div class="flex items-center gap-8">
+  <div class="code-preview-toolbar flex items-center gap-8">
     <Input v-model="query" clearable :placeholder="$t('common.search')" class="flex-1" />
+    <span v-if="search" class="resource-count-badge shrink-0">
+      {{
+        matchedLines.length > MAX_SEARCH_RESULTS
+          ? `${MAX_SEARCH_RESULTS} / ${matchedLines.length}`
+          : matchedLines.length
+      }}
+    </span>
     <Button icon="copy" @click="copy">{{ $t('common.copy') }}</Button>
   </div>
   <template v-if="search">
-    <Empty v-if="!lines.length" />
-    <div v-for="line in lines" :key="line.number" class="font-mono text-13 break-all">
-      <span class="text-muted mr-8">{{ line.number }}</span
-      ><span v-html="highlight(line.text)"></span>
+    <Empty v-if="!matchedLines.length" />
+    <div v-else class="mt-8 flex flex-col gap-2">
+      <div
+        v-for="line in visibleLines"
+        :key="line.number"
+        class="font-mono text-13 break-all whitespace-pre-wrap"
+      >
+        <span class="text-muted mr-8">{{ line.number }}</span
+        ><span v-html="highlight(line.text)"></span>
+      </div>
     </div>
   </template>
   <CodeEditor
@@ -75,5 +92,16 @@ const copy = async () => {
     :copyable="false"
     :toolbar="false"
     lang="text"
+    class="mt-8"
   />
 </template>
+
+<style scoped>
+.code-preview-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: 8px;
+  background: var(--surface-elevated-bg, var(--modal-bg));
+}
+</style>

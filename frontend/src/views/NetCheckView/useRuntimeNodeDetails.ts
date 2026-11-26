@@ -17,9 +17,11 @@ export const useRuntimeNodeDetails = (
 
   const refresh = async () => {
     const current = ++revision
-    config.value = undefined
     unavailable.value = false
-    if (!ready.value) return
+    if (!ready.value) {
+      config.value = undefined
+      return
+    }
     try {
       const parsed = JSON.parse(await ReadFile(CoreConfigFilePath))
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -27,7 +29,10 @@ export const useRuntimeNodeDetails = (
       }
       if (current === revision) config.value = parsed
     } catch {
-      if (current === revision) unavailable.value = true
+      if (current === revision) {
+        config.value = undefined
+        unavailable.value = true
+      }
     }
   }
 

@@ -65,10 +65,18 @@ const onFormatChange = (val: 'json' | 'yaml', old: 'json' | 'yaml') => {
         v-model="model.mixin.config"
         :lang="model.mixin.format"
         editable
+        class="mixin-editor mt-8"
       />
     </template>
     <template #script>
-      <CodeEditor v-model="model.script.code" lang="javascript" editable />
+      <CodeEditor v-model="model.script.code" lang="javascript" editable class="mixin-editor" />
     </template>
   </Tabs>
 </template>
+
+<style scoped>
+.mixin-editor {
+  height: min(55vh, 520px);
+  min-height: 240px;
+}
+</style>

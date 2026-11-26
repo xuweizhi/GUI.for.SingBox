@@ -100,9 +100,21 @@ const dialogRef = useTemplateRef<HTMLElement>('dialogRef')
 let previouslyFocused: HTMLElement | null = null
 
 const modalZindex = ref()
+const modalInstanceId = sampleID()
 const appStore = useAppStore()
 const [isMaximize, toggleMaximize] = useBool(false)
 const isMinimize = ref(false)
+
+watch(
+  [open, isMaximize, isMinimize],
+  ([isOpen, maximized, minimized]) => {
+    const set = appStore.modalMaximized
+    if (!set) return
+    if (isOpen && maximized && !minimized) set.add(modalInstanceId)
+    else set.delete(modalInstanceId)
+  },
+  { immediate: true },
+)
 
 interface CloseOptions {
   isOk: boolean
@@ -245,9 +257,9 @@ const handleAction = (isOk: boolean, waitForAnimation = true, forceDestroy = fal
   requestClose({
     isOk,
     runAction: true,
-    waitForAnimation,
+    waitForAnimation: waitForAnimation && open.value && !isMinimize.value,
     destroy: forceDestroy || props.destroyOnClose,
-    restoreOnFailure: !isMinimize.value,
+    restoreOnFailure: open.value && !isMinimize.value,
   })
 
 const onAfterLeave = () => {
@@ -325,7 +337,13 @@ const getFocusableElements = () => {
     dialogRef.value.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((el) => el.offsetParent !== null || el === document.activeElement)
+  ).filter(
+    (el) =>
+      !el.closest('[hidden], [aria-disabled="true"], [inert]') &&
+      (el.offsetParent !== null ||
+        getComputedStyle(el).position === 'fixed' ||
+        el === document.activeElement),
+  )
 }
 
 const handleDialogKeydown = (event: KeyboardEvent) => {
@@ -333,27 +351,30 @@ const handleDialogKeydown = (event: KeyboardEvent) => {
   const focusable = getFocusableElements()
   if (!focusable.length) {
     event.preventDefault()
+    dialogRef.value?.focus()
     return
   }
   const first = focusable[0]!
   const last = focusable[focusable.length - 1]!
+  const active = document.activeElement
+  const outside = !active || !dialogRef.value?.contains(active)
   if (event.shiftKey) {
-    if (
-      document.activeElement === dialogRef.value ||
-      document.activeElement === first ||
-      !dialogRef.value?.contains(document.activeElement)
-    ) {
+    if (active === dialogRef.value || active === first || outside) {
       event.preventDefault()
       last.focus()
     }
-  } else if (document.activeElement === last) {
+  } else if (active === last || outside) {
     event.preventDefault()
     first.focus()
   }
 }
 
 const restoreFocus = () => {
-  if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+  if (
+    previouslyFocused &&
+    previouslyFocused.isConnected &&
+    typeof previouslyFocused.focus === 'function'
+  ) {
     previouslyFocused.focus()
   }
   previouslyFocused = null
@@ -364,7 +385,6 @@ const minimizeModal = markRaw({
   title: () => props.title,
   openFn: () => {
     if (closeState.phase !== 'idle') return
-    modalZindex.value = ++appStore.modalZIndexCounter
     open.value = true
     removeMinimizedModal()
   },
@@ -445,6 +465,7 @@ watch(
 )
 
 onUnmounted(() => {
+  appStore.modalMaximized?.delete(modalInstanceId)
   appStore.modalMinimizers.delete(handleMinimize)
   const idx = appStore.modalStack.findIndex((fn) => fn === closeFn)
   if (idx !== -1) {

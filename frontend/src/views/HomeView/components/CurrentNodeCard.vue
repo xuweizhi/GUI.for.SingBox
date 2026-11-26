@@ -9,8 +9,12 @@ import { useNodeController } from '@/views/HomeView/useNodeController'
 
 import NodeSelectorModal from './NodeSelectorModal.vue'
 
+const props = withDefaults(defineProps<{ active?: boolean }>(), {
+  active: true,
+})
+
 const open = ref(false)
-const active = ref(false)
+const mountedActive = ref(false)
 const controller = useNodeController({ persistPreferences: true })
 const kernelApiStore = useKernelApiStore()
 const { t, te } = useI18n()
@@ -31,17 +35,21 @@ const openSelector = () => {
   open.value = true
 }
 
-const start = () => {
-  active.value = true
-  if (kernelApiStore.running) {
+const syncPolling = () => {
+  if (mountedActive.value && props.active && kernelApiStore.running) {
     controller.startPolling()
   } else {
     controller.stopPolling()
   }
 }
 
+const start = () => {
+  mountedActive.value = true
+  syncPolling()
+}
+
 const stop = () => {
-  active.value = false
+  mountedActive.value = false
   controller.stopPolling()
 }
 
@@ -51,15 +59,10 @@ onDeactivated(stop)
 onUnmounted(stop)
 
 watch(
-  () => kernelApiStore.running,
-  (running) => {
-    if (!active.value) return
-    if (running) {
-      controller.startPolling()
-    } else {
-      open.value = false
-      controller.stopPolling()
-    }
+  [() => kernelApiStore.running, () => props.active],
+  ([running]) => {
+    if (!running) open.value = false
+    syncPolling()
   },
 )
 </script>
@@ -69,7 +72,7 @@ watch(
     data-current-node
     role="button"
     tabindex="0"
-    class="h-full"
+    class="current-node-wrapper h-full"
     :aria-label="t('home.nodes.openSelector')"
     @click="openSelector"
     @keydown.enter.self.prevent="openSelector"
@@ -77,43 +80,45 @@ watch(
   >
     <Card :title="t('home.nodes.current')" :interactive="kernelApiStore.running" class="h-full">
       <template #extra>
-        <Tag v-if="kernelApiStore.running" size="small" color="blue">
-          {{ t(`home.nodes.mode.${mode}`) }}
-        </Tag>
-        <span v-if="stale" class="text-12 text-danger">
-          {{ t('home.nodes.stale') }}
-        </span>
-        <span
-          v-if="primary.delay"
-          class="text-12 font-bold"
-          :style="{ color: delayColor(primary.delay) }"
-        >
-          {{ primary.delay }} ms
-        </span>
-        <span
-          v-else-if="controller.nodeErrors.value.has(primary.leafName)"
-          class="text-12 text-danger"
-        >
-          {{ t('home.nodes.unavailable') }}
-        </span>
-        <Button
-          v-if="isDelayTestableNode(primary.leafName, primary.leaf)"
-          icon="speedTest"
-          :aria-label="t('workspace.testDelay')"
-          type="text"
-          size="small"
-          :loading="controller.testingNodes.value.has(primary.leafName)"
-          @click.stop="testCurrentNode"
-        />
-        <span v-if="kernelApiStore.running" class="text-12 text-muted">{{
-          t('home.nodes.switchNode')
-        }}</span>
-        <Icon
-          v-if="kernelApiStore.running"
-          icon="arrowRight"
-          :size="14"
-          color="var(--muted-color)"
-        />
+        <div class="current-node-extra flex items-center gap-6">
+          <Tag v-if="kernelApiStore.running" size="small" color="blue">
+            {{ t(`home.nodes.mode.${mode}`) }}
+          </Tag>
+          <span v-if="stale" class="text-12 text-danger">
+            {{ t('home.nodes.stale') }}
+          </span>
+          <span
+            v-if="primary.delay"
+            class="text-12 font-bold"
+            :style="{ color: delayColor(primary.delay) }"
+          >
+            {{ primary.delay }} ms
+          </span>
+          <span
+            v-else-if="controller.nodeErrors.value.has(primary.leafName)"
+            class="text-12 text-danger"
+          >
+            {{ t('home.nodes.unavailable') }}
+          </span>
+          <Button
+            v-if="isDelayTestableNode(primary.leafName, primary.leaf)"
+            icon="speedTest"
+            :aria-label="t('workspace.testDelay')"
+            type="text"
+            size="small"
+            :loading="controller.testingNodes.value.has(primary.leafName)"
+            @click.stop="testCurrentNode"
+          />
+          <span v-if="kernelApiStore.running" class="current-node-switch text-12 text-muted">{{
+            t('home.nodes.switchNode')
+          }}</span>
+          <Icon
+            v-if="kernelApiStore.running"
+            icon="arrowRight"
+            :size="14"
+            color="var(--muted-color)"
+          />
+        </div>
       </template>
 
       <div v-if="!kernelApiStore.running" class="py-6 text-12 text-muted">
@@ -143,3 +148,18 @@ watch(
 
   <NodeSelectorModal v-model:open="open" :controller="controller" />
 </template>
+
+<style scoped>
+.current-node-wrapper :deep(.gui-card__header) {
+  flex-wrap: wrap;
+}
+.current-node-extra {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@container (max-width: 640px) {
+  .current-node-switch {
+    display: none;
+  }
+}
+</style>

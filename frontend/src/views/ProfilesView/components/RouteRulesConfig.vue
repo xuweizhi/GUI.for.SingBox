@@ -22,7 +22,7 @@ import {
 } from '@/enums/kernel'
 import { useBool } from '@/hooks'
 import { useNodeGroupsStore } from '@/stores'
-import { deepClone, ensureNodeGroupOutlet, message, type NodeGroupOutletBehavior } from '@/utils'
+import { deepClone, ensureNodeGroupOutlet, isValidJson, message, type NodeGroupOutletBehavior } from '@/utils'
 
 interface Props {
   inboundOptions: { label: string; value: string }[]
@@ -80,6 +80,24 @@ const handleAddInsertionPoint = () => {
 }
 
 const handleAddEnd = () => {
+  if (fields.value.type !== RuleType.InsertionPoint) {
+    if (!fields.value.payload.trim()) {
+      message.warn('workspace.required')
+      return false
+    }
+    if (fields.value.type === RuleType.Inline && !isValidJson(fields.value.payload)) {
+      message.error('kernel.route.rules.invalid')
+      return false
+    }
+  }
+  if (fields.value.action === RuleAction.RouteOptions && !isValidJson(fields.value.outbound)) {
+    message.error('kernel.route.rules.invalid')
+    return false
+  }
+  if (fields.value.action === RuleAction.Route && targetType.value === 'outbound' && !fields.value.outbound) {
+    message.warn('workspace.required')
+    return false
+  }
   if (fields.value.action === RuleAction.Route && targetType.value === 'group') {
     if (!applyNodeGroupOutlet()) return false
   }
@@ -373,10 +391,9 @@ const resetTarget = () => {
     </div>
     <Card class="mt-4 mb-16">
       <template v-if="fields.action === RuleAction.Route">
-        <div class="form-item">
+        <div v-if="nodeGroupOptions.length || targetType === 'group'" class="form-item">
           {{ t('kernel.route.rules.targetType') }}
           <Radio
-            v-if="nodeGroupOptions.length || targetType === 'group'"
             v-model="targetType"
             :options="[
               { label: 'kernel.route.rules.outbound', value: 'outbound' },

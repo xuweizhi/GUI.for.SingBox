@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import logo from '@/assets/logo'
@@ -17,12 +18,17 @@ import {
 const { t } = useI18n()
 const envStore = useEnvStore()
 const appStore = useAppStore()
+const restarting = ref(false)
 
 const handleRestartApp = async () => {
+  if (restarting.value) return
+  restarting.value = true
   try {
     await restartApp()
   } catch (error: any) {
     message.error(error)
+  } finally {
+    restarting.value = false
   }
 }
 
@@ -33,11 +39,12 @@ if (Date.now() - appStore.lastCheckTime > 60_000) {
 
 <template>
   <div class="flex flex-col items-center py-20 gap-10">
-    <img :src="logo" class="w-96" draggable="false" />
+    <img :src="logo" alt="" class="w-96" draggable="false" />
     <div class="text-18 font-bold">{{ APP_TITLE }}</div>
     <div class="flex flex-wrap items-center justify-center gap-8">
       <Button
         v-if="appStore.restartable"
+        :loading="restarting"
         icon="restartApp"
         size="small"
         type="primary"
@@ -47,7 +54,9 @@ if (Date.now() - appStore.lastCheckTime > 60_000) {
       </Button>
       <template v-else>
         <Button
+          v-tips="'plugins.checkForUpdates'"
           :loading="appStore.checkForUpdatesLoading"
+          icon="refresh"
           type="normal"
           size="small"
           @click="appStore.checkForUpdates(true)"

@@ -42,13 +42,15 @@ const isInteractive = computed(() => {
   <div
     :tabindex="attrs.onClick && !disabled ? 0 : undefined"
     :role="attrs.onClick && !attrs.role ? 'button' : undefined"
+    :aria-disabled="disabled || undefined"
     :class="{
       'is-selected': selected,
       'is-flush': flush,
       'is-disabled': disabled,
-      'is-interactive': isInteractive,
+      'is-interactive': isInteractive && !disabled,
     }"
     class="gui-card relative flex flex-col"
+    @click.capture="disabled && attrs.onClick && $event.stopImmediatePropagation()"
     @keydown.enter.self="
       attrs.onClick && !disabled && ($event.currentTarget as HTMLElement).click()
     "
@@ -90,6 +92,8 @@ const isInteractive = computed(() => {
   color: var(--card-color);
   background-color: var(--surface-bg, var(--card-bg));
   box-shadow: var(--card-shadow);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   transition:
     box-shadow 0.2s ease,
     border-color 0.2s ease,
@@ -141,7 +145,7 @@ const isInteractive = computed(() => {
   padding: 0 var(--card-pad-x, 16px);
 }
 .gui-card__body.has-title {
-  padding-bottom: var(--card-pad-x, 16px);
+  padding-bottom: var(--card-pad-y, 14px);
 }
 .gui-card__body:not(.has-title) {
   padding-block: var(--card-pad-y);

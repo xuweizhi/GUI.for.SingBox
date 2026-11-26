@@ -28,7 +28,14 @@ const handleRunTaskNow = async (id: string) => {
   if (runningTasks.value.has(id)) return
   runningTasks.value.add(id)
   try {
-    await scheduledTasksStore.runScheduledTask(id)
+    const log = await scheduledTasksStore.runScheduledTask(id)
+    const items = Array.isArray(log?.result) ? log.result : []
+    const failed = items.filter((item: any) => item && item.ok === false)
+    if (failed.length) {
+      message.warn(failed.map((item: any) => item.result).filter(Boolean).join('\n') || 'common.warning')
+    } else {
+      message.success('common.success')
+    }
   } catch (error) {
     message.error(error)
   } finally {
@@ -38,12 +45,15 @@ const handleRunTaskNow = async (id: string) => {
 
 const handleShowNextRuns = (id: string) => {
   const task = scheduledTasksStore.getScheduledTaskById(id)
-  if (task) {
+  if (!task) return
+  try {
     const list = new Cron(task.cron).nextRuns(20).map((v, i) => {
       const index = (i + 1).toString().padStart(2, '0')
       return `${index}.  ${formatDate(v.getTime(), 'YYYY-MM-DD HH:mm:ss')}`
     })
     previewCode(t('scheduledtasks.next'), list.join('\n'), 'text')
+  } catch (error: any) {
+    message.error(error?.message || error)
   }
 }
 
@@ -145,12 +155,19 @@ const handleDisableTask = async (s: App.ScheduledTask) => {
 }
 
 const generateMenus = (s: App.ScheduledTask) => [
-  ...menuList.map((v) => ({ ...v, handler: () => v.handler?.(s.id) })),
+  ...menuList.map((v) => ({
+    ...v,
+    disabled: v.label === 'scheduledtasks.run' ? runningTasks.value.has(s.id) : v.disabled,
+    handler: () => v.handler?.(s.id),
+  })),
   { label: s.disabled ? 'common.enable' : 'common.disable', handler: () => handleDisableTask(s) },
   { label: 'common.edit', handler: () => handleShowTaskForm(s.id) },
   { label: 'common.delete', handler: () => handleDeleteTask(s) },
 ]
-const onSortUpdate = debounce(scheduledTasksStore.saveScheduledTasks, 1000)
+const onSortUpdate = debounce(
+  () => scheduledTasksStore.saveScheduledTasks().catch((error) => message.error(error)),
+  1000,
+)
 </script>
 
 <template>

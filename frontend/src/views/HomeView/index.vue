@@ -96,6 +96,17 @@ const handleShowKernelLogs = () => {
   m.setContent(KernelLogs).open()
 }
 
+const showLaunchpad = computed(
+  () =>
+    (!kernelApiStore.running && !kernelApiStore.stopping && !kernelApiStore.restarting) ||
+    (kernelApiStore.starting && !kernelApiStore.restarting),
+)
+
+const showConsoleTabs = computed(() => {
+  const pages = appSettingsStore.app.pages || []
+  return !['PolicyGroups', 'Connections', 'Logs'].every((name) => pages.includes(name))
+})
+
 const tabs = computed(() => [
   { key: 'overview' as const, label: t('home.overview.tabOverview'), icon: 'overview' as const },
   { key: 'groups' as const, label: t('home.overview.tabGroups'), icon: 'link' as const },
@@ -107,17 +118,31 @@ const tabs = computed(() => [
   },
   { key: 'logs' as const, label: t('home.overview.tabLogs'), icon: 'log' as const },
 ])
+
+const onTabKeydown = (event: KeyboardEvent, index: number) => {
+  const list = tabs.value
+  let next = -1
+  if (event.key === 'ArrowRight') next = (index + 1) % list.length
+  else if (event.key === 'ArrowLeft') next = (index - 1 + list.length) % list.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = list.length - 1
+  if (next === -1) return
+  event.preventDefault()
+  setTab(list[next]!.key)
+  const nav = (event.currentTarget as HTMLElement | null)?.closest('[role="tablist"]')
+  nav?.querySelectorAll<HTMLElement>('[role="tab"]')?.[next]?.focus()
+}
 </script>
 
 <template>
   <div class="home-view flex flex-col h-full min-h-0">
     <div
-      v-if="(!kernelApiStore.running && !kernelApiStore.stopping) || kernelApiStore.starting"
+      v-if="showLaunchpad"
       class="launchpad flex-1 flex flex-col items-center justify-center py-24"
     >
       <Card class="launchpad-card">
         <div
-          v-if="activeTab !== 'overview'"
+          v-if="activeTab !== 'overview' && profilesStore.profiles.length > 0"
           class="core-required-banner mb-12 flex flex-wrap items-center justify-center gap-8 rounded-8 px-12 py-8 text-12"
         >
           <span>{{
@@ -136,7 +161,7 @@ const tabs = computed(() => [
           </Button>
         </div>
         <div class="flex flex-col items-center px-8">
-          <img :src="logo" draggable="false" class="w-96 mb-16" />
+          <img :src="logo" alt="" draggable="false" class="w-96 mb-16" />
 
           <template v-if="profilesStore.profiles.length === 0">
             <p class="text-muted text-center mb-16">{{ t('home.noProfile', [APP_TITLE]) }}</p>
@@ -157,6 +182,7 @@ const tabs = computed(() => [
                 v-for="p in visibleProfiles"
                 :key="p.id"
                 :selected="appSettingsStore.app.kernel.profile === p.id"
+                :aria-pressed="appSettingsStore.app.kernel.profile === p.id"
                 interactive
                 @click="appSettingsStore.app.kernel.profile = p.id"
               >
@@ -166,8 +192,12 @@ const tabs = computed(() => [
                   {{ p.name }}
                 </div>
               </Card>
-              <Dropdown v-if="profilesStore.profiles.length > 4" placement="top">
-                <Card interactive class="h-full">
+              <Dropdown
+                v-if="profilesStore.profiles.length > 4"
+                placement="top"
+                class="home-profile-dropdown"
+              >
+                <Card interactive class="h-full w-full">
                   <div
                     class="w-128 min-h-48 flex items-center justify-center py-6 text-center font-bold text-13"
                   >
@@ -180,7 +210,7 @@ const tabs = computed(() => [
                       v-for="p in hiddenProfiles"
                       :key="p.id"
                       type="text"
-                      class="justify-between"
+                      class="justify-start"
                       @click="
                         () => {
                           appSettingsStore.app.kernel.profile = p.id
@@ -189,11 +219,6 @@ const tabs = computed(() => [
                       "
                     >
                       <span>{{ p.name }}</span>
-                      <Icon
-                        v-if="appSettingsStore.app.kernel.profile === p.id"
-                        icon="selected"
-                        color="var(--accent-text)"
-                      />
                     </Button>
                   </div>
                 </template>
@@ -209,6 +234,7 @@ const tabs = computed(() => [
             <div class="flex flex-wrap items-center justify-center gap-10">
               <Button
                 :loading="kernelApiStore.starting"
+                :disabled="!profilesStore.currentProfile"
                 type="primary"
                 size="large"
                 class="start-profile-btn"
@@ -228,11 +254,27 @@ const tabs = computed(() => [
       </Card>
     </div>
 
-    <template v-else-if="!kernelApiStore.coreStateLoading">
-      <div class="console-header flex flex-col gap-10 mb-14 shrink-0">
+    <div
+      v-else-if="kernelApiStore.coreStateLoading && !kernelApiStore.restarting"
+      class="flex-1 flex items-center justify-center"
+    >
+      <Icon icon="loading" :size="24" class="rotation text-muted" />
+    </div>
+
+    <template v-else>
+      <div
+        v-if="kernelApiStore.restarting"
+        role="status"
+        class="core-restarting-banner mb-10 flex items-center gap-8 rounded-8 px-12 py-8 text-12 shrink-0"
+      >
+        <Icon icon="loading" :size="14" class="rotation shrink-0" />
+        <span>{{ t('home.overview.restart') }}...</span>
+      </div>
+
+      <div v-if="showConsoleTabs" class="console-header flex flex-col gap-10 mb-14 shrink-0">
         <nav class="console-tabs" role="tablist" :aria-label="t('home.overview.workspace')">
           <button
-            v-for="tab in tabs"
+            v-for="(tab, index) in tabs"
             :key="tab.key"
             type="button"
             role="tab"
@@ -240,6 +282,7 @@ const tabs = computed(() => [
             :class="{ 'is-active': activeTab === tab.key }"
             class="console-tab"
             @click="setTab(tab.key)"
+            @keydown="onTabKeydown($event, index)"
           >
             <Icon :icon="tab.icon" :size="15" color="currentColor" />
             <span>{{ tab.label }}</span>
@@ -255,8 +298,13 @@ const tabs = computed(() => [
       </div>
 
       <div class="console-workspace flex-1 min-h-0 flex flex-col">
-        <div v-show="activeTab === 'overview'" class="console-pane console-pane--scroll">
+        <div
+          v-show="activeTab === 'overview'"
+          role="tabpanel"
+          class="console-pane console-pane--scroll"
+        >
           <OverView
+            :active="activeTab === 'overview'"
             @open-groups="setTab('groups')"
             @open-connections="setTab('connections')"
             @open-logs="setTab('logs')"
@@ -266,6 +314,7 @@ const tabs = computed(() => [
 
         <div
           v-show="activeTab !== 'overview'"
+          role="tabpanel"
           class="console-pane"
           :class="activeTab === 'groups' ? 'console-pane--scroll' : 'console-pane--fill'"
         >
@@ -392,6 +441,11 @@ const tabs = computed(() => [
   background: var(--warning-soft);
   border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
 }
+.core-restarting-banner {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent-text) 35%, transparent);
+}
 .quick-start-card {
   border-style: dashed;
 }
@@ -409,6 +463,11 @@ const tabs = computed(() => [
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .home-profile-dropdown {
+    width: 100%;
+    align-items: stretch;
+  }
+
   .home-profile-options :deep(.w-128) {
     width: 100%;
     overflow-wrap: anywhere;
@@ -419,6 +478,10 @@ const tabs = computed(() => [
     display: flex;
     flex-wrap: nowrap;
     overflow-x: auto;
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      display: none;
+    }
   }
 
   .console-tab {

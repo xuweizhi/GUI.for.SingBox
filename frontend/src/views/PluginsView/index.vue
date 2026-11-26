@@ -20,8 +20,9 @@ import PluginView from './components/PluginView.vue'
 
 const handleReloadPlugin = async (id: string) => {
   const plugin = pluginsStore.getPluginById(id)
+  if (!plugin) return
   try {
-    await pluginsStore.reloadPlugin(plugin!)
+    await pluginsStore.reloadPlugin(plugin)
     message.success('common.success')
   } catch (error: any) {
     console.log(error)
@@ -176,23 +177,26 @@ const handleDisablePlugin = async (p: App.Plugin) => {
 }
 
 const handleEditPluginCode = (id: string, title: string) => {
-  const m = modal({ title, width: '90' })
+  const m = modal({ title, width: '90', height: '90' })
   m.setContent(PluginView, { id }).open()
 }
 
 const handleOnRun = async (p: App.Plugin) => {
+  if (p.running) return
   p.running = true
   try {
     await pluginsStore.manualTrigger(p.id, PluginTriggerEvent.OnManual)
   } catch (error: any) {
     message.error(error)
+  } finally {
+    p.running = false
   }
-  p.running = false
 }
 
 const handlePluginMenuTrigger = async (p: App.Plugin, fn: string) => {
+  if (p.running) return
+  p.running = true
   try {
-    p.running = true
     await pluginsStore.manualTrigger(p.id, fn as any)
   } catch (error: any) {
     message.error(error)
@@ -224,12 +228,16 @@ const generateMenus = (p: App.Plugin) => {
   }))
 
   return [
-    { label: 'common.update', disabled: p.updating, handler: () => handleUpdatePlugin(p) },
+    {
+      label: 'common.update',
+      disabled: p.disabled || p.updating || updatingAll.value,
+      handler: () => handleUpdatePlugin(p),
+    },
     ...builtInMenus,
     ...pluginMenus,
     { label: 'plugins.source', handler: () => handleEditPluginCode(p.id, p.name) },
     ...(p.triggers.includes(PluginTrigger.OnManual) && !p.disabled
-      ? [{ label: 'common.run', handler: () => handleOnRun(p) }]
+      ? [{ label: 'common.run', disabled: p.running, handler: () => handleOnRun(p) }]
       : []),
     {
       label: p.disabled ? 'common.enable' : 'common.disable',
@@ -241,8 +249,14 @@ const generateMenus = (p: App.Plugin) => {
 }
 
 const noUpdateNeeded = computed(() => pluginsStore.plugins.every((v) => v.disabled))
+const anyUpdating = computed(
+  () => updatingAll.value || pluginsStore.plugins.some((item) => item.updating),
+)
 
-const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
+const onSortUpdate = debounce(
+  () => pluginsStore.savePlugins().catch((error) => message.error(error)),
+  1000,
+)
 </script>
 
 <template>
@@ -278,7 +292,7 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
       {{ t('plugins.checkForUpdates') }}
     </Button>
     <Button
-      :disabled="noUpdateNeeded"
+      :disabled="noUpdateNeeded || anyUpdating"
       :type="noUpdateNeeded ? 'text' : 'link'"
       :loading="updatingAll"
       @click="handleUpdatePlugins"
@@ -367,13 +381,13 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
         </div>
       </div>
 
-      <div class="flex items-center gap-6 mt-10">
-        <Button type="link" size="small" class="pl-0" @click="handleEditPluginCode(p.id, p.name)">
+      <div class="resource-card-footer">
+        <Button type="text" size="small" @click="handleEditPluginCode(p.id, p.name)">
           {{ t('plugins.source') }}
         </Button>
         <Button
           v-if="p.configuration.length"
-          type="link"
+          type="text"
           size="small"
           @click="handleConfigurePlugin(p)"
         >

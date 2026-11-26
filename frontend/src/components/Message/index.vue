@@ -31,12 +31,12 @@ const icon = computed(() => iconMap[props.icon] as any)
 <template>
   <Transition name="slide-down" appear>
     <div
-      role="status"
-      aria-live="polite"
+      :role="props.icon === 'error' ? 'alert' : 'status'"
+      :aria-live="props.icon === 'error' ? 'assertive' : 'polite'"
       class="gui-message flex items-center gap-8 py-8 pl-14 pr-8 rounded-8 my-4"
     >
       <Icon class="shrink-0" :icon="icon" />
-      <div class="text-14 break-all">{{ t(content) }}</div>
+      <div class="text-14 break-all whitespace-pre-wrap">{{ t(content) }}</div>
       <Button
         icon="close"
         :icon-size="12"

@@ -11,9 +11,17 @@ const clearFilters = () => {
 <template>
   <section class="hub">
     <div class="hub-toolbar flex flex-wrap items-center gap-8">
-      <Input v-model="query" class="flex-1" clearable :placeholder="$t('common.search')" />
+      <Input
+        v-model="query"
+        size="small"
+        class="flex-1 min-w-160"
+        clearable
+        :placeholder="$t('common.search')"
+      />
       <Select
+        v-if="categories.length"
         v-model="category"
+        size="small"
         :options="[
           { label: 'workspace.all', value: '' },
           ...categories.map((c) => ({ label: c, value: c })),
@@ -29,7 +37,10 @@ const clearFilters = () => {
       <slot name="actions" />
     </div>
     <div v-if="count" class="hub-results"><slot /></div>
-    <Empty v-else-if="!loading"
+    <div v-else-if="loading" class="flex-1 flex items-center justify-center py-24">
+      <Icon icon="loading" :size="24" class="rotation" />
+    </div>
+    <Empty v-else
       ><template #description>
         <template v-if="query.trim() || category"
           >{{ $t('workspace.noMatches', [query.trim() || category]) }}

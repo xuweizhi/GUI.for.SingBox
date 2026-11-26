@@ -8,7 +8,7 @@ interface Props {
 
 const model = defineModel<string | number | boolean>()
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   options: () => [],
   size: 'default',
 })
@@ -25,21 +25,38 @@ const handleSelect = (val: string | number | boolean) => {
   model.value = val
   emits('change', val, oldValue)
 }
+
+const handleKeydown = (event: KeyboardEvent, index: number) => {
+  const count = props.options.length
+  if (!count) return
+  let next = -1
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % count
+  else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + count) % count
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = count - 1
+  if (next === -1) return
+  event.preventDefault()
+  const opt = props.options[next]
+  if (!opt) return
+  handleSelect(opt.value)
+  const group = (event.currentTarget as HTMLElement | null)?.closest('[role="radiogroup"]')
+  group?.querySelectorAll<HTMLElement>('[role="radio"]')?.[next]?.focus()
+}
 </script>
 
 <template>
   <div role="radiogroup" :class="[size]" class="gui-radio inline-flex text-12">
     <button
-      v-for="o in options"
+      v-for="(o, index) in options"
       :key="o.value.toString()"
-      v-tips.slow="o.label"
+      v-tips="o.label"
       type="button"
       role="radio"
       :aria-checked="o.value === model"
-      :aria-pressed="o.value === model"
       :class="{ active: o.value === model }"
       class="gui-radio-button cursor-pointer px-12 py-6 duration-200"
       @click="handleSelect(o.value)"
+      @keydown="handleKeydown($event, index)"
     >
       {{ t(o.label) }}
     </button>

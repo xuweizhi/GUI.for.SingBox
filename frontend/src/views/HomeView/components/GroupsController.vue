@@ -117,8 +117,17 @@ watch(
   },
   { immediate: true },
 )
-const useProxyWithCatchError = (group: any, proxy: any) => {
-  handleUseProxy(group, proxy).catch((err: any) => message.error(err.message || err))
+const switchingGroup = ref('')
+const useProxyWithCatchError = async (group: any, proxy: any) => {
+  if (switchingGroup.value === group.name) return
+  switchingGroup.value = group.name
+  try {
+    await handleUseProxy(group, proxy)
+  } catch (err: any) {
+    message.error(err.message || err)
+  } finally {
+    if (switchingGroup.value === group.name) switchingGroup.value = ''
+  }
 }
 
 const toggleExpanded = (group: string) => {
@@ -399,7 +408,7 @@ onScopeDispose(() => {
         <span class="font-bold text-16">{{ group.name }}</span>
         <Tag size="small" color="blue">{{ group.type }}</Tag>
         <Tag size="small" color="default">{{ group.all.length }}</Tag>
-        <span class="text-muted">·</span>
+        <span v-if="group.chains.length" class="text-muted">·</span>
         <template v-for="(chain, index) in group.chains" :key="chain">
           <span v-if="index !== 0" class="text-muted">→</span>
           <Button type="text" size="small" @click.stop="locateGroup(group, chain)">
@@ -425,13 +434,16 @@ onScopeDispose(() => {
           size="small"
         >
           <template #editable>
-            <Button
-              type="text"
-              size="small"
-              icon="filter"
-              :aria-label="t('common.keywords')"
-              :icon-color="isFiltered(group.name) ? 'var(--accent-text)' : ''"
-            />
+            <span class="inline-flex items-center gap-4 px-4 py-2 text-12">
+              <Icon
+                icon="filter"
+                :size="14"
+                :color="isFiltered(group.name) ? 'var(--accent-text)' : 'var(--muted-color)'"
+              />
+              <span v-if="isFiltered(group.name)" class="text-12">{{
+                filterKeywordsMap[group.name]
+              }}</span>
+            </span>
           </template>
         </Input>
         <Button
@@ -447,6 +459,7 @@ onScopeDispose(() => {
         <Button
           type="text"
           size="small"
+          :aria-label="t(isExpanded(group.name) ? 'home.overview.collapseAll' : 'home.overview.expandAll')"
           :aria-expanded="isExpanded(group.name)"
           @click="toggleExpanded(group.name)"
         >
@@ -460,7 +473,25 @@ onScopeDispose(() => {
     </div>
     <Transition name="expand">
       <div v-if="isExpanded(group.name)" class="py-8 px-4">
-        <Empty v-if="group.all.length === 0" />
+        <Empty v-if="group.all.length === 0">
+          <template v-if="isFiltered(group.name) || search.trim()" #description>
+            <div class="text-12 text-muted">
+              {{ t('workspace.noMatches', [filterKeywordsMap[group.name] || search.trim()]) }}
+            </div>
+            <Button
+              type="link"
+              size="small"
+              @click="
+                () => {
+                  filterKeywordsMap[group.name] = ''
+                  search = ''
+                }
+              "
+            >
+              {{ t('workspace.clearFilters') }}
+            </Button>
+          </template>
+        </Empty>
         <div
           v-else
           class="groups-card-grid grid gap-8"
@@ -486,7 +517,7 @@ onScopeDispose(() => {
             }"
             :compact="!appSettings.app.kernel.cardMode"
             :selected="proxy.name === group.now"
-            :disabled="group.type !== 'Selector'"
+            :disabled="group.type !== 'Selector' || switchingGroup === group.name"
             :favorite="isFavorite(proxy.name)"
             :testing="isLoading(proxy.name)"
             @favorite="toggleFavorite(proxy.name)"
@@ -569,6 +600,8 @@ onScopeDispose(() => {
 .group-header {
   background-color: var(--surface-bg);
   border: 1px solid var(--surface-border);
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
 }
 
 .group-header {
@@ -576,11 +609,6 @@ onScopeDispose(() => {
   &:hover {
     border-color: color-mix(in srgb, var(--accent-text) 45%, var(--surface-border));
   }
-}
-
-.ring-active {
-  outline: 2px solid var(--accent-text);
-  outline-offset: 2px;
 }
 
 .expand-enter-active,

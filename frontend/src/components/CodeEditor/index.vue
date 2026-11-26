@@ -150,8 +150,9 @@ watch(
   },
 )
 
+const isInModal = inject(IS_IN_MODAL, false)
 let timer: ReturnType<typeof setTimeout>
-onMounted(() => (timer = setTimeout(() => initEditor(), inject(IS_IN_MODAL, false) ? 100 : 0)))
+onMounted(() => (timer = setTimeout(() => initEditor(), isInModal ? 100 : 0)))
 onUnmounted(() => {
   disposed = true
   notifyChange.cancel()
@@ -279,7 +280,7 @@ const formatDocument = () => {
 }
 :deep(.cm-scroller) {
   font-family: monaco, Consolas, Menlo, Courier, monospace;
-  font-size: 14px;
+  font-size: calc(13.5px * var(--font-scale, 1));
 }
 :deep(.cm-focused) {
   outline: none;

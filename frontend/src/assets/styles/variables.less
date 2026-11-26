@@ -2,8 +2,22 @@
   --x: 0px;
   --y: 0px;
 
-  --primary-color: rgb(0, 89, 214);
-  --secondary-color: rgb(5, 62, 142);
+  --primary-color: #2563eb;
+  --secondary-color: #1d4ed8;
+
+  // Z-Index Layers
+  --z-chrome: 30;
+  --z-sidebar: 40;
+  --z-drawer-backdrop: 900;
+  --z-drawer: 910;
+  --z-modal-base: 1000;
+  --z-dock: 9000;
+  --z-command: 9500;
+  --z-popover: 10000;
+  --z-menu: 10010;
+  --z-dialog: 99999;
+  --z-tips: 100100;
+  --z-toast: 999999;
 
   // Semantic Status
   --danger-color-light: #d93025;
@@ -54,11 +68,11 @@
   --btn-normal-color-dark: #e7edf5;
   --btn-normal-bg-dark: #252e3f;
   --btn-normal-border-color-dark: #3b475d;
-  --btn-normal-hover-color-dark: var(--accent-text);
+  --btn-normal-hover-color-dark: var(--accent-text-dark);
   --btn-normal-hover-bg-dark: #2c374c;
-  --btn-normal-hover-border-color-dark: var(--accent-text);
+  --btn-normal-hover-border-color-dark: var(--accent-text-dark);
   --btn-normal-active-color-dark: #ffffff;
-  --btn-normal-active-border-color-dark: var(--accent-text);
+  --btn-normal-active-border-color-dark: var(--accent-text-dark);
 
   --btn-primary-color-light: #ffffff;
   --btn-primary-bg-light: var(--primary-color);
@@ -85,10 +99,10 @@
   --btn-link-hover-color-light: var(--secondary-color);
   --btn-link-active-color-light: var(--primary-color);
 
-  --btn-link-color-dark: var(--accent-text);
+  --btn-link-color-dark: var(--accent-text-dark);
   --btn-link-bg-dark: transparent;
   --btn-link-hover-color-dark: color-mix(in srgb, var(--primary-color) 28%, white);
-  --btn-link-active-color-dark: var(--accent-text);
+  --btn-link-active-color-dark: var(--accent-text-dark);
 
   --btn-text-color-light: #253248;
   --btn-text-bg-light: transparent;
@@ -115,7 +129,7 @@
 
   --radio-normal-color-dark: #cdd7e5;
   --radio-normal-bg-dark: transparent;
-  --radio-normal-hover-color-dark: var(--accent-text);
+  --radio-normal-hover-color-dark: var(--accent-text-dark);
   --radio-primary-color-dark: #ffffff;
   --radio-primary-bg-dark: var(--primary-color);
   --radio-primary-hover-bg-dark: color-mix(in srgb, var(--primary-color) 82%, white);
@@ -137,7 +151,7 @@
   --progress-inner-bg-light: var(--primary-color);
 
   --progress-bg-dark: rgba(221, 229, 240, 0.12);
-  --progress-inner-bg-dark: var(--accent-text);
+  --progress-inner-bg-dark: var(--accent-text-dark);
 
   // Dropdown
   --dropdown-bg-light: rgba(255, 255, 255, 0.96);

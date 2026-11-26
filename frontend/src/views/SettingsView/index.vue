@@ -64,13 +64,19 @@ const appStore = useAppStore()
   width: 100%;
   min-height: 0;
   gap: 24px;
-  :deep(.gui-tabs-tab) {
+  :deep(.gui-tabs-rail) {
     flex-shrink: 0;
     gap: 4px;
   }
-  :deep(.gui-tabs-tab > .gui-button) {
+  :deep(.gui-tabs-tab > .gui-button),
+  :deep(.gui-tabs-extra > .gui-button) {
     justify-content: flex-start;
     min-height: 40px;
+  }
+  :deep(.gui-tabs-extra) {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
   }
   :deep(.gui-tabs-tab > .link) {
     background: var(--accent-soft);
@@ -79,8 +85,6 @@ const appStore = useAppStore()
   :deep(.gui-tabs-content) {
     flex: 1;
     min-width: 0;
-  }
-  :deep(.gui-tabs-content > .pr-20) {
     padding-right: 4px;
   }
 }
@@ -88,18 +92,19 @@ const appStore = useAppStore()
   .settings-tabs {
     flex-direction: column;
     gap: 16px;
-    :deep(.gui-tabs-tab) {
-      width: 100% !important;
-      flex-direction: row;
-      overflow-x: auto;
-      flex-wrap: nowrap;
+    :deep(.gui-tabs-extra) {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
     }
-    :deep(.gui-tabs-tab > .gui-button) {
+    :deep(.gui-tabs-tab > .gui-button),
+    :deep(.gui-tabs-extra > .gui-button) {
       justify-content: center;
       min-height: 44px;
     }
     :deep(.gui-tabs-content) {
       width: 100% !important;
+      padding-right: 0;
     }
   }
 }

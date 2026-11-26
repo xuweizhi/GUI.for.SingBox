@@ -26,7 +26,10 @@ vi.mock('@/constant/app', () => ({
   LocalesFilePath: '',
 }))
 
-vi.mock('@/lang', () => ({ loadLocale: vi.fn() }))
+vi.mock('@/lang', () => ({
+  default: { global: { t: (key: string) => key } },
+  loadLocale: vi.fn(),
+}))
 vi.mock('@/components', () => ({ AboutView: {} }))
 vi.mock('@/stores/env', () => ({
   useEnvStore: () => ({ env: { appName: '', os: 'linux', arch: '' } }),

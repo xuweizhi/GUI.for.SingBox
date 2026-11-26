@@ -223,7 +223,15 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
 
   const defaultSettings = deepClone(app.value)
 
-  const saveAppSettings = debounce((config: string) => {
+  const saveAppSettings = debounce(() => {
+    const days = Number(app.value.log?.retentionDays)
+    const normalizedDays = Number.isFinite(days)
+      ? Math.min(3650, Math.max(1, Math.trunc(days)))
+      : 14
+    if (app.value.log && app.value.log.retentionDays !== normalizedDays) {
+      app.value.log.retentionDays = normalizedDays
+    }
+    const config = stringify(app.value)
     const save = pendingSave.then(async () => {
       if (latestUserSettings === config) return
       await WriteFile(UserFilePath, config)
@@ -329,7 +337,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     theme(theme: App.Theme) {
       const isAuto = theme === Theme.Auto
       if (isAuto) {
-        themeMode.value = mediaQueryList.matches ? Theme.Dark : Theme.Light
+        themeMode.value = mediaQueryList?.matches ? Theme.Dark : Theme.Light
       } else {
         themeMode.value = theme
       }
@@ -337,7 +345,9 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     lang(lang: string) {
       i18n.global.locale.value = lang
       if (!i18n.global.availableLocales.includes(lang)) {
-        loadLocale(lang)
+        void Promise.resolve(loadLocale(lang)).catch((error) =>
+          console.error('Failed to load locale:', error),
+        )
       }
     },
     color(color: App.Color, primary: string, secondary: string) {
@@ -374,28 +384,19 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     },
   }
 
-  /* Apply AppSettings */
-  const onAppSettingsChange = (settings: App.AppSettings) => {
-    applyAppSettings.theme(settings.theme)
-    applyAppSettings.color(settings.color, settings.primaryColor, settings.secondaryColor)
-    applyAppSettings.lang(settings.lang)
-    applyAppSettings.fontFamily(settings.fontFamily)
-    applyAppSettings.fontSize(settings.fontSize)
-    applyAppSettings.customFontPresets(settings.customFontPresets)
-    applyAppSettings.uiStyle(settings.uiStyle)
-    applyAppSettings.uiDensity(settings.uiDensity)
-    if (latestUserSettings !== undefined) {
-      saveAppSettings(stringify(settings)).catch((error) =>
-        console.error('Failed to save user settings:', error),
-      )
-    }
-  }
-  watch(app, onAppSettingsChange, { deep: true })
-
   /* Apply AppTheme */
-  const themeMode = ref<Extract<App.Theme, 'light' | 'dark'>>(Theme.Light)
-  const mediaQueryList = window.matchMedia('(prefers-color-scheme: dark)')
-  mediaQueryList.addEventListener('change', ({ matches }) => {
+  const mediaQueryList =
+    typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-color-scheme: dark)')
+      : null
+  const themeMode = ref<Extract<App.Theme, 'light' | 'dark'>>(
+    app.value.theme === Theme.Auto
+      ? mediaQueryList?.matches
+        ? Theme.Dark
+        : Theme.Light
+      : app.value.theme,
+  )
+  mediaQueryList?.addEventListener?.('change', ({ matches }) => {
     if (app.value.theme === Theme.Auto) {
       themeMode.value = matches ? Theme.Dark : Theme.Light
     }
@@ -412,7 +413,78 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
       document.body.setAttribute('theme-mode', theme)
     }
   }
-  watch(themeMode, setAppTheme, { immediate: true })
+  document.body.setAttribute('theme-mode', themeMode.value)
+  watch(themeMode, setAppTheme)
+
+  const syncLoginPref = (key: string, value: string) => {
+    try {
+      window.localStorage.setItem(key, value)
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  /* Targeted Appearance Watchers */
+  watch(
+    () => app.value.theme,
+    (theme) => {
+      applyAppSettings.theme(theme)
+      if (latestUserSettings !== undefined) {
+        if (theme === Theme.Light || theme === Theme.Dark) syncLoginPref('gfs.login.theme', theme)
+        else {
+          try {
+            window.localStorage.removeItem('gfs.login.theme')
+          } catch {
+            // ignore
+          }
+        }
+      }
+    },
+  )
+  watch(
+    () => [app.value.color, app.value.primaryColor, app.value.secondaryColor] as const,
+    ([color, primary, secondary]) => applyAppSettings.color(color, primary, secondary),
+  )
+  watch(
+    () => app.value.lang,
+    (lang) => {
+      applyAppSettings.lang(lang)
+      if (latestUserSettings !== undefined) syncLoginPref('gfs.login.lang', lang)
+    },
+  )
+  watch(
+    () => app.value.fontFamily,
+    (fontFamily) => applyAppSettings.fontFamily(fontFamily),
+  )
+  watch(
+    () => app.value.fontSize,
+    (fontSize) => applyAppSettings.fontSize(fontSize),
+  )
+  watch(
+    () => app.value.customFontPresets,
+    (presets) => applyAppSettings.customFontPresets(presets),
+    { deep: true },
+  )
+  watch(
+    () => app.value.uiStyle,
+    (style) => applyAppSettings.uiStyle(style),
+  )
+  watch(
+    () => app.value.uiDensity,
+    (density) => applyAppSettings.uiDensity(density),
+  )
+
+  watch(
+    app,
+    () => {
+      if (latestUserSettings !== undefined) {
+        saveAppSettings().catch((error) => console.error('Failed to save user settings:', error))
+      }
+    },
+    { deep: true },
+  )
+
+  applyAppSettings.color(app.value.color, app.value.primaryColor, app.value.secondaryColor)
   applyAppSettings.uiStyle(app.value.uiStyle)
   applyAppSettings.uiDensity(app.value.uiDensity)
   applyAppSettings.fontFamily(app.value.fontFamily)

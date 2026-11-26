@@ -49,7 +49,16 @@ const readonlyMessage = computed(() =>
     : 'home.nodes.directReadonly',
 )
 
+const clearFilters = () => {
+  query.value = ''
+  nodeGroupFilter.value = '__all'
+}
+
 const prepareModal = async () => {
+  if (!batch.value.running && batch.value.cancelled) {
+    batch.value.completed = 0
+    batch.value.cancelled = false
+  }
   try {
     await props.controller.prepareModal()
   } catch (error) {
@@ -97,6 +106,13 @@ const openRoutePolicies = async () => {
     size="drawer"
     mask-closable
   >
+    <div
+      v-if="mode === 'global' && !proxyActive"
+      role="alert"
+      class="stale-banner rounded-8 p-10 mb-8 text-12"
+    >
+      {{ t('home.nodes.globalProxyInactive') }}
+    </div>
     <details class="mode-details mb-8">
       <summary class="text-muted text-12 cursor-pointer">
         {{ t(`home.nodes.mode.${mode}`) }} · {{ t('home.nodes.effectiveChain') }}
@@ -105,9 +121,6 @@ const openRoutePolicies = async () => {
         <div class="flex items-center gap-8">
           <Tag size="small" color="blue">{{ t(`home.nodes.mode.${mode}`) }}</Tag>
           <span>{{ t(modeMessage) }}</span>
-        </div>
-        <div v-if="mode === 'global' && !proxyActive" class="mt-4 text-danger">
-          {{ t('home.nodes.globalProxyInactive') }}
         </div>
         <div v-if="effectiveChain" class="mt-8">
           <div class="font-bold">{{ t('home.nodes.effectiveChain') }}</div>
@@ -190,7 +203,10 @@ const openRoutePolicies = async () => {
     <Empty v-if="nodes.length === 0" :description="emptyMessage">
       <template #description>
         <div class="text-12 text-muted">{{ emptyMessage }}</div>
-        <Button v-if="!filtering" type="link" size="small" @click="openSubscriptions">
+        <Button v-if="filtering" type="link" size="small" @click="clearFilters">
+          {{ t('workspace.clearFilters') }}
+        </Button>
+        <Button v-else type="link" size="small" @click="openSubscriptions">
           {{ t('home.nodes.addSubscription') }}
         </Button>
       </template>
@@ -225,6 +241,8 @@ const openRoutePolicies = async () => {
 <style lang="less" scoped>
 .node-toolbar {
   background: var(--surface-elevated-bg, var(--modal-bg));
+  border-bottom: 1px solid var(--surface-border, var(--border-color));
+  margin-bottom: 8px;
 }
 
 .readonly-banner {

@@ -60,6 +60,7 @@ const handleSubmit = async () => {
     } else {
       await rulesetsStore.addRuleset(ruleset.value)
     }
+    message.success('common.success')
     await finishSave?.()
   } catch (error: any) {
     console.error(props.isUpdate ? 'editRuleset: ' : 'addRuleset: ', error)
@@ -91,7 +92,7 @@ watch(
     const isJson = v === RulesetFormat.Source
     if (!isJson && ruleset.value.type === 'Manual') {
       ruleset.value.format = old
-      message.error('Not support')
+      message.error('common.notSupported')
       return
     }
     ruleset.value.path = ruleset.value.path.replace(

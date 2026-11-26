@@ -15,14 +15,14 @@ const props = withDefaults(defineProps<Props>(), { id: '' })
 
 const { t } = useI18n()
 const logsStore = useLogsStore()
-const pluginsStore = useScheduledTasksStore()
+const scheduledTasksStore = useScheduledTasksStore()
 
-const plugin = ref(pluginsStore.getScheduledTaskById(props.id)?.name ?? '')
+const selectedTaskId = ref(props.id || '')
 const keywords = ref('')
 
 const columns: Column[] = [
   {
-    title: 'scheduledtasks.name',
+    title: 'scheduledtask.name',
     align: 'center',
     key: 'name',
   },
@@ -55,24 +55,43 @@ const columns: Column[] = [
   },
 ]
 
-const pluginsOptions = computed(() =>
-  [{ label: 'All', value: '' }].concat(
-    ...pluginsStore.scheduledtasks.map((v) => ({
+const taskOptions = computed(() =>
+  [{ label: 'workspace.all', value: '' }].concat(
+    scheduledTasksStore.scheduledtasks.map((v) => ({
       label: v.name,
-      value: v.name,
+      value: v.id,
     })),
   ),
 )
 
 const filteredLogs = computed(() => {
-  return logsStore.scheduledtasksLogs.filter((v) => {
-    const p = plugin.value ? v.name === plugin.value : true
-    const k = buildSmartRegExp(keywords.value, 'i').test(JSON.stringify(v.result))
-    return p && k
-  })
+  const q = keywords.value.trim()
+  const matcher = q ? buildSmartRegExp(q, 'i') : null
+  const selectedTask = selectedTaskId.value
+    ? scheduledTasksStore.getScheduledTaskById(selectedTaskId.value)
+    : undefined
+  return logsStore.scheduledtasksLogs
+    .filter((v) => {
+      const hitTask = selectedTaskId.value
+        ? v.id
+          ? v.id === selectedTaskId.value
+          : Boolean(selectedTask && v.name === selectedTask.name)
+        : true
+      if (!hitTask) return false
+      if (!matcher) return true
+      const text = Array.isArray(v.result)
+        ? v.result.map((entry: any) => String(entry?.result ?? entry ?? '')).join(' ')
+        : String(v.result ?? '')
+      return matcher.test(v.name) || matcher.test(text)
+    })
+    .map((v, idx) => ({
+      ...v,
+      _rowKey: `${v.id || v.name}-${v.startTime}-${v.endTime}-${idx}`,
+    }))
 })
 
 const clearLogs = async () => {
+  if (logsStore.scheduledtasksLogs.length === 0) return
   const ok = await confirm(
     t('common.clear'),
     t('common.confirmClear', [t('scheduledtasks.logs')]),
@@ -81,41 +100,66 @@ const clearLogs = async () => {
     () => true,
     () => false,
   )
-  if (ok) await pluginsStore.clearScheduledTaskLogs().catch(message.error)
+  if (ok) await scheduledTasksStore.clearScheduledTaskLogs().catch(message.error)
 }
 </script>
 
 <template>
   <div class="h-full flex flex-col">
-    <div class="flex items-center">
-      <span class="mr-4">
-        {{ t('scheduledtasks.name') }}
-        :
-      </span>
-      <Select v-model="plugin" :options="pluginsOptions" size="small" />
+    <div class="flex flex-wrap items-center gap-8">
+      <span class="text-12 text-muted"> {{ t('scheduledtask.name') }}: </span>
+      <Select v-model="selectedTaskId" :options="taskOptions" size="small" />
       <Input
         v-model="keywords"
         clearable
         size="small"
         :placeholder="t('common.keywords')"
-        class="ml-8 flex-1"
+        class="flex-1 min-w-160"
       />
       <Button
         v-tips="'common.clear'"
+        :aria-label="t('common.clear')"
+        :disabled="logsStore.scheduledtasksLogs.length === 0"
         icon="clear"
         size="small"
         type="text"
-        class="ml-8"
         @click="clearLogs"
       />
     </div>
 
-    <Empty v-if="filteredLogs.length === 0" />
+    <div
+      v-if="filteredLogs.length === 0"
+      class="flex-1 flex flex-col items-center justify-center gap-8"
+    >
+      <Empty />
+      <Button
+        v-if="keywords.trim() || selectedTaskId"
+        size="small"
+        @click="
+          () => {
+            keywords = ''
+            selectedTaskId = ''
+          }
+        "
+      >
+        {{ t('workspace.clearFilters') }}
+      </Button>
+    </div>
 
-    <Table v-else :columns="columns" :data-source="filteredLogs" sort="startTime" class="mt-8">
+    <Table
+      v-else
+      :columns="columns"
+      :data-source="filteredLogs"
+      sort="startTime"
+      class="mt-8"
+    >
       <template #result="{ record }">
-        <div class="flex flex-col gap-8 text-left">
-          <div v-for="item in record.result" :key="item">
+        <div class="flex flex-col gap-6 text-left">
+          <div
+            v-for="(item, index) in record.result"
+            :key="`${record._rowKey}-${index}`"
+            class="break-all"
+          >
             <span :style="{ color: item.ok ? 'var(--success-color)' : 'var(--danger-color)' }"
               >●</span
             >

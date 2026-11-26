@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, reactive, ref, shallowRef } from 'vue'
+import { computed, onActivated, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useWebuiAuthStore } from '@/stores'
@@ -39,6 +39,15 @@ const preview = ref<Preview>()
 const showPreview = ref(false)
 const source = ref('')
 const dav = reactive({ url: '', username: '', password: '' })
+const trimmedDavUrl = computed(() => dav.url.trim())
+
+watch(showPreview, (open) => {
+  if (!open) {
+    selected.value = undefined
+    preview.value = undefined
+    source.value = ''
+  }
+})
 
 const request = async (action: string, init: RequestInit = {}) => {
   const response = await fetch('/__webui/api/backup/' + action, init)
@@ -72,7 +81,11 @@ onActivated(() => void run('history', refreshHistory))
 
 const toggle = (enabled: boolean) =>
   run('history', async () => {
-    await request('history', { method: 'PUT', body: JSON.stringify({ enabled }) })
+    await request('history', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    })
     auto.value = enabled
   })
 
@@ -105,8 +118,12 @@ const chooseFile = (event: Event) => {
 const chooseSnapshot = (name: string) =>
   run('snapshot', async () => {
     pendingSnapshot.value = name
-    const response = await request('snapshot?name=' + encodeURIComponent(name))
-    await inspect(await response.blob(), name)
+    try {
+      const response = await request('snapshot?name=' + encodeURIComponent(name))
+      await inspect(await response.blob(), name)
+    } finally {
+      pendingSnapshot.value = ''
+    }
   })
 
 const restore = async () => {
@@ -125,12 +142,14 @@ const restore = async () => {
 
 const webdav = (upload: boolean) =>
   run(upload ? 'upload' : 'download', async () => {
+    const url = trimmedDavUrl.value
+    if (!url) return
     const action = upload ? 'webdav-upload' : 'webdav-download'
     const send = () =>
       request(action, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dav),
+        body: JSON.stringify({ ...dav, url }),
       })
     const response = upload ? await withConfigMutation(send) : await send()
     if (upload) message.success('common.success')
@@ -200,30 +219,40 @@ const webdav = (upload: boolean) =>
       <div class="flex flex-col">
         <div class="settings-row">
           <label for="backup-dav-url" class="text-13 font-bold">{{ t('backup.davUrl') }}</label>
-          <Input v-model="dav.url" input-id="backup-dav-url" placeholder="https://…/backup.zip" />
+          <Input
+            v-model="dav.url"
+            input-id="backup-dav-url"
+            placeholder="https://…/backup.zip"
+            class="w-full"
+          />
         </div>
         <div class="settings-row">
           <label for="backup-dav-user" class="text-13 font-bold">{{ t('backup.username') }}</label>
-          <Input v-model="dav.username" input-id="backup-dav-user" />
+          <Input v-model="dav.username" input-id="backup-dav-user" class="w-full" />
         </div>
         <div class="settings-row">
           <label for="backup-dav-password" class="text-13 font-bold">{{
             t('backup.password')
           }}</label>
-          <Input v-model="dav.password" type="password" input-id="backup-dav-password" />
+          <Input
+            v-model="dav.password"
+            type="password"
+            input-id="backup-dav-password"
+            class="w-full"
+          />
         </div>
         <div class="flex flex-wrap gap-8 mt-4">
           <Button
             type="primary"
             :loading="busyAction === 'upload'"
-            :disabled="!dav.url || (busy && busyAction !== 'upload')"
+            :disabled="!trimmedDavUrl || (busy && busyAction !== 'upload')"
             @click="webdav(true)"
           >
             {{ t('backup.upload') }}
           </Button>
           <Button
             :loading="busyAction === 'download'"
-            :disabled="!dav.url || (busy && busyAction !== 'download')"
+            :disabled="!trimmedDavUrl || (busy && busyAction !== 'download')"
             @click="webdav(false)"
           >
             {{ t('backup.download') }}

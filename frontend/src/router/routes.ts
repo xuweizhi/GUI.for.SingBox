@@ -146,6 +146,13 @@ const routes: RouteRecordRaw[] = [
       hidden: false,
     },
   },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/',
+    meta: {
+      hidden: true,
+    },
+  },
 ]
 
 export default routes

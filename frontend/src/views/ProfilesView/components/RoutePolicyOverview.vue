@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { Outbound } from '@/enums/kernel'
+import { Outbound, RuleType } from '@/enums/kernel'
 import { useNodeGroupsStore } from '@/stores'
 import {
   findOutboundGraphIssues,
@@ -14,7 +14,12 @@ import {
   setInitialOutboundTarget,
 } from '@/utils/outboundPolicy'
 
-const props = defineProps<{ route: App.Route; outbounds: App.Outbound[]; dns: App.Dns }>()
+const props = defineProps<{
+  route: App.Route
+  outbounds: App.Outbound[]
+  dns: App.Dns
+  inboundOptions?: { label: string; value: string }[]
+}>()
 const primaryProxyOutbound = defineModel<string | undefined>('primaryProxyOutbound', {
   default: '',
 })
@@ -69,7 +74,19 @@ const rulesFor = (outbound: App.Outbound) =>
     (rule) => rule.enable && rule.action === 'route' && rule.outbound === outbound.id,
   )
 
-const ruleLabel = (rule: App.Rule) => `${rule.type}: ${rule.payload}`
+const ruleLabel = (rule: App.Rule) => {
+  let displayPayload = rule.payload
+  if (rule.type === RuleType.RuleSet) {
+    displayPayload = rule.payload
+      .split(',')
+      .map((id) => props.route.rule_set.find((rs) => rs.id === id)?.tag || id)
+      .join(', ')
+  } else if (rule.type === RuleType.Inbound) {
+    displayPayload =
+      props.inboundOptions?.find((option) => option.value === rule.payload)?.label || rule.payload
+  }
+  return `${rule.type}: ${displayPayload}`
+}
 
 const hasContraryTarget = (outbound: App.Outbound) => {
   const role = getOutboundRole(outbound)

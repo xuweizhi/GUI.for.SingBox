@@ -36,9 +36,8 @@ const resolverAddress = (server: Record<string, any> | undefined) => {
   } catch {
     // Native DNS server definitions store a hostname or IP rather than a URL.
   }
-  return [server.type, display, server.server_port ? `:${server.server_port}` : '']
-    .filter(Boolean)
-    .join(' ')
+  const endpoint = `${display}${server.server_port ? `:${server.server_port}` : ''}`
+  return [server.type, endpoint].filter(Boolean).join(' ')
 }
 
 export const resolveRuntimeNodeDetails = (

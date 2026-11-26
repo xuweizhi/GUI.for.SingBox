@@ -109,12 +109,20 @@ const handleSave = async () => {
     } else {
       await pluginsStore.addPlugin(plugin.value)
     }
+    message.success('common.success')
     await handleSubmit()
   } catch (error: any) {
     console.error(error)
     message.error(error)
+  } finally {
+    loading.value = false
   }
-  loading.value = false
+}
+
+const hasDefaultValue = (value: unknown) => {
+  if (Array.isArray(value)) return value.length !== 0
+  if (value && typeof value === 'object') return Object.keys(value).length !== 0
+  return Boolean(value)
 }
 
 const handleAddParam = async () => {
@@ -134,12 +142,7 @@ const handleDelParam = (index: number) => {
 }
 
 const hasOption = (component: App.PluginConfiguration['component']) => {
-  return (
-    component !== 'InputList' &&
-    ['CheckBox', 'InputList', 'Radio', 'Select', 'MultipleSelect'].includes(
-      component as ComponentType,
-    )
-  )
+  return ['CheckBox', 'Radio', 'Select', 'MultipleSelect'].includes(component as ComponentType)
 }
 
 const onComponentChange = (component: ComponentType, index: number) => {
@@ -369,7 +372,7 @@ defineExpose({ modalSlots })
                 >
               </div>
             </div>
-            <div class="form-item" :class="{ 'items-start': conf.value.length !== 0 }">
+            <div class="form-item" :class="{ 'items-start': hasDefaultValue(conf.value) }">
               {{ t('plugin.confDefault') }}
               <div
                 :class="
@@ -379,7 +382,7 @@ defineExpose({ modalSlots })
                 "
               >
                 <Component
-                  :is="conf.component"
+                  :is="(conf.component as any) === 'CodeViewer' ? 'CodeEditor' : conf.component"
                   v-model="conf.value"
                   :options="getOptions(conf.options)"
                   editable
