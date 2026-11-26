@@ -14,6 +14,17 @@ const kernelApiStore = useKernelApiStore()
 const nodeController = useNodeController({ includePolicyNodes: true })
 const networkCheck = useRuntimeNetworkCheck()
 const runError = ref('')
+const testedNode = ref('')
+const checkedAt = ref<Date>()
+const currentNode = computed(() => nodeController.primary.value.leafName || '')
+const totals = computed(() => {
+  const items = networkCheck.groups.value.flatMap((g) => g.items)
+  return {
+    passed: items.filter((i) => i.status === 'success').length,
+    failed: items.filter((i) => i.status === 'failed').length,
+    skipped: items.filter((i) => i.status === 'skipped').length,
+  }
+})
 
 const presetTargets = [
   { label: 'gstatic 204', value: 'https://www.gstatic.com/generate_204' },
@@ -47,8 +58,10 @@ const handleRun = async () => {
   if (networkCheck.running.value) return
   runError.value = ''
 
+  const initialNode = currentNode.value
   try {
-    await networkCheck.run()
+    testedNode.value = (await networkCheck.run()) ?? initialNode
+    checkedAt.value = new Date()
     if (kernelApiStore.running) {
       await Promise.resolve(nodeController.refresh()).catch(() => undefined)
       await runtimeNode.refresh()
@@ -65,23 +78,37 @@ const applyPreset = (target: string) => {
 
 const clearResults = () => {
   runError.value = ''
+  testedNode.value = ''
+  checkedAt.value = undefined
   networkCheck.clear()
 }
+const verdictColor = computed(() => {
+  if (networkCheck.running.value) return 'blue'
+  if (totals.value.failed || !totals.value.passed) return 'red'
+  return 'green'
+})
 
 const active = ref(false)
-const activate = () => { active.value = true }
-const deactivate = () => { active.value = false }
+const activate = () => {
+  active.value = true
+}
+const deactivate = () => {
+  active.value = false
+}
 onMounted(activate)
 onActivated(activate)
 onDeactivated(deactivate)
-watch(() => active.value && kernelApiStore.running, (running) => void syncNodeController(running))
+watch(
+  () => active.value && kernelApiStore.running,
+  (running) => void syncNodeController(running),
+)
 onUnmounted(() => nodeController.stopPolling())
 </script>
 
 <template>
   <div class="net-check flex flex-col gap-16 pb-16">
     <Card>
-      <div class="flex flex-col gap-10 py-14">
+      <div class="flex flex-col gap-10">
         <div class="text-13 text-muted">
           {{ t('netCheck.target.description') }}
         </div>
@@ -128,8 +155,55 @@ onUnmounted(() => nodeController.stopPolling())
       </div>
     </Card>
 
+    <section
+      v-if="checkedAt && networkCheck.groups.value.length"
+      class="net-check__verdict surface-panel p-12"
+      aria-live="polite"
+    >
+      <div class="flex flex-wrap items-center gap-8">
+        <Tag size="small" :color="verdictColor">
+          {{
+            t(
+              networkCheck.running.value
+                ? 'netCheck.status.running'
+                : totals.failed || !totals.passed
+                  ? 'workspace.issues'
+                  : 'workspace.passed',
+            )
+          }}
+        </Tag>
+        <strong>{{
+          t(
+            networkCheck.running.value
+              ? 'netCheck.status.running'
+              : totals.failed || !totals.passed
+                ? 'workspace.issues'
+                : 'workspace.passed',
+          )
+        }}</strong>
+        <span class="text-12 text-muted"
+          >{{ t('workspace.tested') }} {{ testedNode || t('common.none') }} ·
+          {{ checkedAt.toLocaleTimeString() }}</span
+        >
+      </div>
+      <div class="text-12 text-secondary mt-4">
+        {{ t('netCheck.summary.groupCountSuccess', [totals.passed]) }} ·
+        {{ t('netCheck.summary.groupCountFailed', [totals.failed]) }} ·
+        {{ t('netCheck.summary.groupCountSkipped', [totals.skipped]) }}
+      </div>
+      <div
+        v-if="!networkCheck.running.value && testedNode && currentNode !== testedNode"
+        class="net-check__stale mt-8"
+      >
+        <span>{{ t('workspace.nodeChanged', [currentNode || t('common.none'), testedNode]) }}</span>
+        <Button size="small" :disabled="networkCheck.running.value" @click="handleRun">{{
+          t('netCheck.actions.run')
+        }}</Button>
+      </div>
+    </section>
     <div class="net-check__grid">
-      <Card :title="t('netCheck.results.title')">
+      <section class="net-check__results">
+        <div class="text-16 font-bold mb-12">{{ t('netCheck.results.title') }}</div>
         <div
           v-if="networkCheck.groups.value.length === 0"
           class="py-24 text-center text-13 text-muted"
@@ -144,7 +218,7 @@ onUnmounted(() => nodeController.stopPolling())
             :running="networkCheck.running.value"
           />
         </div>
-      </Card>
+      </section>
 
       <NodeDiagnosticsPanel
         :controller="nodeController"
@@ -177,8 +251,23 @@ onUnmounted(() => nodeController.stopPolling())
   background: var(--danger-soft);
   border: 1px solid color-mix(in srgb, var(--danger-color) 35%, transparent);
 }
+.net-check__verdict {
+  border-color: var(--surface-border);
+}
+.net-check__stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  color: var(--danger-color);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger-color) 35%, transparent);
+  border-radius: var(--control-radius);
+  font-size: calc(12px * var(--font-scale, 1));
+}
 
-@media (max-width: 1040px) {
+@container (max-width: 1024px) {
   .net-check__grid {
     grid-template-columns: minmax(0, 1fr);
   }

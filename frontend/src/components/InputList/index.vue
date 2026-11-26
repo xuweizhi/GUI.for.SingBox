@@ -94,7 +94,7 @@ const emitUpdate = () => {
       class="flex flex-col gap-2"
     >
       <TransitionGroup name="list">
-        <Card v-for="item in innerList" :key="item.id">
+        <Card v-for="item in innerList" :key="item.id" flush>
           <div class="flex items-center py-4 break-all">
             <span class="mr-auto">{{ item.value }}</span>
             <Button

@@ -2,6 +2,7 @@
 import { ref, inject, h, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { useNodeGroupsStore, useProfilesStore } from '@/stores'
 import { generateConfig, message, restoreProfile } from '@/utils'
 
@@ -24,6 +25,7 @@ const nodeGroupsStore = useNodeGroupsStore()
 
 const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
+const { resetBaseline } = useFormDraft(() => profileText.value)
 
 const handleSave = async () => {
   if (!ready.value || loading.value) return
@@ -69,6 +71,7 @@ onMounted(() => {
     baseline = JSON.parse(JSON.stringify(text))
     profileText.value = JSON.stringify(text, null, 2)
     ready.value = true
+    resetBaseline()
   }).catch((error) => message.error(error))
 })
 
@@ -99,5 +102,7 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <CodeEditor v-if="ready" v-model="profileText" lang="json" editable class="h-full" />
+  <div ref="formRoot" class="h-full">
+    <CodeEditor v-if="ready" v-model="profileText" lang="json" editable class="h-full" />
+  </div>
 </template>

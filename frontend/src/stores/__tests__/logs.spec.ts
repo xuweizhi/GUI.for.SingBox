@@ -20,6 +20,20 @@ describe('logs store', () => {
     ])
   })
 
+  it('keeps the console sources independent during refresh and clear', () => {
+    const store = useLogsStore()
+    store.recordKernelApiLog({ type: 'info', payload: 'API message' })
+    store.hydrateKernelLogs('INFO[0001] process output')
+    expect(store.apiEntries.map(entry => entry.payload)).toEqual(['API message'])
+    expect(store.processEntries.map(entry => entry.payload)).toEqual(['INFO[0001] process output'])
+    store.clearSource('core')
+    store.hydrateKernelLogs('INFO[0001] process output')
+    expect(store.processEntries).toEqual([])
+    expect(store.apiEntries).toHaveLength(1)
+    store.hydrateKernelLogs('INFO[0002] refreshed', true)
+    expect(store.processEntries[0]?.payload).toBe('INFO[0002] refreshed')
+  })
+
   it('records live kernel logs in both raw and structured collections', () => {
     const store = useLogsStore()
 

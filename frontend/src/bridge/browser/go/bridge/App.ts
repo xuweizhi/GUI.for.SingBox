@@ -37,6 +37,8 @@ export const ExecBackground = (
 ) => flagResult('ExecBackground', [arg1, arg2, arg3, arg4, arg5])
 export const FileExists = (arg1: string) => flagResult('FileExists', [arg1])
 export const FileSHA256 = (arg1: string) => flagResult('FileSHA256', [arg1])
+export const CoreStartTime = () => invokeBridge<number>('CoreStartTime', [])
+
 export const FindOwnedCore = (branch: string, args: string[]) =>
   invokeBridge<number>('FindOwnedCore', [branch, args])
 export const StopOwnedCore = (pid: number, timeout = 10) =>
@@ -72,6 +74,10 @@ type SubscriptionUsageReport = Pick<
 
 export const RefreshSubscriptionUsage = (id: string, proxy: string, userAgent: string) =>
   invokeBridge<SubscriptionUsageReport>('RefreshSubscriptionUsage', [id, proxy, userAgent])
+export const UpdateSubscriptionSettings = (
+  id: string,
+  changes: Record<string, { before: unknown; after: unknown }>,
+) => invokeBridge<void>('UpdateSubscriptionSettings', [id, changes])
 export const ReloadScheduledTaskWorker = () => flagResult('ReloadScheduledTaskWorker')
 export const RemoveFile = (arg1: string) => flagResult('RemoveFile', [arg1])
 export const Requests = (

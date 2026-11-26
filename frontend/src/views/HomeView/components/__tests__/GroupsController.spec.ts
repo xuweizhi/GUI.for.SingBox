@@ -23,6 +23,7 @@ vi.mock('@/bridge', () => ({}))
 vi.mock('@/stores', () => {
   mocks.store ||= reactive({
     proxies: {},
+    getNodePreferenceKey: (name: string) => name,
     refreshProviderProxies: mocks.refresh,
     refreshConfig: vi.fn(),
   })
@@ -31,6 +32,7 @@ vi.mock('@/stores', () => {
     useProfilesStore: () => ({ currentProfile: { outbounds: [] } }),
     useAppSettingsStore: () => ({
       app: {
+        nodePreferences: { favorites: [], recent: [] },
         kernel: {
           testUrl: 'https://probe.test',
           testTimeout: 4321,
@@ -49,7 +51,7 @@ vi.mock('@/utils', () => ({
   handleUseProxy: vi.fn(),
   ignoredError: (fn: () => Promise<unknown>) => fn().catch(() => undefined),
   sleep: vi.fn(),
-  message: { info: mocks.info, error: mocks.error, warn: mocks.warn, success: vi.fn() },
+  message: { info: mocks.info, error: mocks.error, warn: mocks.warn, success: mocks.complete },
 }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -90,6 +92,7 @@ const mountController = () =>
     global: {
       stubs: {
         Button: {
+          emits: ['click'],
           template: '<button v-bind="$attrs" @click="$emit(\'click\', $event)"><slot /></button>',
         },
         Card: { template: '<div><slot /></div>' },
@@ -116,6 +119,7 @@ const mountKeepAliveController = () =>
       global: {
         stubs: {
           Button: {
+            emits: ['click'],
             template: '<button v-bind="$attrs" @click="$emit(\'click\', $event)"><slot /></button>',
           },
           Card: { template: '<div><slot /></div>' },
@@ -133,7 +137,9 @@ const mountKeepAliveController = () =>
     },
   )
 const expandGroup = async (wrapper: ReturnType<typeof mountController>) => {
-  await wrapper.get('.sticky.z-2').trigger('click')
+  if (wrapper.get('[aria-expanded]').attributes('aria-expanded') !== 'true') {
+    await wrapper.get('.group-header').trigger('click')
+  }
 }
 const flushTasks = async () => {
   for (let index = 0; index < 6; index++) await Promise.resolve()
@@ -191,15 +197,17 @@ describe('GroupsController latency tasks', () => {
     )
   })
 
-  it('delegates group message close to cancel', async () => {
+  it('cancels the group from its inline progress control', async () => {
     const task = deferredTask()
     mocks.submit.mockReturnValueOnce(task)
     const wrapper = mountController()
     await wrapper.get('[data-test="group-delay-Proxy"]').trigger('click')
     const options = mocks.submit.mock.calls[0]![0]
     options.onResult({ ok: true, name: 'HK', delay: 55, attempts: 1 })
-    const close = mocks.info.mock.calls[0]![2]
-    close()
+    await wrapper.vm.$nextTick()
+    const cancel = wrapper.get('[data-test="cancel-Proxy"]')
+    expect(cancel.text()).toContain('1/2')
+    await cancel.trigger('click')
     expect(task.cancel).toHaveBeenCalledOnce()
     task.resolve(summary({ total: 2, completed: 2, success: 1, cancelled: true }))
     await vi.waitFor(() => expect(mocks.refresh).toHaveBeenCalledOnce())
@@ -208,40 +216,16 @@ describe('GroupsController latency tasks', () => {
     expect(mocks.complete).not.toHaveBeenCalled()
   })
 
-  it('destroys a normal completion after three seconds without blocking done or refresh', async () => {
+  it('removes inline progress after completion and reports the result once', async () => {
     const task = deferredTask()
     mocks.submit.mockReturnValueOnce(task)
     const wrapper = mountController()
     await wrapper.get('[data-test="group-delay-Proxy"]').trigger('click')
+    expect(wrapper.find('[data-test="cancel-Proxy"]').exists()).toBe(true)
     task.resolve(summary({ total: 2, completed: 2, success: 2 }))
-
-    await flushTasks()
+    await vi.waitFor(() => expect(mocks.complete).toHaveBeenCalledOnce())
+    expect(wrapper.find('[data-test="cancel-Proxy"]').exists()).toBe(false)
     expect(mocks.refresh).toHaveBeenCalledOnce()
-    expect(mocks.complete).toHaveBeenCalledOnce()
-    expect(mocks.destroy).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(2999)
-    expect(mocks.destroy).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(mocks.destroy).toHaveBeenCalledOnce()
-  })
-
-  it('destroys the completion toast immediately and clears its timer when unmounted', async () => {
-    const task = deferredTask()
-    mocks.submit.mockReturnValueOnce(task)
-    const wrapper = mountController()
-    await wrapper.get('[data-test="group-delay-Proxy"]').trigger('click')
-    task.resolve(summary({ total: 2, completed: 2, success: 2 }))
-    await flushTasks()
-    expect(mocks.complete).toHaveBeenCalledOnce()
-    expect(mocks.destroy).not.toHaveBeenCalled()
-
-    mocks.info.mock.calls[0]![2]()
-    expect(mocks.warn).not.toHaveBeenCalled()
-    expect(task.cancel).not.toHaveBeenCalled()
-    wrapper.unmount()
-    expect(mocks.destroy).toHaveBeenCalledOnce()
-    await vi.advanceTimersByTimeAsync(3000)
-    expect(mocks.destroy).toHaveBeenCalledOnce()
   })
 
   it('submits a single, writes failure history and toasts the original error with node', async () => {

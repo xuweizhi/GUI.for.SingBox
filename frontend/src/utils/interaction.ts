@@ -3,6 +3,7 @@ import { render, h, type VNode } from 'vue'
 import i18n from '@/lang'
 import { APP_TITLE, bindAppContext, normalizeErrorMessage, sampleID } from '@/utils'
 
+import CodePreviewModal from '@/components/_common/CodePreviewModal.vue'
 import ConfirmComp from '@/components/Confirm/index.vue'
 import MessageComp from '@/components/Message/index.vue'
 import { useModal } from '@/components/Modal'
@@ -173,7 +174,7 @@ class Picker {
     options?: Partial<ResourceSelectProps>,
     initialValue?: string[],
   ): Promise<{ ids: string[]; items: ResourceResultMap[T][] }> => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const dom = document.createElement('div')
       const vnode = h(ResourceSelectComp, {
         type: ResourceTypeMap[type],
@@ -181,6 +182,11 @@ class Picker {
         renderSlot: false,
         openImmediate: true,
         modelValue: initialValue,
+        onCancel() {
+          reject(i18n.global.t('common.canceled'))
+          render(null, dom)
+          dom.remove()
+        },
         onSubmit(ids, items) {
           resolve({ ids, items } as any)
           render(null, dom)
@@ -347,3 +353,12 @@ export const modal = (options: ModalProps = {}, slots: ModalSlots = {}) => {
 export const picker = new Picker()
 
 export const message = new Message()
+
+export const previewCode = (
+  title: string,
+  content: string,
+  lang: 'json' | 'javascript' | 'yaml' | 'text' = 'json',
+) =>
+  modal({ title, size: 'lg', submit: false, cancelText: 'common.close', maskClosable: true })
+    .setContent(CodePreviewModal, { content, lang })
+    .open()

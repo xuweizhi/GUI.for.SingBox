@@ -25,7 +25,6 @@ import {
   sleep,
   modal,
 } from '@/utils'
-
 import { downloadProgressText, parseReleaseSha256 } from '@/utils/releaseAsset'
 
 import { AboutView } from '@/components'
@@ -38,7 +37,7 @@ export const useAppStore = defineStore('app', () => {
   /* Global Menu */
   const menuShow = ref(false)
   const menuList = ref<App.Menu[]>([])
-  const menuPosition = ref({
+  const menuPosition = ref<{ x: number; y: number; align?: 'end' }>({
     x: 0,
     y: 0,
   })

@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, ref } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 
 import { DefaultConcurrencyLimit, DefaultTestTimeout, DefaultTestURL } from '@/constant/app'
 import {
@@ -9,9 +9,9 @@ import {
   useSubscribesStore,
 } from '@/stores'
 import { handleUseProxy } from '@/utils/helper'
+import { getNodeGroupRuntimeNames } from '@/utils/nodeGroup'
 import { normalizeErrorMessage } from '@/utils/others'
 import { getOutboundRole } from '@/utils/outboundPolicy'
-import { getNodeGroupRuntimeNames } from '@/utils/nodeGroup'
 import {
   filterAndSortNodes,
   getDelayTestableNodeNames,
@@ -28,6 +28,8 @@ import type {
   LatencyResult,
   LatencyTaskHandle,
 } from '@/views/HomeView/nodeLatencyScheduler'
+
+import { useNodeFavorites } from './useNodeFavorites'
 
 export type NodeOperationResult = { ok: true } | { ok: false; error: string }
 
@@ -50,17 +52,37 @@ const emptyBatch = (): BatchTestState => ({
   failure: 0,
 })
 
-export const useNodeController = (options: { includePolicyNodes?: boolean } = {}) => {
+export const useNodeController = (
+  options: { includePolicyNodes?: boolean; persistPreferences?: boolean } = {},
+) => {
   const appSettingsStore = useAppSettingsStore()
   const kernelApiStore = useKernelApiStore()
   const profilesStore = useProfilesStore()
   const nodeGroupsStore = useNodeGroupsStore()
   const subscribesStore = useSubscribesStore()
 
+  const readPreference = <T>(key: string, fallback: T): T => {
+    if (!options.persistPreferences) return fallback
+    try {
+      const raw = window.localStorage.getItem(key)
+      return raw === null ? fallback : (JSON.parse(raw) as T)
+    } catch {
+      return fallback
+    }
+  }
   const selectedGroupName = ref('')
   const query = ref('')
-  const sortByDelay = ref(false)
-  const nodeGroupFilter = ref('__all')
+  const sortByDelay = ref(readPreference('gfs.nodes.sortByDelay', false))
+  const nodeGroupFilter = ref(readPreference('gfs.nodes.groupFilter', '__all'))
+  watch([sortByDelay, nodeGroupFilter], () => {
+    if (!options.persistPreferences) return
+    try {
+      window.localStorage.setItem('gfs.nodes.sortByDelay', JSON.stringify(sortByDelay.value))
+      window.localStorage.setItem('gfs.nodes.groupFilter', JSON.stringify(nodeGroupFilter.value))
+    } catch {
+      // ignore storage errors in restricted environments
+    }
+  })
   const failureTimes = new Map<string, number>()
   const nodeErrors = ref(new Map<string, NodeDelayError>())
   const localDelays = ref(new Map<string, number>())
@@ -77,7 +99,11 @@ export const useNodeController = (options: { includePolicyNodes?: boolean } = {}
     getVisibleGroups(mode.value, profilesStore.currentProfile, kernelApiStore.proxies),
   )
   const primary = computed(() => {
-    const current = resolvePrimaryNode(mode.value, profilesStore.currentProfile, kernelApiStore.proxies)
+    const current = resolvePrimaryNode(
+      mode.value,
+      profilesStore.currentProfile,
+      kernelApiStore.proxies,
+    )
     const localDelay = localDelays.value.get(current.leafName)
     return localDelay === undefined ? current : { ...current, delay: localDelay || null }
   })
@@ -102,7 +128,9 @@ export const useNodeController = (options: { includePolicyNodes?: boolean } = {}
     return new Map(
       nodeGroupsStore.nodeGroups.flatMap((group) => {
         const names = getNodeGroupRuntimeNames(
-          nodeGroupsStore.resolveGroup(group), runtimeNames, subscribesStore.subscribes,
+          nodeGroupsStore.resolveGroup(group),
+          runtimeNames,
+          subscribesStore.subscribes,
         )
         return names.size ? [[group.id, names] as const] : []
       }),
@@ -120,17 +148,10 @@ export const useNodeController = (options: { includePolicyNodes?: boolean } = {}
     ),
     { label: 'nodeGroups.ungrouped', value: '__ungrouped' },
   ])
-  const favoriteKeys = computed(() => new Set(appSettingsStore.app.nodePreferences.favorites))
+  const { isFavorite, toggleFavorite } = useNodeFavorites()
   const recentOrder = computed(
     () => new Map(appSettingsStore.app.nodePreferences.recent.map((key, index) => [key, index])),
   )
-  const toggleFavorite = (name: string) => {
-    const key = kernelApiStore.getNodePreferenceKey(name)
-    const prefs = appSettingsStore.app.nodePreferences
-    prefs.favorites = favoriteKeys.value.has(key)
-      ? prefs.favorites.filter((entry) => entry !== key)
-      : [...prefs.favorites, key]
-  }
   const nodes = computed(() => {
     if (!selectedGroup.value) return []
     const profileOutbounds = profilesStore.currentProfile?.outbounds || []
@@ -150,7 +171,7 @@ export const useNodeController = (options: { includePolicyNodes?: boolean } = {}
         const role = configured ? getOutboundRole(configured) : undefined
         return {
           ...node,
-          favorite: favoriteKeys.value.has(key),
+          favorite: isFavorite(node.name),
           recentIndex: recentOrder.value.get(key),
           role,
           displayName:
@@ -162,9 +183,15 @@ export const useNodeController = (options: { includePolicyNodes?: boolean } = {}
         }
       })
       .filter(
-        (node) => options.includePolicyNodes || !node.role || !['direct', 'block', 'fallback', 'global'].includes(node.role),
+        (node) =>
+          options.includePolicyNodes ||
+          !node.role ||
+          !['direct', 'block', 'fallback', 'global'].includes(node.role),
       )
-      .filter((node) => options.includePolicyNodes || !['Direct', 'Reject'].includes(node.proxy?.type || ''))
+      .filter(
+        (node) =>
+          options.includePolicyNodes || !['Direct', 'Reject'].includes(node.proxy?.type || ''),
+      )
       .filter((node) => {
         if (nodeGroupFilter.value === '__all') return true
         if (nodeGroupFilter.value === '__favorites') return node.favorite
@@ -183,7 +210,7 @@ export const useNodeController = (options: { includePolicyNodes?: boolean } = {}
   let disposed = false
   let pollTimer: number | undefined
   let refreshPromise: Promise<void> | undefined
-  let groupHandle: LatencyTaskHandle | undefined
+  let groupTask: { handle: LatencyTaskHandle; release: () => void } | undefined
   const activeHandles = new Set<LatencyTaskHandle>()
   const protectedLocalResults = new Set<string>()
   const nodeOwners = new Map<string, Set<symbol>>()
@@ -271,14 +298,22 @@ export const useNodeController = (options: { includePolicyNodes?: boolean } = {}
     } catch (error) {
       refreshFailure = error
     }
-    query.value = ''
-    selectedGroupName.value = proxyGroup.value?.name || groups.value[0]?.name || ''
-    nodeGroupFilter.value = '__all'
+    if (!groups.value.some((group) => group.name === selectedGroupName.value)) {
+      selectedGroupName.value = proxyGroup.value?.name || groups.value[0]?.name || ''
+    }
     if (refreshFailure) throw refreshFailure
+    if (!nodeGroupFilterOptions.value.some((option) => option.value === nodeGroupFilter.value))
+      nodeGroupFilter.value = '__all'
   }
 
   const selectGroup = (name: string) => {
     if (!groups.value.some((group) => group.name === name)) return
+    if (groupTask) {
+      groupTask.handle.cancel()
+      groupTask.release()
+      groupTask = undefined
+    }
+    batch.value = emptyBatch()
     selectedGroupName.value = name
     query.value = ''
     nodeGroupFilter.value = '__all'
@@ -403,37 +438,39 @@ export const useNodeController = (options: { includePolicyNodes?: boolean } = {}
       return
     }
 
-    const { handle, release } = submit(names, (result) => {
+    const progress = batch.value
+    const task = submit(names, (result) => {
       if (disposed) return
       applyResult(result)
-      batch.value.completed++
-      if (result.ok) batch.value.success++
-      else batch.value.failure++
+      progress.completed++
+      if (result.ok) progress.success++
+      else progress.failure++
     })
-    groupHandle = handle
+    groupTask = task
 
     try {
-      const summary = await handle.done
-      if (!disposed)
-        batch.value = {
-          running: true,
+      const summary = await task.handle.done
+      if (!disposed && groupTask === task)
+        Object.assign(progress, {
           cancelled: summary.cancelled,
           total: summary.total,
           completed: summary.completed,
           success: summary.success,
           failure: summary.failure,
-        }
+        })
     } finally {
-      groupHandle = undefined
       if (!disposed) await refresh().catch(() => undefined)
-      release()
-      if (!disposed) batch.value.running = false
+      if (groupTask === task) {
+        task.release()
+        groupTask = undefined
+        if (!disposed) progress.running = false
+      }
     }
   }
 
   const cancelGroupTest = () => {
     batch.value.cancelled = true
-    groupHandle?.cancel()
+    groupTask?.handle.cancel()
   }
 
   const stopPolling = () => {

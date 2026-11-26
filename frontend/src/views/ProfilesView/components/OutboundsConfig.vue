@@ -95,7 +95,11 @@ const handleAdd = () => {
   showEditModal.value = true
 }
 
-defineExpose({ handleAdd })
+const editById = (id: string) => {
+  const index = model.value.findIndex((o) => o.id === id)
+  if (index >= 0) handleEditGroup(index)
+}
+defineExpose({ handleAdd, editById })
 
 const handleDeleteGroup = (index: number) => {
   const id = model.value[index]!.id
@@ -146,8 +150,8 @@ const handleAddEnd = () => {
     if (issue.type === 'cycle') return issue.chain.includes(id)
     if (issue.groupId !== id) return false
     if (issue.type === 'reserved-tag') return true
-    return !previous.some((old) =>
-      old.groupId === id && old.type === issue.type && old.targetId === issue.targetId
+    return !previous.some(
+      (old) => old.groupId === id && old.type === issue.type && old.targetId === issue.targetId,
     )
   })
   if (cycle?.type === 'reserved-tag') {
@@ -193,7 +197,9 @@ const handleAddProxy = (groupID: string, proxyID: string, proxyName: string) => 
   // self
   if (groupID === 'Built-in' && proxyID === fields.value.id) return
 
-  const idx = fields.value.outbounds.findIndex((outbound) => outbound.type === groupID && outbound.id === proxyID)
+  const idx = fields.value.outbounds.findIndex(
+    (outbound) => outbound.type === groupID && outbound.id === proxyID,
+  )
   if (idx !== -1) {
     fields.value.outbounds.splice(idx, 1)
   } else {
@@ -202,7 +208,9 @@ const handleAddProxy = (groupID: string, proxyID: string, proxyName: string) => 
 }
 
 const isInuse = (groupID: string, proxyID: string) => {
-  return fields.value.outbounds.find((outbound) => outbound.type === groupID && outbound.id === proxyID)
+  return fields.value.outbounds.find(
+    (outbound) => outbound.type === groupID && outbound.id === proxyID,
+  )
 }
 
 const hasLost = (outbound: App.Outbound) => {
@@ -316,7 +324,7 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
     </div>
 
     <div v-draggable="[model, DraggableOptions]">
-      <Card v-for="(outbound, index) in model" :key="outbound.id" class="mb-6">
+      <Card v-for="(outbound, index) in model" :key="outbound.id" flush class="mb-6">
         <div class="flex flex-wrap items-center py-6 gap-6">
           <Icon icon="drag" :size="15" color="var(--muted-color)" class="cursor-move shrink-0" />
           <div class="font-bold flex items-center gap-4" style="min-width: 90px">
@@ -344,13 +352,25 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
               {{ t(getOutboundRoleLabel(getOutboundRole(outbound))) }}
             </Tag>
           </div>
-          <Button type="link" size="small" @click="handleSortGroup(index)">
+          <span class="text-12 text-muted">
             {{ t('kernel.outbounds.refsOutbound') }}: {{ clacOutboundsCount(outbound) }} ·
             {{ t('kernel.outbounds.refsSubscription') }}: {{ clacSubscriptionsCount(outbound) }} ·
             {{ t('router.nodeGroups') }}: {{ clacNodeGroupsCount(outbound) }}
-          </Button>
+          </span>
+          <Button
+            v-if="[Outbound.Selector, Outbound.Urltest].includes(outbound.type as Outbound)"
+            type="link"
+            size="small"
+            @click="handleSortGroup(index)"
+            >{{ t('kernel.outbounds.sort') }}</Button
+          >
           <div class="ml-auto flex items-center gap-2">
-            <Button v-if="hasLost(outbound)" type="text" size="small" @click="handleClearGroup(outbound)">
+            <Button
+              v-if="hasLost(outbound)"
+              type="text"
+              size="small"
+              @click="handleClearGroup(outbound)"
+            >
               {{ t('common.clear') }}
             </Button>
             <Button
@@ -376,16 +396,22 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
 
   <Modal
     v-model:open="showSortModal"
+    size="drawer"
     :on-ok="handleSortGroupEnd"
     mask-closable
     title="kernel.outbounds.sort"
-    max-width="80"
-    max-height="80"
   >
     <Divider>{{ t('kernel.outbounds.refs') }}</Divider>
+    <p class="text-12 text-muted mt-0 mb-8">{{ t('kernel.outbounds.sortHint') }}</p>
     <Empty v-if="fields.outbounds.length === 0" />
     <div v-draggable="[fields.outbounds, DraggableOptions]" class="flex flex-wrap gap-6">
-      <Button v-for="proxy in fields.outbounds" :key="JSON.stringify([proxy.type, proxy.id])" type="normal" size="small" icon="drag">
+      <Button
+        v-for="proxy in fields.outbounds"
+        :key="JSON.stringify([proxy.type, proxy.id])"
+        type="normal"
+        size="small"
+        icon="drag"
+      >
         {{ proxy.tag }}
       </Button>
     </div>
@@ -393,10 +419,9 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
 
   <Modal
     v-model:open="showEditModal"
+    size="drawer"
     :on-ok="handleAddEnd"
     title="kernel.outbounds.name"
-    width="80"
-    height="80"
   >
     <div class="form-item">
       {{ t('kernel.outbounds.tag') }}
@@ -455,9 +480,8 @@ subscribesStore.subscribes.forEach(async ({ id, name, proxies }) => {
     </template>
     <template v-if="[Outbound.Selector, Outbound.Urltest].includes(fields.type as any)">
       <Divider>
-        {{ t('kernel.outbounds.refsOutbound') }}、{{ t('kernel.outbounds.refsSubscription') }}、{{
-          t('router.nodeGroups')
-        }}
+        {{ t('kernel.outbounds.refsOutbound') }}, {{ t('kernel.outbounds.refsSubscription') }},
+        {{ t('router.nodeGroups') }}
       </Divider>
 
       <div class="mb-8">

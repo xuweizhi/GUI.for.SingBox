@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 
 import logo from '@/assets/logo'
-import { NavLayout, Theme } from '@/enums/app'
+import { ModeOptions } from '@/constant/kernel'
+import { NavLayout } from '@/enums/app'
 import rawRoutes from '@/router/routes'
 import {
   useAppSettingsStore,
@@ -12,9 +13,10 @@ import {
   useProfilesStore,
   useWebuiAuthStore,
 } from '@/stores'
-import { confirm } from '@/utils'
+import { confirm, handleChangeMode, message } from '@/utils'
 
 import AppearancePopover from './AppearancePopover.vue'
+import CoreControls from './CoreControls.vue'
 import NavigationBar from './NavigationBar.vue'
 
 const SIDEBAR_STORAGE_KEY = 'gfs.webui.sidebar.collapsed'
@@ -29,7 +31,7 @@ const readCollapsedState = () => {
 
 const { t } = useI18n()
 const route = useRoute()
-const router = useRouter()
+
 const appSettings = useAppSettingsStore()
 const authStore = useWebuiAuthStore()
 const kernelApiStore = useKernelApiStore()
@@ -53,12 +55,36 @@ watch(
   },
 )
 
-const isDarkTheme = computed(() => appSettings.themeMode === Theme.Dark)
 const isTopnav = computed(() => appSettings.app.navLayout === NavLayout.Topnav)
 const activeProfileName = computed(() => profilesStore.currentProfile?.name || '')
-const pageTitle = computed(() =>
-  route.meta.name ? t(route.meta.name) : String(route.name || ''),
+const homeTab = computed(() =>
+  route.path === '/' ? String(route.query.tab || '') : '',
 )
+const pageTitle = computed(() => {
+  const tabTitles: Record<string, string> = {
+    groups: 'home.overview.tabGroups',
+    connections: 'home.overview.tabConnections',
+    logs: 'home.overview.tabLogs',
+  }
+  if (tabTitles[homeTab.value]) return t(tabTitles[homeTab.value]!)
+  return route.meta.name ? t(route.meta.name) : String(route.name || '')
+})
+const isFluid = computed(
+  () => route.meta.fluid === true || ['groups', 'connections', 'logs'].includes(homeTab.value),
+)
+const overflowActive = computed(() => {
+  const overflow = visibleRoutes.value.slice(visibleCount.value)
+  return overflow.some((r) => r.path === activePath.value)
+})
+const modeKey = ref(0)
+const onModeChange = async (mode: 'direct' | 'global' | 'rule') => {
+  try {
+    await handleChangeMode(mode)
+  } catch (error) {
+    modeKey.value++
+    message.error(error)
+  }
+}
 const isMac = computed(
   () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || ''),
 )
@@ -71,20 +97,43 @@ const visibleRoutes = computed(() =>
   ),
 )
 
-const toggleTheme = (event: MouseEvent) => {
-  document.documentElement.style.setProperty('--x', event.clientX + 'px')
-  document.documentElement.style.setProperty('--y', event.clientY + 'px')
-  appSettings.app.theme = isDarkTheme.value ? Theme.Light : Theme.Dark
+const activePath = computed(() => {
+  if (route.path.startsWith('/profiles/')) return '/profiles'
+  if (route.path === '/' && ['groups', 'connections', 'logs'].includes(String(route.query.tab)))
+    return '/' + route.query.tab
+  return route.path
+})
+const nav = ref<HTMLElement>()
+const measurements = ref<HTMLElement>()
+const visibleCount = ref(Infinity)
+const measureNav = () => {
+  if (!nav.value?.clientWidth || !measurements.value) return
+  const widths = Array.from(
+    measurements.value.children,
+    (el) => el.getBoundingClientRect().width + 4,
+  )
+  const more = widths.pop() || 0
+  const width = nav.value.clientWidth - 4
+  if (widths.reduce((a, b) => a + b, 0) <= width) {
+    visibleCount.value = widths.length
+    return
+  }
+  let used = more
+  visibleCount.value = widths.findIndex((w) => (used += w) > width)
 }
-
+watch(
+  [nav, measurements],
+  ([container, labels], _, cleanup) => {
+    if (!container || !labels || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measureNav)
+    observer.observe(container)
+    observer.observe(labels)
+    cleanup(() => observer.disconnect())
+  },
+  { flush: 'post' },
+)
 const openCommandPalette = () => {
   window.dispatchEvent(new CustomEvent('open-command-palette'))
-}
-
-const goOverview = () => {
-  if (route.path !== '/') {
-    void router.push('/')
-  }
 }
 
 const handleLogout = async () => {
@@ -120,7 +169,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
     <div class="app-main">
       <header class="app-topbar">
-        <div class="app-topbar__inner">
+        <div class="app-topbar__inner" :class="{ 'is-fluid': isFluid }">
           <div class="app-topbar__left">
             <button
               type="button"
@@ -139,19 +188,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             </RouterLink>
 
             <h1 class="topbar-title" :class="{ 'is-mobile-only': isTopnav }">{{ pageTitle }}</h1>
+            <Radio
+              v-if="kernelApiStore.running && !isTopnav"
+              :key="kernelApiStore.config.mode + '-' + modeKey"
+              class="header-mode"
+              size="small"
+              :model-value="kernelApiStore.config.mode"
+              :options="ModeOptions"
+              @change="onModeChange"
+            />
           </div>
 
-          <nav
-            v-if="isTopnav"
-            class="topbar-nav"
-            :aria-label="t('navigation.main')"
-          >
+          <nav v-if="isTopnav" ref="nav" class="topbar-nav" :aria-label="t('navigation.main')">
             <RouterLink
-              v-for="r in visibleRoutes"
+              v-for="r in visibleRoutes.slice(0, visibleCount)"
               :key="r.path"
               :to="r.path"
               class="topbar-nav__link"
-              active-class="is-active"
+              active-class=""
+              :class="{ 'is-active': activePath === r.path }"
             >
               <Icon
                 v-if="r.meta?.icon"
@@ -162,31 +217,73 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               />
               <span>{{ r.meta?.name ? t(r.meta.name) : r.name }}</span>
             </RouterLink>
+            <div ref="measurements" class="nav-measure" aria-hidden="true">
+              <span v-for="r in visibleRoutes" :key="r.path" class="nav-width"
+                ><Icon v-if="r.meta?.icon" :icon="r.meta.icon" :size="15" />{{
+                  r.meta?.name && t(r.meta.name)
+                }}</span
+              >
+              <span class="nav-width">{{ t('common.more') }} ▾</span>
+            </div>
+            <Dropdown v-if="visibleRoutes.length > visibleCount" align="end">
+              <Button
+                type="text"
+                size="small"
+                class="topbar-more"
+                :class="{ 'is-active': overflowActive }"
+                >{{ t('common.more') }} ▾</Button
+              >
+              <template #overlay="{ close }"
+                ><div class="flex flex-col p-4">
+                  <RouterLink
+                    v-for="r in visibleRoutes.slice(visibleCount)"
+                    :key="r.path"
+                    :to="r.path"
+                    class="topbar-nav__link"
+                    :class="{ 'is-active': activePath === r.path }"
+                    @click="close"
+                  >
+                    <Icon
+                      v-if="r.meta?.icon"
+                      :icon="r.meta.icon"
+                      :size="15"
+                      color="currentColor"
+                      class="shrink-0"
+                    />
+                    <span>{{ r.meta?.name ? t(r.meta.name) : r.name }}</span>
+                  </RouterLink>
+                </div></template
+              >
+            </Dropdown>
           </nav>
 
           <div class="app-topbar__right">
-            <button
-              type="button"
-              class="topbar-core-pill"
-              :class="[
-                kernelApiStore.running ? 'is-running' : 'is-stopped',
-                { 'is-desktop-visible': sidebarCollapsed || isTopnav },
-              ]"
-              :title="
-                (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped')) +
-                (activeProfileName ? ' · ' + activeProfileName : '')
-              "
-              @click="goOverview"
-            >
-              <span class="topbar-core-pill__dot" aria-hidden="true"></span>
-              <span class="topbar-core-pill__text">
-                {{
-                  activeProfileName ||
-                  (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped'))
-                }}
-              </span>
-            </button>
+            <Dropdown align="end">
+              <button
+                type="button"
+                class="topbar-core-pill"
+                :class="[
+                  kernelApiStore.running ? 'is-running' : 'is-stopped',
+                  { 'is-desktop-visible': sidebarCollapsed || isTopnav },
+                ]"
+                :title="
+                  (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped')) +
+                  (activeProfileName ? ' · ' + activeProfileName : '')
+                "
+              >
+                <span class="topbar-core-pill__dot" aria-hidden="true"></span>
+                <span class="topbar-core-pill__text">
+                  {{
+                    activeProfileName ||
+                    (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped'))
+                  }}
+                </span>
+              </button>
 
+              <template #overlay="{ show, close }"
+                ><CoreControls v-if="show" @close="close"
+              /></template>
+            </Dropdown>
             <AppearancePopover />
 
             <button
@@ -203,16 +300,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
             <button
               type="button"
-              class="topbar-icon-btn"
-              :aria-label="t('common.switchTheme')"
-              :title="t('common.switchTheme')"
-              @click="toggleTheme"
-            >
-              <Icon :icon="isDarkTheme ? 'sun' : 'moon'" :size="16" color="currentColor" />
-            </button>
-
-            <button
-              type="button"
               class="topbar-logout-btn"
               :aria-label="t('auth.signOut')"
               :title="t('auth.logout')"
@@ -225,10 +312,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </div>
       </header>
 
-      <main :class="{ 'app-page--overview': route.name === 'Overview' }" class="app-page">
+      <main
+        :class="{
+          'app-page--fill': route.meta.layout === 'fill',
+          'app-page--fluid': isFluid,
+        }"
+        class="app-page"
+      >
         <RouterView #="{ Component }">
-          <KeepAlive>
-            <component :is="Component" />
+          <KeepAlive exclude="ProfileForm">
+            <component
+              :is="Component"
+              :key="route.name === 'EditProfile' ? route.fullPath : route.name"
+            />
           </KeepAlive>
         </RouterView>
       </main>
@@ -265,13 +361,17 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .app-topbar__inner {
   height: 100%;
   width: 100%;
-  max-width: 1360px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 0 var(--page-pad-x, 24px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+
+  &.is-fluid {
+    max-width: none;
+  }
 }
 
 .app-topbar__left {
@@ -321,7 +421,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   }
 }
 
-.topbar-nav__link {
+.topbar-nav__link,
+.nav-width {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -441,7 +542,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 }
 
 .topbar-core-pill {
-  display: none;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   max-width: 170px;
@@ -497,19 +598,52 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   flex: 1;
   min-height: 0;
   width: 100%;
-  max-width: 1360px;
+  max-width: 1440px;
   margin: 0 auto;
   overflow-y: auto;
   padding: var(--page-pad-y, 18px) var(--page-pad-x, 24px) 20px;
 }
 
-@media (max-width: 1180px) {
+.nav-measure {
+  position: absolute;
+  display: flex;
+  visibility: hidden;
+  pointer-events: none;
+  width: max-content;
+}
+.topbar-nav {
+  position: relative;
+  overflow: hidden;
+}
+.app-page--fluid {
+  max-width: none;
+}
+.app-page--fill,
+.app-page:has(.grid-list-header),
+.app-page:has(.settings-tabs) {
+  overflow: hidden;
+}
+.app-topbar__left {
+  min-width: 0;
+  flex-shrink: 1;
+}
+.topbar-more.is-active {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+@media (min-width: 1025px) {
+  .app-shell:not(.is-topnav) .topbar-core-pill {
+    display: none;
+  }
+  .app-shell:not(.is-topnav) .topbar-core-pill.is-desktop-visible {
+    display: inline-flex;
+  }
+}
+@media (max-width: 1024px) {
   .topbar-brand__name {
     display: none;
   }
-}
 
-@media (max-width: 960px) {
   .topbar-menu-btn {
     display: inline-flex;
   }
@@ -526,9 +660,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   .topbar-title.is-mobile-only {
     display: block;
   }
+
+  .header-mode {
+    display: none;
+  }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .app-topbar__inner {
     padding: 0 16px;
   }

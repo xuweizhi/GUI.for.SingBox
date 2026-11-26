@@ -6,8 +6,9 @@ import { HttpGet } from '@/bridge'
 import { DefaultRouteRule, DefaultRouteRuleset } from '@/constant/profile'
 import { RulesetFormat, RulesetType, RuleType } from '@/enums/kernel'
 import { useProfilesStore, useRulesetsStore } from '@/stores'
-import { alert, deepClone, message, picker } from '@/utils'
+import { previewCode, deepClone, message, picker } from '@/utils'
 
+import ResourceHubModal from '@/components/_common/ResourceHubModal.vue'
 import Button from '@/components/Button/index.vue'
 import Pagination from '@/components/Pagination/index.vue'
 
@@ -22,13 +23,16 @@ const profilesStore = useProfilesStore()
 const keywords = ref('')
 const handleCancel = inject('cancel') as any
 
-watch(keywords, () => (currentPage.value = 1))
+const category = ref('')
+const installing = ref(new Set<string>())
+watch([keywords, category], () => (currentPage.value = 1))
 
 const filteredList = computed(() => {
   const q = keywords.value.trim().toLowerCase()
-  if (!q) return rulesetsStore.rulesetHub.list
   return rulesetsStore.rulesetHub.list.filter(
-    (ruleset) => ruleset.name.toLowerCase().includes(q) || ruleset.type.toLowerCase().includes(q),
+    (ruleset) =>
+      (!category.value || ruleset.type === category.value) &&
+      (ruleset.name.toLowerCase().includes(q) || ruleset.type.toLowerCase().includes(q)),
   )
 })
 
@@ -51,6 +55,8 @@ const getRulesetUrlAndSuffix = (ruleset: App.RulesetHub['list'][number], format:
 const handleAddRuleset = async (ruleset: App.RulesetHub['list'][number], format: RulesetFormat) => {
   const [url, suffix] = getRulesetUrlAndSuffix(ruleset, format)
   const id = ruleset.type + '_' + ruleset.name + '.' + format
+  if (installing.value.has(id) || isAlreadyAdded(ruleset, format)) return
+  installing.value.add(id)
   const file = ruleset.type + '_' + ruleset.name + suffix
   try {
     await rulesetsStore.addRuleset({
@@ -70,6 +76,8 @@ const handleAddRuleset = async (ruleset: App.RulesetHub['list'][number], format:
   } catch (error: any) {
     console.error(error)
     message.error(error.message || error)
+  } finally {
+    installing.value.delete(id)
   }
 }
 
@@ -80,8 +88,10 @@ const handleAddRulesetToProfile = async (
   const [url, suffix] = getRulesetUrlAndSuffix(ruleset, format)
 
   try {
-    const { items } = await picker.resource('profile', 'profiles.select', { min: 1, max: 1 })
-    const profile = items[0]
+    const selected = await picker
+      .resource('profile', 'profiles.select', { min: 1, max: 1 })
+      .catch(() => undefined)
+    const profile = selected?.items[0]
     if (!profile) return
 
     const insertionPointIndex = profile.route.rules.findIndex(
@@ -116,9 +126,9 @@ const handleAddRulesetToProfile = async (
       message.warn('kernel.route.rules.invalid')
       return
     }
-    const target = await picker.single('kernel.route.rules.outbound', outboundOptions, [
-      outboundOptions[0]!.value,
-    ]).catch(() => undefined)
+    const target = await picker
+      .single('kernel.route.rules.outbound', outboundOptions, [outboundOptions[0]!.value])
+      .catch(() => undefined)
     if (!target) return
 
     const nextProfile = deepClone(profile)
@@ -153,14 +163,14 @@ const handlePreview = async (ruleset: App.RulesetHub['list'][number], format: Ru
   try {
     const { body } = await HttpGet(getRulesetUrlAndSuffix(ruleset, format)[0])
     destroy()
-    await alert(ruleset.name, typeof body === 'string' ? body : JSON.stringify(body, null, 2))
+    previewCode(ruleset.name, typeof body === 'string' ? body : JSON.stringify(body, null, 2))
   } catch (err: any) {
     error(err.message || err)
     setTimeout(destroy, 2000)
   }
 }
 
-const handleUpdatePluginHub = async () => {
+const handleUpdateHub = async () => {
   try {
     await rulesetsStore.updateRulesetHub()
     message.success('rulesets.updateSuccess')
@@ -175,7 +185,7 @@ const isAlreadyAdded = (ruleset: App.RulesetHub['list'][number], format: Ruleset
 }
 
 if (rulesetsStore.rulesetHub.list.length === 0) {
-  rulesetsStore.updateRulesetHub()
+  void handleUpdateHub()
 }
 
 const modalSlots = {
@@ -205,104 +215,92 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div class="h-full">
-    <div v-if="rulesetsStore.rulesetHubLoading" class="flex items-center justify-center h-full">
-      <Button type="text" loading />
-    </div>
-    <div v-else class="flex flex-col h-full">
-      <div class="flex items-center gap-8">
-        <Input
-          v-model="keywords"
-          :border="false"
-          :placeholder="t('rulesets.total') + ': ' + rulesetsStore.rulesetHub.list.length"
-          clearable
-          size="small"
-          class="flex-1"
-        />
-        <Button icon="refresh" size="small" @click="handleUpdatePluginHub">
-          {{ t('plugins.update') }}
-        </Button>
-      </div>
-
-      <Empty v-if="filteredList.length === 0" />
-
-      <div class="responsive-card-grid overflow-y-auto text-12 mt-8 pb-16 pr-4">
-        <Card
-          v-for="ruleset in currentList"
-          :key="ruleset.name + ruleset.type"
-          :title="ruleset.name"
-        >
-          <template #extra>
-            <Tag size="small" color="cyan">{{ ruleset.type }}</Tag>
-          </template>
-          <div class="flex flex-col h-full">
-            <div class="flex items-center justify-between">
-              {{ t('rulesets.rulesetCount') }} : {{ ruleset.count }}
-              <Button
-                icon="preview"
-                size="small"
-                type="text"
-                @click="handlePreview(ruleset, RulesetFormat.Source)"
-              />
-            </div>
-            <div class="flex items-center justify-between">
-              <Dropdown placement="bottom">
-                <Button type="text" size="small" style="margin-left: -2px; padding-left: 2px">
-                  {{ t('common.more') }}
-                </Button>
-                <template #overlay="{ close }">
-                  <div class="flex flex-col gap-4 min-w-96 p-4">
-                    <Button
-                      v-for="format in rulesetFormats"
-                      :key="format"
-                      :disabled="!!isAlreadyAdded(ruleset, format)"
-                      type="text"
-                      size="small"
-                      @click="
-                        () => {
-                          close()
-                          handleAddRuleset(ruleset, format)
-                        }
-                      "
-                    >
-                      <template v-if="isAlreadyAdded(ruleset, format)">
-                        {{ t(`ruleset.format.${format}`) }} {{ t('common.added') }}
-                      </template>
-                      <template v-else>
-                        {{ t('common.add') }} {{ t(`ruleset.format.${format}`) }}
-                      </template>
-                    </Button>
-                  </div>
-                </template>
-              </Dropdown>
-
-              <Dropdown placement="bottom">
-                <Button type="link" size="small">
-                  {{ t('rulesets.addToProfile') }}
-                </Button>
-                <template #overlay="{ close }">
-                  <div class="flex flex-col gap-4 min-w-96 p-4">
-                    <Button
-                      v-for="format in rulesetFormats"
-                      :key="format"
-                      type="text"
-                      size="small"
-                      @click="
-                        () => {
-                          close()
-                          handleAddRulesetToProfile(ruleset, format)
-                        }
-                      "
-                    >
-                      {{ t(`ruleset.format.${format}`) }}
-                    </Button>
-                  </div>
-                </template>
-              </Dropdown>
-            </div>
+  <ResourceHubModal
+    v-model:query="keywords"
+    v-model:category="category"
+    :categories="['geoip', 'geosite']"
+    :loading="rulesetsStore.rulesetHubLoading"
+    :count="filteredList.length"
+    @refresh="handleUpdateHub"
+  >
+    <div class="responsive-card-grid text-12 mt-8 pb-16 pr-4">
+      <Card v-for="ruleset in currentList" :key="ruleset.name + ruleset.type" :title="ruleset.name">
+        <template #extra>
+          <Tag
+            v-if="rulesetFormats.some((format) => isAlreadyAdded(ruleset, format))"
+            size="small"
+            >{{ t('common.added') }}</Tag
+          >
+          <Tag size="small" color="cyan">{{ ruleset.type }}</Tag>
+        </template>
+        <div class="flex flex-col h-full">
+          <div class="flex items-center justify-between">
+            {{ t('rulesets.rulesetCount') }} : {{ ruleset.count }}
+            <Button
+              icon="preview"
+              size="small"
+              type="text"
+              @click="handlePreview(ruleset, RulesetFormat.Source)"
+            />
           </div>
-        </Card>
-      </div>
+          <div class="flex items-center justify-between">
+            <Dropdown placement="bottom">
+              <Button type="text" size="small" style="margin-left: -2px; padding-left: 2px">
+                {{ t('common.more') }}
+              </Button>
+              <template #overlay="{ close }">
+                <div class="flex flex-col gap-4 min-w-96 p-4">
+                  <Button
+                    v-for="format in rulesetFormats"
+                    :key="format"
+                    :loading="installing.has(ruleset.type + '_' + ruleset.name + '.' + format)"
+                    :disabled="!!isAlreadyAdded(ruleset, format)"
+                    type="text"
+                    size="small"
+                    @click="
+                      () => {
+                        close()
+                        handleAddRuleset(ruleset, format)
+                      }
+                    "
+                  >
+                    <template v-if="isAlreadyAdded(ruleset, format)">
+                      {{ t(`ruleset.format.${format}`) }} {{ t('common.added') }}
+                    </template>
+                    <template v-else>
+                      {{ t('common.add') }} {{ t(`ruleset.format.${format}`) }}
+                    </template>
+                  </Button>
+                </div>
+              </template>
+            </Dropdown>
+
+            <Dropdown placement="bottom">
+              <Button type="link" size="small">
+                {{ t('rulesets.addToProfile') }}
+              </Button>
+              <template #overlay="{ close }">
+                <div class="flex flex-col gap-4 min-w-96 p-4">
+                  <Button
+                    v-for="format in rulesetFormats"
+                    :key="format"
+                    type="text"
+                    size="small"
+                    @click="
+                      () => {
+                        close()
+                        handleAddRulesetToProfile(ruleset, format)
+                      }
+                    "
+                  >
+                    {{ t(`ruleset.format.${format}`) }}
+                  </Button>
+                </div>
+              </template>
+            </Dropdown>
+          </div>
+        </div>
+      </Card>
     </div>
-  </div>
+  </ResourceHubModal>
 </template>

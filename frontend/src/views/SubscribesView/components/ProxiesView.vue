@@ -91,7 +91,10 @@ const handleDeleteProxy = async (record: App.Subscription['proxies'][number]) =>
 }
 
 const handleAddToManualGroup = (groupId: string, record: App.Subscription['proxies'][number]) => {
-  if (pendingAssignments.value.some((item) => item.groupId === groupId && item.nodeId === record.id)) return
+  if (
+    pendingAssignments.value.some((item) => item.groupId === groupId && item.nodeId === record.id)
+  )
+    return
   pendingAssignments.value.push({ groupId, nodeId: record.id })
   message.info('nodeGroups.addOnSave')
 }
@@ -209,7 +212,7 @@ let loaded: Promise<void> | undefined
 const initAllFieldsProxies = () => {
   loaded ??= (async () => {
     const content = await ReadFile(sub.value.path).catch(async (error) => {
-      if (sub.value.proxies.length || await FileExists(sub.value.path)) throw error
+      if (sub.value.proxies.length || (await FileExists(sub.value.path))) throw error
       return '[]'
     })
     const extracted = extractSubscriptionConfig(JSON.parse(content))
@@ -257,9 +260,7 @@ defineExpose({ modalSlots })
 <template>
   <div class="h-full flex flex-col">
     <div class="flex flex-wrap items-center gap-8">
-      <span class="text-12 text-muted">
-        {{ t('subscribes.proxies.type') }}:
-      </span>
+      <span class="text-12 text-muted"> {{ t('subscribes.proxies.type') }}: </span>
       <Select v-model="proxyType" :options="filteredProxyTypeOptions" size="small" />
       <Input
         v-model="keywords"
@@ -296,7 +297,7 @@ defineExpose({ modalSlots })
         :title="proxy.tag"
       >
         <template #extra>
-          <Dropdown>
+          <Dropdown align="end">
             <Button
               type="text"
               size="small"
@@ -392,6 +393,7 @@ defineExpose({ modalSlots })
 
   <Modal
     v-model:open="showDetails"
+    size="lg"
     :submit="isEdit"
     :mask-closable="!isEdit"
     :title="isEdit ? (editId ? 'common.edit' : 'common.add') : 'common.details'"
@@ -411,19 +413,19 @@ defineExpose({ modalSlots })
   align-content: start;
 }
 
-@media (max-width: 1080px) {
+@container (max-width: 1024px) {
   .proxies-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 780px) {
+@container (max-width: 640px) {
   .proxies-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 520px) {
+@container (max-width: 640px) {
   .proxies-grid {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -1,27 +1,77 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import logo from '@/assets/logo'
-import { useWebuiAuthStore } from '@/stores'
+import { Theme } from '@/enums/app'
+import { useAppSettingsStore, useAppStore, useWebuiAuthStore } from '@/stores'
 import { message } from '@/utils'
 import { resolveRedirectTarget } from '@/utils/webuiAuth'
 
-const { t } = useI18n()
+const LANG_KEY = 'gfs.login.lang'
+const THEME_KEY = 'gfs.login.theme'
+
+const appearance = useAppSettingsStore()
+const appStore = useAppStore()
+const { t, te, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const authStore = useWebuiAuthStore()
 
 const input = ref(authStore.token)
 const loading = computed(() => authStore.status === 'checking')
+const languageOptions = computed(() =>
+  appStore.locales.length
+    ? appStore.locales
+    : [
+        { label: '简体中文', value: 'zh' },
+        { label: 'English', value: 'en' },
+      ],
+)
+const currentLanguageLabel = computed(() => {
+  const label = languageOptions.value.find((item) => item.value === locale.value)?.label
+  return label && te(label) ? t(label) : label || locale.value
+})
 
-const submit = async (event?: Event) => {
-  if (
-    event instanceof KeyboardEvent &&
-    (!(event.target instanceof HTMLInputElement) || event.isComposing)
-  )
-    return
+const persistPreference = (key: string, value: string) => {
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    // ignore storage errors in restricted environments
+  }
+}
+const applyPreferences = () => {
+  try {
+    const lang = window.localStorage.getItem(LANG_KEY)
+    if (lang && languageOptions.value.some((item) => item.value === lang)) {
+      appearance.previewLoginAppearance({ lang })
+    }
+    const theme = window.localStorage.getItem(THEME_KEY)
+    if (theme === Theme.Light || theme === Theme.Dark) {
+      appearance.previewLoginAppearance({ theme })
+    }
+  } catch {
+    // ignore storage errors in restricted environments
+  }
+}
+const switchLanguage = () => {
+  const options = languageOptions.value
+  if (!options.length) return
+  const index = options.findIndex((item) => item.value === locale.value)
+  const next = options[(index + 1) % options.length]!
+  appearance.previewLoginAppearance({ lang: next.value }, true)
+  persistPreference(LANG_KEY, next.value)
+}
+const switchTheme = () => {
+  const next = appearance.themeMode === Theme.Dark ? Theme.Light : Theme.Dark
+  appearance.previewLoginAppearance({ theme: next }, true)
+  persistPreference(THEME_KEY, next)
+}
+
+onMounted(applyPreferences)
+
+const submit = async () => {
   if (!input.value.trim() || loading.value) return
 
   try {
@@ -29,7 +79,6 @@ const submit = async (event?: Event) => {
     if (!ok) {
       return
     }
-
     const redirect = resolveRedirectTarget(route.query.redirect as string | undefined)
     await router.replace(redirect)
   } catch (error) {
@@ -41,41 +90,51 @@ const submit = async (event?: Event) => {
 <template>
   <main class="login-view">
     <Card class="login-card">
+      <div class="flex justify-end gap-6">
+        <Button size="small" type="text" @click="switchLanguage">{{
+          currentLanguageLabel
+        }}</Button>
+        <Button
+          size="small"
+          type="text"
+          :aria-label="t('common.switchTheme')"
+          :icon="appearance.themeMode === Theme.Dark ? 'sun' : 'moon'"
+          @click="switchTheme"
+        />
+      </div>
       <div class="login-brand">
         <img :src="logo" alt="" width="36" height="36" /> GUI.for.SingBox
       </div>
       <h1 class="login-title">{{ t('auth.title') }}</h1>
       <p class="login-description">{{ t('auth.description') }}</p>
 
-      <label for="webui-token" class="login-label">Token</label>
-      <Input
-        v-model="input"
-        input-id="webui-token"
-        type="password"
-        :placeholder="t('auth.tokenPlaceholder')"
-        autofocus
-        class="w-full"
-        @keydown.enter="submit"
-      />
+      <form @submit.prevent="submit">
+        <label for="webui-token" class="login-label">{{ t('workspace.token') }}</label>
+        <Input
+          v-model="input"
+          input-id="webui-token"
+          type="password"
+          :placeholder="t('auth.tokenPlaceholder')"
+          autofocus
+          class="w-full"
+          autocomplete="current-password"
+          @keydown.enter="submit"
+        />
 
-      <div
-        v-if="authStore.lastError"
-        role="alert"
-        class="text-14 mt-12"
-        style="color: var(--level-3-color)"
-      >
-        {{ t(authStore.lastError) }}
-      </div>
+        <div v-if="authStore.lastError" role="alert" class="login-error mt-12">
+          {{ t(authStore.lastError) }}
+        </div>
 
-      <Button
-        type="primary"
-        class="mt-20 w-full justify-center"
-        :disabled="!input.trim()"
-        :loading="loading"
-        @click="submit"
-      >
-        {{ t('auth.submit') }}
-      </Button>
+        <Button
+          type="primary"
+          :loading="loading"
+          :disabled="!input.trim()"
+          class="login-submit mt-20 w-full"
+          @click="submit"
+        >
+          {{ t('auth.submit') }}
+        </Button>
+      </form>
     </Card>
   </main>
 </template>
@@ -100,7 +159,6 @@ const submit = async (event?: Event) => {
 .login-card {
   width: 100%;
   max-width: 420px;
-  padding: 32px 16px;
 }
 .login-brand {
   display: flex;
@@ -121,5 +179,17 @@ const submit = async (event?: Event) => {
   display: block;
   margin-bottom: 8px;
   font-weight: 600;
+}
+.login-error {
+  color: var(--color-danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--control-radius);
+  padding: 8px 12px;
+  font-size: calc(14px * var(--font-scale, 1));
+}
+.login-submit {
+  width: 100%;
+  padding: 10px;
 }
 </style>

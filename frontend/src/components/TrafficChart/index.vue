@@ -11,7 +11,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  height: 214,
+  height: undefined,
   padding: 64,
   legend: () => ['upload', 'download'],
 })
@@ -51,9 +51,10 @@ const maxValue = computed(() => {
   return 1024
 })
 
-const plotHeight = computed(() => props.height - 20)
+const chartHeight = computed(() => props.height ?? Math.max(156, Math.min(280, width.value * 0.26)))
+const plotHeight = computed(() => chartHeight.value - 20)
 const plotTop = 10
-const plotBottom = computed(() => props.height - 10)
+const plotBottom = computed(() => chartHeight.value - 10)
 const spacing = computed(() => Math.max(1, (width.value - props.padding - 8) / (MAX_HISTORY - 1)))
 
 const updateSvgWidth = () => {
@@ -179,19 +180,14 @@ watch(() => props.series, updateChart, { deep: true })
 
     <svg
       ref="svgRef"
-      :height="height + 'px'"
+      :height="chartHeight"
       width="100%"
       xmlns="http://www.w3.org/2000/svg"
       @mousemove="onMouseMove"
       @mouseleave="onMouseLeave"
     >
       <template v-for="(tick, idx) in yTicks" :key="idx">
-        <text
-          :y="tick.y + 4"
-          class="traffic-chart__axis-label"
-          x="2"
-          fill="var(--muted-color)"
-        >
+        <text :y="tick.y + 4" class="traffic-chart__axis-label" x="2" fill="var(--muted-color)">
           {{ tick.label }}
         </text>
         <line
@@ -235,8 +231,8 @@ watch(() => props.series, updateChart, { deep: true })
 
 <style lang="less" scoped>
 .gui-traffic-chart {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
+  background: var(--surface-bg);
+  border: 1px solid var(--surface-border);
 }
 
 .traffic-chart__axis-label {

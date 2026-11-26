@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, inject, watch, computed, h } from 'vue'
+import { ref, inject, watch, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { RulesetFormatOptions } from '@/constant/kernel'
 import { RulesetFormat } from '@/enums/kernel'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { useRulesetsStore } from '@/stores'
 import { deepClone, message, sampleID } from '@/utils'
 
@@ -36,9 +37,21 @@ const ruleset = ref<App.RuleSet>({
 const { t } = useI18n()
 const rulesetsStore = useRulesetsStore()
 
+const finishSave = inject<() => Promise<void>>('submit')
 const handleCancel = inject('cancel') as any
 
 const handleSubmit = async () => {
+  if (loading.value) return
+  errorField.value = ''
+  if (!ruleset.value.name.trim()) {
+    return invalid('name')
+  }
+  if (ruleset.value.type !== 'Manual' && !ruleset.value.url.trim()) {
+    return invalid('url')
+  }
+  if (!ruleset.value.path.trim()) {
+    return invalid('path')
+  }
   loading.value = true
 
   try {
@@ -47,7 +60,7 @@ const handleSubmit = async () => {
     } else {
       await rulesetsStore.addRuleset(ruleset.value)
     }
-    handleCancel()
+    await finishSave?.()
   } catch (error: any) {
     console.error(props.isUpdate ? 'editRuleset: ' : 'addRuleset: ', error)
     message.error(error)
@@ -55,13 +68,6 @@ const handleSubmit = async () => {
     loading.value = false
   }
 }
-
-const disabled = computed(
-  () =>
-    !ruleset.value.name ||
-    (ruleset.value.type === 'Manual' && !ruleset.value.path) ||
-    (['Http', 'File'].includes(ruleset.value.type) && (!ruleset.value.url || !ruleset.value.path)),
-)
 
 if (props.isUpdate) {
   const r = rulesetsStore.getRulesetById(props.id)
@@ -95,6 +101,7 @@ watch(
   },
 )
 
+const { errorField, errorMessage, invalid } = useFormDraft(() => ruleset.value)
 const modalSlots = {
   cancel: () =>
     h(
@@ -110,7 +117,6 @@ const modalSlots = {
       Button,
       {
         type: 'primary',
-        disabled: disabled.value,
         loading: loading.value,
         onClick: handleSubmit,
       },
@@ -122,7 +128,7 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div>
+  <div ref="formRoot" class="resource-form">
     <div class="form-item">
       {{ t('ruleset.rulesetType') }}
       <Radio
@@ -138,15 +144,18 @@ defineExpose({ modalSlots })
       {{ t('ruleset.format.name') }}
       <Radio v-model="ruleset.format" :options="RulesetFormatOptions" />
     </div>
-    <div class="form-item">
+    <div class="form-item" :data-invalid="errorField === 'name'">
       {{ t('ruleset.name') }} *
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Input v-model="ruleset.name" autofocus class="w-full" />
+        <small v-if="errorField === 'name'" class="field-error" role="alert">{{
+          errorMessage
+        }}</small>
       </div>
     </div>
-    <div v-show="ruleset.type !== 'Manual'" class="form-item">
+    <div v-show="ruleset.type !== 'Manual'" class="form-item" :data-invalid="errorField === 'url'">
       {{ t('ruleset.url') }} *
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Input
           v-model="ruleset.url"
           allow-paste
@@ -158,16 +167,22 @@ defineExpose({ modalSlots })
           "
           class="w-full"
         />
+        <small v-if="errorField === 'url'" class="field-error" role="alert">{{
+          errorMessage
+        }}</small>
       </div>
     </div>
-    <div class="form-item">
+    <div class="form-item" :data-invalid="errorField === 'path'">
       {{ t('ruleset.path') }} *
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Input
           v-model="ruleset.path"
           :placeholder="`data/rulesets/{filename}.${ruleset.format === RulesetFormat.Binary ? 'srs' : 'json'}`"
           class="w-full"
         />
+        <small v-if="errorField === 'path'" class="field-error" role="alert">{{
+          errorMessage
+        }}</small>
       </div>
     </div>
   </div>

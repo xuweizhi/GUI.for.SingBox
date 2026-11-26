@@ -2,8 +2,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { useNodeGroupsStore } from '@/stores'
 import { Outbound } from '@/enums/kernel'
+import { useNodeGroupsStore } from '@/stores'
 import {
   findOutboundGraphIssues,
   getOutboundChainLabels,
@@ -50,7 +50,9 @@ const primaryOptions = computed(() =>
 )
 
 const nodeGroupsStore = useNodeGroupsStore()
-const graphIssues = computed(() => findOutboundGraphIssues(props.outbounds, nodeGroupsStore.nodeGroups))
+const graphIssues = computed(() =>
+  findOutboundGraphIssues(props.outbounds, nodeGroupsStore.nodeGroups),
+)
 
 const issueChain = (value: string[]) => getOutboundChainLabels(value, props.outbounds).join(' → ')
 
@@ -112,6 +114,7 @@ const setTarget = (outbound: App.Outbound, value: string) => {
   const targetTag = props.outbounds.find((candidate) => candidate.id === value)?.tag || value
   setInitialOutboundTarget(outbound, value, targetTag)
 }
+const emit = defineEmits<{ editOutbound: [id: string]; editRule: [id: string] }>()
 </script>
 
 <template>
@@ -140,6 +143,9 @@ const setTarget = (outbound: App.Outbound, value: string) => {
           </Tag>
         </template>
         <template #extra>
+          <Button type="link" size="small" @click="emit('editOutbound', outbound.id)">{{
+            t('common.edit')
+          }}</Button>
           <Tag v-if="route.final === outbound.id" color="gold" size="small">
             {{ t('kernel.route.policy.final') }}
           </Tag>
@@ -151,14 +157,16 @@ const setTarget = (outbound: App.Outbound, value: string) => {
           {{ references(outbound).routeRules + references(outbound).routeFinal }}
         </div>
         <div v-if="rulesFor(outbound).length" class="flex flex-wrap gap-4 mb-8">
-          <Tag
+          <Button
             v-for="rule in rulesFor(outbound).slice(0, 3)"
             :key="rule.id"
+            type="link"
             size="small"
-            color="default"
+            class="rule-link"
+            @click="emit('editRule', rule.id)"
           >
             {{ ruleLabel(rule) }}
-          </Tag>
+          </Button>
           <Tag v-if="rulesFor(outbound).length > 3" size="small" color="default">
             +{{ rulesFor(outbound).length - 3 }}
           </Tag>
@@ -203,8 +211,9 @@ const setTarget = (outbound: App.Outbound, value: string) => {
 }
 
 .policy-warning {
-  color: var(--level-4-color);
-  background: var(--card-bg);
+  color: var(--color-danger);
+  background: var(--surface-bg);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
 }
 
 .policy-note {
@@ -212,10 +221,15 @@ const setTarget = (outbound: App.Outbound, value: string) => {
 }
 
 .semantic-warning {
-  color: var(--level-4-color);
+  color: var(--color-danger);
+}
+.rule-link {
+  white-space: normal;
+  text-align: left;
+  word-break: break-word;
 }
 
-@media (max-width: 760px) {
+@container (max-width: 640px) {
   .policy-grid {
     grid-template-columns: minmax(0, 1fr);
   }

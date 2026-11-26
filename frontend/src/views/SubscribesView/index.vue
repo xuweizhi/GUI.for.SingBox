@@ -4,10 +4,16 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n, I18nT } from 'vue-i18n'
 
 import { BrowserOpenURL, ClipboardSetText } from '@/bridge'
-import { removeUnusedResourceCache } from '@/utils/configPersistence'
-import { DraggableOptions, ViewOptions } from '@/constant/app'
+import { DraggableOptions } from '@/constant/app'
 import { RequestProxyMode, View } from '@/enums/app'
-import { useSubscribesStore, useAppSettingsStore, usePluginsStore, useAppStore } from '@/stores'
+import {
+  useProfilesStore,
+  useNodeGroupsStore,
+  useSubscribesStore,
+  useAppSettingsStore,
+  usePluginsStore,
+  useAppStore,
+} from '@/stores'
 import {
   confirm,
   formatBytes,
@@ -18,6 +24,11 @@ import {
   message,
   modal,
 } from '@/utils'
+import { removeUnusedResourceCache } from '@/utils/configPersistence'
+import { profileUsesSubscription } from '@/utils/nodeGroup'
+
+import ResourceActions from '@/components/_common/ResourceActions.vue'
+import ResourcePageShell from '@/components/_common/ResourcePageShell.vue'
 
 import ProxiesEditor from './components/ProxiesEditor.vue'
 import ProxiesView from './components/ProxiesView.vue'
@@ -51,7 +62,7 @@ const menuList: App.Menu[] = [
     },
   },
   {
-    label: 'common.update',
+    label: 'settings.requestProxy.name',
     children: [
       {
         label: 'subscribes.updateDirect',
@@ -80,28 +91,50 @@ const menuList: App.Menu[] = [
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const profilesStore = useProfilesStore()
+const groupsStore = useNodeGroupsStore()
 const subscribeStore = useSubscribesStore()
 const appSettingsStore = useAppSettingsStore()
 const pluginsStore = usePluginsStore()
+const usedBy = (id: string) =>
+  profilesStore.profiles.filter((p) => profileUsesSubscription(p, id, groupsStore.nodeGroups))
 const keywords = ref('')
 
-const filteredSubscribes = computed(() => {
+const matches = computed(() => {
   const q = keywords.value.trim().toLowerCase()
   if (!q) return subscribeStore.subscribes
   return subscribeStore.subscribes.filter(
     (s) => s.name.toLowerCase().includes(q) || (s.url || '').toLowerCase().includes(q),
   )
 })
+const filter = ref('')
+const sort = ref('manual')
+const filters = [
+  { label: 'common.enabled', value: 'enabled' },
+  { label: 'common.disabled', value: 'disabled' },
+]
+const filteredSubscribes = computed(() => {
+  const records = matches.value.filter(
+    (item) => !filter.value || (filter.value === 'disabled' ? item.disabled : !item.disabled),
+  )
+  return sort.value === 'name' ? records.sort((a, b) => a.name.localeCompare(b.name)) : records
+})
 
 const generateMenus = (subscription: App.Subscription) => {
-  const builtInMenus: App.Menu[] = menuList.map((v) => ({
-    ...v,
-    handler: () => v.handler?.(subscription.id),
-    children: v.children?.map((child) => ({
-      ...child,
-      handler: () => child.handler?.(subscription.id),
-    })),
-  }))
+  const builtInMenus: App.Menu[] = menuList
+    .filter((v) => v.label !== 'subscribes.copySub' || Boolean(subscription.url))
+    .map((v) => ({
+      ...v,
+      disabled:
+        v.label === 'settings.requestProxy.name'
+          ? subscription.disabled || subscription.updating
+          : v.disabled,
+      handler: () => v.handler?.(subscription.id),
+      children: v.children?.map((child) => ({
+        ...child,
+        handler: () => child.handler?.(subscription.id),
+      })),
+    }))
 
   const contextMenus = pluginsStore.plugins.filter(
     (plugin) => Object.keys(plugin.context.subscriptions).length !== 0,
@@ -139,13 +172,26 @@ const generateMenus = (subscription: App.Subscription) => {
     )
   }
 
-  return builtInMenus
+  return [
+    {
+      label: 'common.update',
+      disabled: subscription.disabled || subscription.updating,
+      handler: () => handleUpdateSub(subscription),
+    },
+    ...builtInMenus,
+    {
+      label: subscription.disabled ? 'common.enable' : 'common.disable',
+      handler: () => handleDisableSub(subscription),
+    },
+    { label: 'common.edit', handler: () => handleShowSubForm(subscription.id) },
+    { label: 'common.delete', handler: () => handleDeleteSub(subscription) },
+  ]
 }
 
 const handleShowSubForm = (id?: string) => {
   const m = modal({
     title: id ? 'common.edit' : 'common.add',
-    class: 'subscription-dialog',
+    size: 'lg',
   })
   m.setContent(SubscribeForm, { id }).open()
 }
@@ -183,17 +229,6 @@ const handleEditProxies = (id: string, editor = false) => {
   }
 }
 
-const handleCopySubUrl = async (s: App.Subscription) => {
-  if (!s.url) return
-  await ClipboardSetText(s.url)
-  message.success('common.copied')
-}
-
-const handleEditScript = (id: string) => {
-  const m = modal({ title: 'common.edit', width: '90' })
-  m.setContent(SubscribeScript, { id }).open()
-}
-
 const handleUpdateSub = async (s: App.Subscription, options?: Partial<App.Subscription>) => {
   if (updatingAll.value || s.updating) return
   try {
@@ -220,11 +255,18 @@ const handleRefreshUsage = async (id: string) => {
 
 const handleDeleteSub = async (s: App.Subscription) => {
   try {
-    await confirm(t('common.delete'), t('common.confirmDelete', [s.name]), {
-      type: 'text',
-      okText: 'common.delete',
-      danger: true,
-    })
+    await confirm(
+      t('common.delete'),
+      [
+        t('common.confirmDelete', [s.name]),
+        ...usedBy(s.id).map((p) => t('workspace.usedBy', [p.name])),
+      ].join('\n'),
+      {
+        type: 'text',
+        okText: 'common.delete',
+        danger: true,
+      },
+    )
   } catch {
     return
   }
@@ -281,50 +323,45 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
     </Empty>
   </div>
 
-  <div v-else class="grid-list-header subscriptions-toolbar">
-    <Radio v-model="appSettingsStore.app.subscribesView" :options="ViewOptions" />
-    <span class="resource-count-badge">
-      {{
-        keywords.trim()
-          ? `${filteredSubscribes.length} / ${subscribeStore.subscribes.length}`
-          : subscribeStore.subscribes.length
-      }}
-    </span>
-    <Input
-      v-model="keywords"
-      size="small"
-      clearable
-      auto-size
-      :placeholder="t('common.search')"
-      class="resource-search mr-auto"
-    />
-    <div class="subscriptions-actions">
-      <CustomAction :actions="appStore.customActions.subscriptions_header" />
-      <Button
-        :disabled="noUpdateNeeded"
-        :type="noUpdateNeeded ? 'text' : 'link'"
-        :loading="updatingAll" @click="handleUpdateSubs"
-      >
-        {{ t('common.updateAll') }}
-      </Button>
-      <Button type="link" @click="handleSyncOutboundRefs">
-        {{ t('subscribes.syncOutboundRefs') }}
-      </Button>
+  <template v-else>
+    <div v-if="subscribeStore.pendingReferences" class="surface-inset p-8 flex items-center gap-8">
+      {{ t('workspace.syncReferences', [subscribeStore.pendingReferences]) }}
+      <Button type="link" @click="handleSyncOutboundRefs">{{
+        t('subscribes.syncOutboundRefs')
+      }}</Button>
     </div>
-    <Button type="primary" icon="add" class="subscriptions-add" @click="handleShowSubForm()">
-      {{ t('common.add') }}
-    </Button>
-  </div>
-
-  <Empty v-if="subscribeStore.subscribes.length > 0 && filteredSubscribes.length === 0" />
-
+    <ResourcePageShell
+      v-model:query="keywords"
+      v-model:view="appSettingsStore.app.subscribesView"
+      v-model:sort="sort"
+      v-model:filter="filter"
+      :filters="filters"
+      :total="subscribeStore.subscribes.length"
+      :count="filteredSubscribes.length"
+    >
+      <div class="subscriptions-actions">
+        <CustomAction :actions="appStore.customActions.subscriptions_header" />
+        <Button
+          :disabled="noUpdateNeeded"
+          :type="noUpdateNeeded ? 'text' : 'link'"
+          :loading="updatingAll"
+          @click="handleUpdateSubs"
+        >
+          {{ t('common.updateAll') }}
+        </Button>
+      </div>
+      <Button type="primary" icon="add" class="subscriptions-add" @click="handleShowSubForm()">
+        {{ t('common.add') }}
+      </Button>
+    </ResourcePageShell>
+  </template>
   <VueDraggable
-    v-else-if="subscribeStore.subscribes.length > 0"
+    v-if="filteredSubscribes.length"
     v-model="subscribeStore.subscribes"
     v-bind="DraggableOptions"
-    @update="onSortUpdate"
-    :disabled="Boolean(keywords.trim())"
+    :disabled="Boolean(keywords.trim() || filter || sort !== 'manual')"
     :class="'grid-list-' + appSettingsStore.app.subscribesView"
+    @update="onSortUpdate"
   >
     <Card
       v-for="s in filteredSubscribes"
@@ -351,152 +388,7 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         />
       </template>
 
-      <template v-if="appSettingsStore.app.subscribesView === View.Grid" #extra>
-        <Dropdown>
-          <Button
-            type="text"
-            size="small"
-            icon="more"
-            :aria-label="t('common.more') + ' · ' + s.name"
-          />
-          <template #overlay="{ close }">
-            <div class="flex flex-col gap-2 min-w-128 p-6">
-              <Button
-                :disabled="s.disabled"
-                :loading="s.updating"
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    handleUpdateSub(s)
-                    close()
-                  }
-                "
-              >
-                {{ t('common.update') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    handleEditProxies(s.id)
-                    close()
-                  }
-                "
-              >
-                {{ t('subscribes.editProxies') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    handleEditProxies(s.id, true)
-                    close()
-                  }
-                "
-              >
-                {{ t('subscribes.editSourceFile') }}
-              </Button>
-              <Button
-                v-if="s.url"
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    handleCopySubUrl(s)
-                    close()
-                  }
-                "
-              >
-                {{ t('subscribes.copySub') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    handleEditScript(s.id)
-                    close()
-                  }
-                "
-              >
-                {{ t('subscribes.script') }}
-              </Button>
-              <Divider size="small" />
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    handleDisableSub(s)
-                    close()
-                  }
-                "
-              >
-                {{ s.disabled ? t('common.enable') : t('common.disable') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    handleShowSubForm(s.id)
-                    close()
-                  }
-                "
-              >
-                {{ t('common.edit') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start text-danger"
-                @click="
-                  () => {
-                    close()
-                    handleDeleteSub(s)
-                  }
-                "
-              >
-                {{ t('common.delete') }}
-              </Button>
-            </div>
-          </template>
-        </Dropdown>
-      </template>
-
-      <template v-else #extra>
-        <Button
-          :disabled="s.disabled"
-          :loading="s.updating"
-          type="text"
-          size="small"
-          @click="handleUpdateSub(s)"
-        >
-          {{ t('common.update') }}
-        </Button>
-        <Button type="text" size="small" @click="handleEditProxies(s.id)">
-          {{ t('subscribes.editProxies') }}
-        </Button>
-        <Button type="text" size="small" @click="handleDisableSub(s)">
-          {{ s.disabled ? t('common.enable') : t('common.disable') }}
-        </Button>
-        <Button type="text" size="small" @click="handleShowSubForm(s.id)">
-          {{ t('common.edit') }}
-        </Button>
-        <Button type="text" size="small" class="text-danger" @click="handleDeleteSub(s)">
-          {{ t('common.delete') }}
-        </Button>
-      </template>
+      <template #extra><ResourceActions :items="generateMenus(s)" :name="s.name" /></template>
 
       <template v-if="appSettingsStore.app.subscribesView === View.List">
         <div style="margin-bottom: 8px">
@@ -583,7 +475,7 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         </span>
       </div>
 
-      <div v-if="appSettingsStore.app.subscribesView === View.Grid" class="resource-card-footer">
+      <div class="resource-card-footer">
         <Button
           :disabled="s.disabled"
           :loading="s.updating"
@@ -600,6 +492,15 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
         <Button type="text" size="small" class="ml-auto" @click="handleShowSubForm(s.id)">
           {{ t('common.edit') }}
         </Button>
+      </div>
+      <div v-if="usedBy(s.id).length" class="flex flex-wrap gap-6 mt-8">
+        <span class="text-muted">{{ t('nodeGroups.dependencies') }}</span>
+        <RouterLink
+          v-for="p in usedBy(s.id)"
+          :key="p.id"
+          :to="{ name: 'EditProfile', params: { id: p.id }, query: { step: 3 } }"
+          ><Tag size="small">{{ p.name }}</Tag></RouterLink
+        >
       </div>
     </Card>
   </VueDraggable>
@@ -638,20 +539,10 @@ const onSortUpdate = debounce(subscribeStore.saveSubscribes, 1000)
   flex-wrap: wrap;
   gap: 4px;
 }
-@media (max-width: 700px) {
-  .subscriptions-toolbar {
-    display: flex;
-  }
+@container (max-width: 640px) {
   .subscriptions-add {
     margin-left: auto;
     min-height: 36px;
   }
-}
-</style>
-
-<style>
-.subscription-dialog.gui-modal-modal:not(.is-maximized) {
-  width: 720px !important;
-  min-width: 0 !important;
 }
 </style>

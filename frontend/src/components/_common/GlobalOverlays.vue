@@ -26,7 +26,9 @@ const openAll = () => {
 }
 
 const minimizeAll = () => {
-  Array.from(appStore.modalMinimizers).reverse().forEach((minimize) => minimize())
+  Array.from(appStore.modalMinimizers)
+    .reverse()
+    .forEach((minimize) => minimize())
 }
 </script>
 
@@ -46,15 +48,33 @@ const minimizeAll = () => {
   <CommandView v-if="!loading" />
 
   <div
-    v-if="appStore.modalMinimizers.size || appStore.modalMinimized.length || kernelApiStore.needRestart || kernelApiStore.restarting"
+    v-if="
+      appStore.modalMinimizers.size ||
+      appStore.modalMinimized.length ||
+      kernelApiStore.needRestart ||
+      kernelApiStore.restarting
+    "
     class="fixed right-32 bottom-32 flex flex-col gap-8 z-9999"
   >
-    <Dropdown v-if="appStore.modalMinimizers.size || appStore.modalMinimized.length" placement="top">
-      <Button
-        icon="adjust"
-        :aria-label="$t('common.modalList')"
-        class="shadow"
-      />
+    <Dropdown
+      v-if="appStore.modalMinimizers.size || appStore.modalMinimized.length"
+      placement="top"
+      align="end"
+      :trigger="['hover', 'click']"
+    >
+      <div class="modal-dock-trigger">
+        <Button
+          icon="adjust"
+          :aria-label="$t('common.modalList')"
+          class="shadow"
+          :title="
+            appStore.modalMinimized.map((m) => $t(m.title())).join(', ') || $t('common.modalList')
+          "
+        />
+        <span v-if="appStore.modalMinimized.length" class="modal-dock-badge">{{
+          appStore.modalMinimized.length
+        }}</span>
+      </div>
       <template #overlay="{ close }">
         <Card :title="$t('common.modalList')">
           <template #extra>
@@ -123,5 +143,25 @@ const minimizeAll = () => {
 .restart-pill {
   border-radius: 999px;
   padding: 8px 16px;
+}
+.modal-dock-trigger {
+  position: relative;
+  display: inline-flex;
+}
+.modal-dock-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-text);
+  color: var(--btn-primary-color);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
 }
 </style>

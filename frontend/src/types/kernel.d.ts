@@ -71,6 +71,7 @@ export interface CoreApiMemoryData {
 }
 
 export interface CoreApiLogsData {
+  time?: string
   type: string
   payload: string
 }

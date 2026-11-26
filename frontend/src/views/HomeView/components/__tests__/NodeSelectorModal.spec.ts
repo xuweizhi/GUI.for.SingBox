@@ -322,7 +322,7 @@ describe('NodeSelectorModal', () => {
     controller.switchingNode.value = 'JP 01'
     const wrapper = mountModal(controller)
 
-    expect(wrapper.get('[data-node="JP 01"]').attributes('aria-disabled')).toBe('true')
+    expect((wrapper.get('[data-node="JP 01"] .node-name').element as HTMLButtonElement).disabled).toBe(true)
     await wrapper.get('[data-node="JP 01"]').trigger('click')
 
     expect(controller.switchNode).not.toHaveBeenCalled()
@@ -353,14 +353,15 @@ describe('NodeSelectorModal', () => {
     expect(controller.cancelGroupTest).toHaveBeenCalled()
   })
 
-  it('wires search and delay sorting controls without exposing a policy-group selector', async () => {
+  it('wires search, sorting, and the sticky policy-group selector', async () => {
     const controller = createController()
+    controller.groups = computed(() => [{ name: 'Proxy' }, { name: 'Global' }]) as never
     const wrapper = mountModal(controller)
 
     await wrapper.get('.search').setValue('jp')
     await wrapper.get('.sort').trigger('click')
 
-    expect(wrapper.find('.group-select').exists()).toBe(false)
+    expect(wrapper.find('.node-group-select').exists()).toBe(true)
     expect(controller.query.value).toBe('jp')
     expect(controller.sortByDelay.value).toBe(true)
   })
@@ -392,7 +393,7 @@ describe('NodeSelectorModal', () => {
     controller.readonlyMode = computed(() => true)
     const wrapper = mountModal(controller)
 
-    expect(wrapper.get('[data-node="JP 01"]').attributes('aria-disabled')).toBe('true')
+    expect((wrapper.get('[data-node="JP 01"] .node-name').element as HTMLButtonElement).disabled).toBe(true)
     await wrapper.get('[data-node="JP 01"]').trigger('click')
     await wrapper.get('[data-delay="JP 01"]').trigger('click')
 

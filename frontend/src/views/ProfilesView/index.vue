@@ -2,10 +2,10 @@
 import { computed, ref } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n, I18nT } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
 import { ClipboardSetText } from '@/bridge'
-import { DraggableOptions, ViewOptions } from '@/constant/app'
-import { View } from '@/enums/app'
+import { DraggableOptions } from '@/constant/app'
 import {
   useProfilesStore,
   useAppSettingsStore,
@@ -22,11 +22,15 @@ import {
   message,
   sampleID,
   alert,
+  previewCode,
   modal,
 } from '@/utils'
 
+import ResourceActions from '@/components/_common/ResourceActions.vue'
+import ResourcePageShell from '@/components/_common/ResourcePageShell.vue'
+
 import ProfileEditor from './components/ProfileEditor.vue'
-import ProfileForm from './components/ProfileForm.vue'
+const router = useRouter()
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -38,19 +42,39 @@ const pluginsStore = usePluginsStore()
 const keywords = ref('')
 const switchingProfileId = ref('')
 
-const filteredProfiles = computed(() => {
+const matches = computed(() => {
   const q = keywords.value.trim().toLowerCase()
   if (!q) return profilesStore.profiles
   return profilesStore.profiles.filter((p) => p.name.toLowerCase().includes(q))
+})
+const filter = ref('')
+const sort = ref('manual')
+const filters = [
+  { label: 'home.overview.currentProfile', value: 'active' },
+  { label: 'common.auto', value: 'auto' },
+]
+const filteredProfiles = computed(() => {
+  const records = matches.value.filter(
+    (item) =>
+      !filter.value ||
+      (filter.value === 'active'
+        ? item.id === appSettingsStore.app.kernel.profile
+        : isCreatedBySubscription(item.id)),
+  )
+  return sort.value === 'name' ? records.sort((a, b) => a.name.localeCompare(b.name)) : records
 })
 
 const selectProfile = async (id: string, start = false) => {
   const previous = appSettingsStore.app.kernel.profile
   const wasRunning = kernelApiStore.running
   if (
-    switchingProfileId.value || kernelApiStore.starting || kernelApiStore.stopping ||
-    kernelApiStore.restarting || (id === previous && (wasRunning || !start))
-  ) return
+    switchingProfileId.value ||
+    kernelApiStore.starting ||
+    kernelApiStore.stopping ||
+    kernelApiStore.restarting ||
+    (id === previous && (wasRunning || !start))
+  )
+    return
 
   switchingProfileId.value = id
   appSettingsStore.app.kernel.profile = id
@@ -101,7 +125,7 @@ const handlePreviewGeneratedConfig = async (id: string) => {
   const p = profilesStore.getProfileById(id)!
   try {
     const config = await generateConfig(p)
-    alert(p.name, JSON.stringify(config, null, 2))
+    previewCode(p.name, JSON.stringify(config, null, 2))
   } catch (error: any) {
     message.error(error.message || error)
   }
@@ -114,7 +138,6 @@ const handleEditProfileSource = (id: string) => {
 }
 
 const menuList: App.Menu[] = [
-  'profile.step.name',
   'profile.step.general',
   'profile.step.inbounds',
   'profile.step.outbounds',
@@ -126,7 +149,7 @@ const menuList: App.Menu[] = [
     label: v,
     handler: (id: string) => {
       const p = profilesStore.getProfileById(id)
-      p && handleShowProfileForm(p.id, i)
+      p && handleShowProfileForm(p.id, i + 1)
     },
   }
 })
@@ -204,13 +227,19 @@ const generateMenus = (profile: App.Profile) => {
     )
   }
 
-  return builtInMenus
+  return [
+    { label: 'common.use', handler: () => handleUseProfile(profile) },
+    ...builtInMenus,
+    { label: 'common.delete', handler: () => handleDeleteProfile(profile) },
+  ]
 }
 
-const handleShowProfileForm = (id?: string, step = 0) => {
-  const m = modal({ title: id ? 'common.edit' : 'common.add', minWidth: '72' })
-  m.setContent(ProfileForm, { id, step }).open()
-}
+const handleShowProfileForm = (id?: string, step = 1) =>
+  router.push(
+    id
+      ? { name: 'EditProfile', params: { id }, query: { step: Math.max(step, 1) } }
+      : { name: 'NewProfile' },
+  )
 
 const handleDeleteProfile = async (p: App.Profile) => {
   const { profile } = appSettingsStore.app.kernel
@@ -266,38 +295,29 @@ const onSortUpdate = debounce(
     </Empty>
   </div>
 
-  <div v-else class="grid-list-header">
-    <Radio v-model="appSettingsStore.app.profilesView" :options="ViewOptions" />
-    <span class="resource-count-badge">
-      {{
-        keywords.trim()
-          ? `${filteredProfiles.length} / ${profilesStore.profiles.length}`
-          : profilesStore.profiles.length
-      }}
-    </span>
-    <Input
-      v-model="keywords"
-      size="small"
-      clearable
-      auto-size
-      :placeholder="t('common.search')"
-      class="resource-search mr-auto"
-    />
+  <ResourcePageShell
+    v-else
+    v-model:query="keywords"
+    v-model:view="appSettingsStore.app.profilesView"
+    v-model:sort="sort"
+    v-model:filter="filter"
+    :filters="filters"
+    :total="profilesStore.profiles.length"
+    :count="filteredProfiles.length"
+  >
     <CustomAction :actions="appStore.customActions.profiles_header" />
     <Button type="primary" icon="add" @click="handleShowProfileForm()">
       {{ t('common.add') }}
     </Button>
-  </div>
-
-  <Empty v-if="profilesStore.profiles.length > 0 && filteredProfiles.length === 0" />
+  </ResourcePageShell>
 
   <VueDraggable
-    v-else-if="profilesStore.profiles.length > 0"
+    v-if="filteredProfiles.length"
     v-model="profilesStore.profiles"
     v-bind="DraggableOptions"
-    @update="onSortUpdate"
-    :disabled="Boolean(keywords.trim())"
+    :disabled="Boolean(keywords.trim() || filter || sort !== 'manual')"
     :class="'grid-list-' + appSettingsStore.app.profilesView"
+    @update="onSortUpdate"
   >
     <Card
       v-for="p in filteredProfiles"
@@ -321,151 +341,14 @@ const onSortUpdate = debounce(
         </Tag>
       </template>
 
-      <template v-if="appSettingsStore.app.profilesView === View.Grid" #extra>
-        <Dropdown>
-          <Button
-            type="text"
-            size="small"
-            icon="more"
-            :loading="switchingProfileId === p.id"
-            :aria-label="t('common.more') + ' · ' + p.name"
-          />
-          <template #overlay="{ close }">
-            <div class="flex flex-col gap-2 min-w-160 p-6">
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleUseProfile(p)
-                  }
-                "
-              >
-                {{ t('common.use') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleStartWithProfile(p.id)
-                  }
-                "
-              >
-                {{ t('profiles.start') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleShowProfileForm(p.id)
-                  }
-                "
-              >
-                {{ t('common.edit') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleDuplicateProfile(p.id)
-                  }
-                "
-              >
-                {{ t('profiles.copy') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handlePreviewGeneratedConfig(p.id)
-                  }
-                "
-              >
-                {{ t('profiles.generateAndView') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleCopyGeneratedConfig(p.id)
-                  }
-                "
-              >
-                {{ t('profiles.copytoClipboard') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleEditProfileSource(p.id)
-                  }
-                "
-              >
-                {{ t('profiles.editSourceFile') }}
-              </Button>
-              <Divider size="small" />
-              <Button
-                type="text"
-                size="small"
-                class="justify-start text-danger"
-                @click="
-                  () => {
-                    close()
-                    handleDeleteProfile(p)
-                  }
-                "
-              >
-                {{ t('common.delete') }}
-              </Button>
-            </div>
-          </template>
-        </Dropdown>
-      </template>
-
-      <template v-else #extra>
-        <Button
-          type="text"
-          size="small"
-          :loading="switchingProfileId === p.id"
-          @click="handleUseProfile(p)"
-        >
-          {{ t('common.use') }}
-        </Button>
-        <Button type="text" size="small" @click="handleShowProfileForm(p.id)">
-          {{ t('common.edit') }}
-        </Button>
-        <Button type="text" size="small" @click="handlePreviewGeneratedConfig(p.id)">
-          {{ t('common.preview') }}
-        </Button>
-        <Button type="text" size="small" class="text-danger" @click="handleDeleteProfile(p)">
-          {{ t('common.delete') }}
-        </Button>
-      </template>
+      <template #extra><ResourceActions :items="generateMenus(p)" :name="p.name" /></template>
 
       <div class="resource-meta-list">
         <div class="resource-meta-row">
           <span>{{ t('profiles.inbounds') }} / {{ t('profiles.outbounds') }}</span>
-          <span class="resource-meta-value">{{ p.inbounds.length }} / {{ p.outbounds.length }}</span>
+          <span class="resource-meta-value"
+            >{{ p.inbounds.length }} / {{ p.outbounds.length }}</span
+          >
         </div>
         <div class="resource-meta-row">
           <span>{{ t('kernel.route.tab.rule_set') }} / {{ t('kernel.route.tab.rules') }}</span>
@@ -481,11 +364,7 @@ const onSortUpdate = debounce(
         </div>
       </div>
 
-      <div
-        v-if="appSettingsStore.app.profilesView === View.Grid"
-        class="resource-card-footer"
-        @dblclick.stop
-      >
+      <div class="resource-card-footer" @dblclick.stop>
         <Button
           :type="appSettingsStore.app.kernel.profile === p.id ? 'text' : 'normal'"
           size="small"

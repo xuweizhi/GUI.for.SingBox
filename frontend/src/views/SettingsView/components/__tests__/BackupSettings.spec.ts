@@ -34,6 +34,7 @@ it('previews the chosen archive and resubmits the same bytes only after confirma
   const wrapper = mount(BackupSettings, {
     global: {
       stubs: {
+        AdvancedSettings: true,
         Card: { template: '<section><slot/></section>' },
         Input: true,
         Button: true,
@@ -69,7 +70,8 @@ it('previews the chosen archive and resubmits the same bytes only after confirma
 })
 
 it('keeps the switch at the saved value after a failed request and retries the same change', async () => {
-  const fetch = vi.fn()
+  const fetch = vi
+    .fn()
     .mockResolvedValueOnce(new Response('failed', { status: 500 }))
     .mockResolvedValueOnce(new Response())
   vi.stubGlobal('fetch', fetch)
@@ -78,7 +80,13 @@ it('keeps the switch at the saved value after a failed request and retries the s
     global: {
       components: { Switch },
       directives: { tips: {} },
-      stubs: { Card: { template: '<section><slot/></section>' }, Input: true, Button: true, Modal: true },
+      stubs: {
+        AdvancedSettings: true,
+        Card: { template: '<section><slot/></section>' },
+        Input: true,
+        Button: true,
+        Modal: true,
+      },
     },
   })
   try {
@@ -89,7 +97,10 @@ it('keeps the switch at the saved value after a failed request and retries the s
     await toggle.trigger('click')
     await flushPromises()
     expect(toggle.attributes('aria-checked')).toBe('true')
-    expect(fetch.mock.calls.map((args) => JSON.parse(args[1].body))).toEqual([{ enabled: true }, { enabled: true }])
+    expect(fetch.mock.calls.map((args) => JSON.parse(args[1].body))).toEqual([
+      { enabled: true },
+      { enabled: true },
+    ])
   } finally {
     wrapper.unmount()
   }

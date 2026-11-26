@@ -31,7 +31,7 @@ const configure = async (plugin: App.Plugin, value: Recordable) => {
         {{ $t('plugins.configuration') }}
       </div>
       <Card>
-        <div class="py-32"><Empty /></div>
+        <Empty />
       </Card>
     </template>
 
@@ -44,32 +44,11 @@ const configure = async (plugin: App.Plugin, value: Recordable) => {
     >
       <template #header="{ handleResetAll }">
         <div class="flex items-center px-8 py-12">
-          <Dropdown>
-            <Button
-              icon="settings"
-              type="text"
-              size="small"
-              class="mr-4"
-              style="margin-left: -8px"
-            />
-            <template #overlay="{ close }">
-              <div class="flex flex-col gap-4 min-w-64 p-4">
-                <Button
-                  type="text"
-                  size="small"
-                  @click="
-                    () => {
-                      handleResetAll()
-                      close()
-                    }
-                  "
-                >
-                  {{ $t('settings.plugin.resetSettings') }}
-                </Button>
-              </div>
-            </template>
-          </Dropdown>
-          <div class="text-18 font-bold">{{ plugin.name }}</div>
+          <strong class="mr-auto">{{ plugin.name }}</strong>
+          <span class="text-12 text-muted">{{ $t('workspace.autoSaved') }}</span>
+          <Button type="link" size="small" @click="handleResetAll">{{
+            $t('settings.plugin.resetSettings')
+          }}</Button>
         </div>
       </template>
     </PluginConfigItem>

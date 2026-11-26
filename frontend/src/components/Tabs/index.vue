@@ -95,6 +95,10 @@ const currentComponent = computed(() => {
 
 .gui-tabs-tab--left .gui-tabs-item {
   justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   &.is-active::before {
     content: '';
     position: absolute;
@@ -118,7 +122,7 @@ const currentComponent = computed(() => {
   background: var(--accent-text);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .gui-tabs.is-left {
     flex-direction: column;
     gap: 12px;
@@ -126,7 +130,19 @@ const currentComponent = computed(() => {
     > .gui-tabs-tab {
       width: 100% !important;
       flex-direction: row;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+
+      &::-webkit-scrollbar {
+        display: none;
+      }
+
+      > .gui-button,
+      > :slotted(.gui-button) {
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
     }
 
     > .gui-tabs-content {

@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { parse } from 'yaml'
 
-import { RefreshSubscriptionUsage } from '@/bridge/browser/go/bridge/App'
+import { RefreshSubscriptionUsage, UpdateSubscriptionSettings } from '@/bridge/browser/go/bridge/App'
 
 import { ReadFile, WriteFile, Requests, GetSystemProxy } from '@/bridge'
 import { DefaultSubscribeScript, SubscribesFilePath, NodeGroupsFilePath } from '@/constant/app'
@@ -134,42 +134,63 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     profiles.forEach((profile, index) => Object.assign(store.profiles[index]!, profile))
   }
 
+  const referenceChanges = computed(() => {
+    const store = useProfilesStore()
+    const ids = new Set(subscribes.value.map((s) => s.id))
+    return store.profiles.flatMap((profile) =>
+      profile.outbounds.flatMap((outbound) => {
+        const refs = new Set(
+          outbound.outbounds.filter((item) => item.type === 'Subscription').map((item) => item.id),
+        )
+        const remove = outbound.outbounds.filter(
+          (item) => item.type === 'Subscription' && !ids.has(item.id),
+        )
+        const add =
+          profile.id === store.currentProfile?.id &&
+          defaultOutboundIds.includes(outbound.id) &&
+          ['selector', 'urltest'].includes(outbound.type)
+            ? [...ids].filter((id) => !refs.has(id))
+            : []
+        return add.length || remove.length
+          ? [
+              {
+                profile: profile.id,
+                outbound: outbound.id,
+                remove: remove.map((item) => item.id),
+                add,
+              },
+            ]
+          : []
+      }),
+    )
+  })
+  const pendingReferences = computed(() =>
+    referenceChanges.value.reduce((n, c) => n + c.add.length + c.remove.length, 0),
+  )
   const syncSubscribeOutboundRefs = () =>
     withConfigMutation(async () => {
-      const profilesStore = useProfilesStore()
-      const profiles = deepClone(profilesStore.profiles)
-      const currentProfile = profiles.find(
-        (profile) => profile.id === profilesStore.currentProfile?.id,
-      )
-      const subscriptionIds = new Set(subscribes.value.map((item) => item.id))
-      const changed = new Set<string>()
+      const changes = referenceChanges.value
+      const store = useProfilesStore()
       let added = 0
       let removed = 0
-      profiles.forEach((profile) =>
-        profile.outbounds.forEach((outbound) => {
-          outbound.outbounds = outbound.outbounds.filter((item) => {
-            if (item.type !== 'Subscription' || subscriptionIds.has(item.id)) return true
-            removed++
-            changed.add(profile.id)
-            return false
-          })
-        }),
-      )
-      if (currentProfile) {
-        const before = currentProfile.outbounds.reduce(
-          (n, outbound) => n + outbound.outbounds.length,
-          0,
-        )
-        subscribes.value.forEach((subscription) =>
-          addSubscribeToDefaultOutbounds(subscription, currentProfile),
-        )
-        added =
-          currentProfile.outbounds.reduce((n, outbound) => n + outbound.outbounds.length, 0) -
-          before
-        if (added) changed.add(currentProfile.id)
-      }
-      if (added || removed) {
-        await profilesStore.writeProfiles(profiles)
+      if (changes.length) {
+        const profiles = deepClone(store.profiles)
+        const changed = new Set<string>()
+        for (const change of changes) {
+          const outbound = profiles
+            .find((p) => p.id === change.profile)!
+            .outbounds.find((o) => o.id === change.outbound)!
+          const stale = new Set(change.remove)
+          outbound.outbounds = outbound.outbounds.filter(
+            (item) => item.type !== 'Subscription' || !stale.has(item.id),
+          )
+          for (const id of change.add)
+            outbound.outbounds.push({ id, tag: id, type: 'Subscription' })
+          added += change.add.length
+          removed += change.remove.length
+          changed.add(change.profile)
+        }
+        await store.writeProfiles(profiles)
         publishProfiles(profiles)
         changed.forEach((id) => eventBus.emit('profileChange', { id }))
       }
@@ -240,6 +261,23 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       if (changed.size) publishProfiles(profiles)
       changed.forEach((id) => eventBus.emit('profileChange', { id }))
       eventBus.emit('subscriptionChange', { id })
+    })
+
+  const editSubscriptionSettings = (original: App.Subscription, draft: App.Subscription) =>
+    withConfigMutation(async () => {
+      const current = getSubscribeById(original.id)
+      if (!current) throw new Error(`${original.id} Not Found`)
+      const changes = Object.fromEntries(
+        (Object.keys(draft) as (keyof App.Subscription)[])
+          .filter((key) => JSON.stringify(original[key]) !== JSON.stringify(draft[key]))
+          .map((key) => [key, { before: original[key], after: draft[key] }]),
+      )
+      if (!Object.keys(changes).length) return
+      await UpdateSubscriptionSettings(original.id, changes)
+      for (const [key, change] of Object.entries(changes)) {
+        Object.assign(current, { [key]: change.after })
+      }
+      eventBus.emit('subscriptionChange', { id: original.id })
     })
 
   const editSubscribe = (
@@ -607,8 +645,10 @@ export const useSubscribesStore = defineStore('subscribes', () => {
     reloadFromDisk,
     saveSubscribes,
     addSubscribe,
+    editSubscriptionSettings,
     editSubscribe,
     deleteSubscribe,
+    pendingReferences,
     syncSubscribeOutboundRefs,
     updateSubscribe,
     refreshUsage,

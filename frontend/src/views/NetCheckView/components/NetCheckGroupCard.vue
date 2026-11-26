@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { NetworkCheckResultGroup } from '@/views/NetCheckView/useNetworkCheck'
@@ -64,33 +64,91 @@ const statusLabel = (status: string) => {
 }
 
 const showEmptyBody = computed(() => !props.running && props.group.items.length === 0)
+const collapsible = computed(() => props.group.id === 'rulesets')
+const expanded = ref(!collapsible.value || props.group.status === 'failed')
+const hasFailures = computed(() => props.group.items.some((item) => item.status === 'failed'))
+const failureOnly = ref(false)
+const visibleItems = computed(() =>
+  collapsible.value && failureOnly.value
+    ? props.group.items.filter((item) => item.status === 'failed')
+    : props.group.items,
+)
+const toggleExpanded = () => {
+  if (collapsible.value) expanded.value = !expanded.value
+}
+const toggleFailureOnly = () => {
+  failureOnly.value = !failureOnly.value
+  expanded.value = true
+}
+watch(
+  () => props.running,
+  (running, wasRunning) => {
+    if (!collapsible.value || !wasRunning || running) return
+    expanded.value = props.group.status === 'failed'
+    failureOnly.value = props.group.status === 'failed'
+  },
+)
+watch(
+  () => props.group.status,
+  (status) => {
+    if (!collapsible.value) return
+    if (status === 'failed') expanded.value = true
+  },
+)
 </script>
 
 <template>
-  <div
-    class="group-card flex flex-col gap-10 rounded-10 p-12"
+  <section
+    class="group-card flex flex-col gap-10"
     :class="`group-card--${props.group.status}`"
     :data-group="props.group.id"
   >
-    <div class="flex flex-wrap items-center justify-between gap-8">
+    <component
+      :is="collapsible ? 'button' : 'div'"
+      :type="collapsible ? 'button' : undefined"
+      :aria-expanded="collapsible ? expanded : undefined"
+      class="group-card__header flex flex-wrap items-center justify-between gap-8"
+      :class="{ 'is-collapsible': collapsible }"
+      @click="toggleExpanded"
+    >
       <div class="flex items-center gap-8">
+        <Icon
+          v-if="collapsible"
+          icon="arrowRight"
+          :size="14"
+          color="currentColor"
+          class="group-card__chevron"
+          :class="{ 'is-expanded': expanded }"
+        />
         <span class="font-bold text-14">{{ renderText(props.group.title) }}</span>
         <span class="status-badge" :class="`status-badge--${props.group.status}`">
           {{ statusLabel(props.group.status) }}
         </span>
       </div>
-      <div v-if="props.group.summary" class="text-12 text-muted">
-        {{ renderGroupSummary() }}
+      <div class="flex items-center gap-8">
+        <div v-if="props.group.summary" class="text-12 text-muted">
+          {{ renderGroupSummary() }}
+        </div>
+        <template v-if="collapsible && hasFailures">
+          <Button size="small" type="text" @click.stop="toggleFailureOnly">
+            {{
+              t(failureOnly ? 'netCheck.actions.showAll' : 'netCheck.actions.failuresOnly')
+            }}
+          </Button>
+        </template>
       </div>
-    </div>
+    </component>
 
     <div v-if="showEmptyBody" class="text-12 text-muted">
       {{ t('netCheck.results.empty') }}
     </div>
 
-    <div v-else class="flex flex-col gap-8">
+    <div
+      v-else-if="!collapsible || expanded"
+      class="flex flex-col gap-8"
+    >
       <div
-        v-for="item in props.group.items"
+        v-for="item in visibleItems"
         :key="item.id"
         class="group-item rounded-8 p-10"
         :class="`group-item--${item.status}`"
@@ -98,7 +156,11 @@ const showEmptyBody = computed(() => !props.running && props.group.items.length 
       >
         <div class="flex flex-wrap items-center justify-between gap-8">
           <div class="flex items-center gap-6">
-            <span class="status-dot" :class="`status-dot--${item.status}`" aria-hidden="true"></span>
+            <span
+              class="status-dot"
+              :class="`status-dot--${item.status}`"
+              aria-hidden="true"
+            ></span>
             <span class="font-bold text-13">{{ renderText(item.title) }}</span>
           </div>
           <div class="flex items-center gap-8">
@@ -118,19 +180,39 @@ const showEmptyBody = computed(() => !props.running && props.group.items.length 
         </div>
       </div>
     </div>
-  </div>
+  </section>
 </template>
 
 <style scoped lang="less">
 .group-card {
-  border: 1px solid var(--border-color, #e5e7eb);
-  background: var(--bg-color);
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+}
+.group-card__header {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+.group-card__header.is-collapsible {
+  cursor: pointer;
+}
+.group-card__chevron {
+  transition: transform 0.16s ease;
+}
+.group-card__chevron.is-expanded {
+  transform: rotate(90deg);
 }
 
 .group-item {
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: 1px solid var(--surface-border, var(--border-color, #e5e7eb));
   border-left-width: 3px;
-  background: var(--card-bg, #fff);
+  background: var(--surface-bg, var(--card-bg, #fff));
 
   &--success {
     border-left-color: var(--success-color);
@@ -189,7 +271,7 @@ const showEmptyBody = computed(() => !props.running && props.group.items.length 
   &--skipped {
     color: var(--muted-color);
     background: var(--bg-color);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--surface-border);
   }
 }
 </style>

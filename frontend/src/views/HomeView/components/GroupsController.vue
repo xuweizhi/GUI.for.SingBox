@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onActivated, onScopeDispose } from 'vue'
+import { ref, computed, nextTick, watch, onActivated, onScopeDispose } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
@@ -12,21 +12,32 @@ import {
 import { useBool } from '@/hooks'
 import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
 import { ignoredError, sleep, handleUseProxy, message, buildSmartRegExp } from '@/utils'
-import { getDelayTestableNodeNames, isDelayTestableNode, resolveProxyChain } from '@/views/HomeView/nodeController'
+import {
+  getDelayTestableNodeNames,
+  isDelayTestableNode,
+  resolveProxyChain,
+} from '@/views/HomeView/nodeController'
 import { nodeLatencyScheduler } from '@/views/HomeView/nodeLatencyScheduler'
+
+import NodeCard from '@/components/_common/NodeCard.vue'
 
 import type {
   LatencyResult,
   LatencyTaskHandle,
-  LatencyTaskSummary,
+  LatencyNodePhase,
+  LatencyFailureResult,
 } from '@/views/HomeView/nodeLatencyScheduler'
 
+import { useNodeFavorites } from '../useNodeFavorites'
+
+const search = ref('')
+const groupTasks = ref<Record<string, { completed: number; total: number; cancel: () => void }>>({})
 const expandedSet = ref<Set<string>>(new Set())
 const loadingSet = ref<Set<string>>(new Set())
 const resultCache = new Map<string, { result?: LatencyResult; owners: Set<symbol> }>()
 const handles = new Set<LatencyTaskHandle>()
-const progressToasts = new Set<() => void>()
-const destroyTimers = new Set<ReturnType<typeof setTimeout>>()
+const phases = ref(new Map<string, LatencyNodePhase>())
+const errors = ref(new Map<string, LatencyFailureResult>())
 let refreshQueue = Promise.resolve()
 let pendingRefreshes = 0
 let disposed = false
@@ -40,6 +51,7 @@ const appSettings = useAppSettingsStore()
 const kernelApiStore = useKernelApiStore()
 const profilesStore = useProfilesStore()
 
+const { isFavorite, toggleFavorite } = useNodeFavorites()
 const groups = computed(() => {
   const { proxies } = kernelApiStore
   const iconMapping = (profilesStore.currentProfile?.outbounds || []).reduce((p, c) => {
@@ -64,12 +76,16 @@ const groups = computed(() => {
           const alive = (history[history.length - 1]?.delay ?? 0) > 0
           const condition1 =
             appSettings.app.kernel.unAvailable ||
-            ['direct', 'block'].includes(proxy) ||
-            proxies[proxy]?.all ||
+            ['Direct', 'Reject', 'Selector', 'URLTest'].includes(proxies[proxy]?.type || '') ||
             alive
           const keywords = filterKeywordsMap.value[group.name]
           const condition2 = keywords ? buildSmartRegExp(keywords, 'i').test(proxy) : true
-          return proxies[proxy] && condition1 && condition2
+          return (
+            proxies[proxy] &&
+            condition1 &&
+            condition2 &&
+            proxy.toLowerCase().includes(search.value.trim().toLowerCase())
+          )
         })
         .map((proxy) => {
           const history = proxies[proxy]?.history || []
@@ -88,6 +104,19 @@ const groups = computed(() => {
     })
 })
 
+let openedInitial = false
+watch(
+  groups,
+  (list) => {
+    if (openedInitial || !list.length) return
+    const primary = profilesStore.currentProfile?.outbounds.find(
+      (o) => o.id === profilesStore.currentProfile?.primary_proxy_outbound,
+    )
+    expandedSet.value.add(list.find((g) => g.name === primary?.tag)?.name ?? list[0]!.name)
+    openedInitial = true
+  },
+  { immediate: true },
+)
 const useProxyWithCatchError = (group: any, proxy: any) => {
   handleUseProxy(group, proxy).catch((err: any) => message.error(err.message || err))
 }
@@ -104,7 +133,7 @@ const expandAll = () => groups.value.forEach(({ name }) => expandedSet.value.add
 
 const collapseAll = () => expandedSet.value.clear()
 
-const isExpanded = (group: string) => expandedSet.value.has(group)
+const isExpanded = (group: string) => Boolean(search.value.trim()) || expandedSet.value.has(group)
 
 const isLoading = (group: string) => loadingSet.value.has(group)
 
@@ -119,6 +148,7 @@ const retainLoading = (names: string[], owner: symbol) =>
 const releaseLoading = (names: string[], owner: symbol) =>
   names.forEach((name) => {
     const cached = resultCache.get(name)
+    phases.value.delete(name)
     cached?.owners.delete(owner)
     if (!cached?.owners.size && !pendingRefreshes) {
       resultCache.delete(name)
@@ -131,7 +161,11 @@ const releaseLoading = (names: string[], owner: symbol) =>
 const applyResult = (result: LatencyResult, owner?: symbol) => {
   if (disposed) return
   const cached = resultCache.get(result.name)
-  if (owner && cached?.owners.has(owner)) cached.result = result
+  if (owner && cached?.owners.has(owner)) {
+    cached.result = result
+    if (result.ok) errors.value.delete(result.name)
+    else errors.value.set(result.name, result)
+  }
   const proxy = kernelApiStore.proxies[result.name]
   if (!proxy) return
   proxy.history ||= []
@@ -190,63 +224,38 @@ const handleGroupDelay = (group: string) => {
     const owned = [group, ...names]
     const owner = Symbol(group)
     retainLoading(owned, owner)
-    let finished = false
-    let completed = 0
-    let success = 0
-    let failure = 0
-    const {
-      update,
-      destroy,
-      success: msgSuccess,
-    } = message.info(
-      t('home.nodes.testingProgress', [0, names.length, 0, 0]),
-      99999,
-      () => {
-        if (finished || disposed) return
-        handle.cancel()
-        message.warn('common.canceled')
-      },
-    )
+    groupTasks.value[group] = { completed: 0, total: names.length, cancel: () => handle.cancel() }
     const handle = nodeLatencyScheduler.submit({
       ...taskOptions(names),
-      onState: (_name, phase) => {
-        if (disposed || !['queued', 'testing', 'retry-queued'].includes(phase)) return
-        update(t('home.nodes.testingProgress', [completed, names.length, success, failure]))
+      onState: (name, phase) => {
+        if (!disposed) phases.value.set(name, phase)
       },
       onResult: (result) => {
         if (disposed) return
         applyResult(result, owner)
-        completed++
-        if (result.ok) success++
-        else failure++
-        update(t('home.nodes.testingProgress', [completed, names.length, success, failure]))
+        const task = groupTasks.value[group]
+        if (task) task.completed++
       },
     })
     handles.add(handle)
-    progressToasts.add(destroy)
-    void handle.done.then(() => { finished = true })
-    void finishTask(handle, owned, owner).then((summary: LatencyTaskSummary) => {
-      if (disposed) return
-      if (summary.cancelled) {
-        progressToasts.delete(destroy)
-        destroy()
-        return
-      }
-      msgSuccess(
-        t('home.nodes.testingCompleted', [
-          summary.completed,
-          summary.total,
-          summary.success,
-          summary.failure,
-        ]),
-      )
-      const timer = setTimeout(() => {
-        progressToasts.delete(destroy)
-        destroyTimers.delete(timer)
-        destroy()
-      }, 3000)
-      destroyTimers.add(timer)
-    })
+    void finishTask(handle, owned, owner)
+      .then((summary) => {
+        if (disposed || summary.cancelled) return
+        message.success(
+          t('home.nodes.testingCompleted', [
+            summary.completed,
+            summary.total,
+            summary.success,
+            summary.failure,
+          ]),
+        )
+      })
+      .catch((error) => {
+        if (!disposed) console.error(error)
+      })
+      .finally(() => {
+        delete groupTasks.value[group]
+      })
   }
 }
 
@@ -261,11 +270,15 @@ const handleProxyDelay = (proxy: string) => {
   retainLoading([proxy], owner)
   const handle = nodeLatencyScheduler.submit({
     ...taskOptions([proxy]),
+    onState: (name, phase) => {
+      if (!disposed) phases.value.set(name, phase)
+    },
     onResult: (result) => {
       if (disposed) return
       applyResult(result, owner)
       if (!result.ok) {
-        const reason = result.message === 'home.nodes.unavailable' ? t(result.message) : result.message
+        const reason =
+          result.message === 'home.nodes.unavailable' ? t(result.message) : result.message
         message.error(`${reason}: ${result.name}`)
       }
     },
@@ -283,20 +296,21 @@ const handleRefresh = async () => {
 }
 
 const locateGroup = (group: any, chain: string) => {
-  collapseAll()
-  if (kernelApiStore.proxies[chain]?.all) {
-    toggleExpanded(kernelApiStore.proxies[chain].name)
-  } else {
-    toggleExpanded(group.name)
-  }
+  const target = kernelApiStore.proxies[chain]?.all?.length ? chain : group.name
+  expandedSet.value.add(target)
+  nextTick(() => {
+    const element = document.getElementById('policy-' + target)
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    element?.animate?.(
+      [{ outline: '2px solid var(--accent-text)' }, { outline: '2px solid transparent' }],
+      1000,
+    )
+  })
 }
 
-const delayColor = (delay = 0) => {
-  if (delay === 0) return 'var(--level-0-color)'
-  if (delay < 500) return 'var(--level-1-color)'
-  if (delay < 1000) return 'var(--level-2-color)'
-  if (delay < 1500) return 'var(--level-3-color)'
-  return 'var(--level-4-color)'
+const clearFilters = () => {
+  search.value = ''
+  filterKeywordsMap.value = {}
 }
 
 const handleResetMoreSettings = () => {
@@ -315,16 +329,18 @@ onScopeDispose(() => {
   disposed = true
   handles.forEach((handle) => handle.cancel())
   handles.clear()
-  progressToasts.forEach((destroy) => destroy())
-  progressToasts.clear()
-  destroyTimers.forEach((timer) => clearTimeout(timer))
-  destroyTimers.clear()
 })
 </script>
 
 <template>
   <div class="mb-10">
     <div class="groups-toolbar flex flex-wrap gap-8 items-center p-10 rounded-12">
+      <Input
+        v-model="search"
+        clearable
+        size="small"
+        :placeholder="t('home.nodes.title') + ' · ' + t('common.search')"
+      />
       <Switch v-model="appSettings.app.kernel.autoClose" label="home.controller.autoClose" />
       <Switch v-model="appSettings.app.kernel.unAvailable" label="home.controller.unAvailable" />
       <Switch v-model="appSettings.app.kernel.cardMode" label="home.controller.cardMode" />
@@ -367,7 +383,13 @@ onScopeDispose(() => {
     </div>
   </div>
 
-  <div v-for="group in groups" :key="group.name" class="mb-10">
+  <div
+    v-for="group in groups"
+    v-show="!search.trim() || group.all.length"
+    :id="'policy-' + group.name"
+    :key="group.name"
+    class="mb-10"
+  >
     <div
       class="group-header sticky top-0 z-2 flex flex-wrap gap-8 items-center p-10 rounded-12 cursor-pointer backdrop-blur-sm"
       @click="toggleExpanded(group.name)"
@@ -386,6 +408,15 @@ onScopeDispose(() => {
         </template>
       </div>
       <div class="ml-auto flex items-center gap-4" @click.stop>
+        <Button
+          v-if="groupTasks[group.name]"
+          :data-test="'cancel-' + group.name"
+          size="small"
+          @click="groupTasks[group.name]!.cancel()"
+        >
+          {{ groupTasks[group.name]!.completed }}/{{ groupTasks[group.name]!.total }} ·
+          {{ t('common.cancel') }}
+        </Button>
         <Input
           v-model="filterKeywordsMap[group.name]"
           :placeholder="t('common.keywords')"
@@ -431,57 +462,53 @@ onScopeDispose(() => {
       <div v-if="isExpanded(group.name)" class="py-8 px-4">
         <Empty v-if="group.all.length === 0" />
         <div
-          v-else-if="appSettings.app.kernel.cardMode"
-          :class="`grid-cols-${appSettings.app.kernel.cardColumns}`"
+          v-else
           class="groups-card-grid grid gap-8"
+          :style="{
+            '--columns': appSettings.app.kernel.cardMode ? appSettings.app.kernel.cardColumns : 1,
+          }"
         >
-          <Card
+          <NodeCard
             v-for="proxy in group.all"
             :key="proxy.name"
-            :title="proxy.name"
+            :phase="phases.get(proxy.name)"
+            :query="search"
+            :node="{
+              name: proxy.name,
+              proxy,
+              error: proxy.delay ? undefined : errors.get(proxy.name),
+              delay: proxy.delay,
+              delayStatus: proxy.delay
+                ? 'success'
+                : errors.has(proxy.name) || proxy.history?.length
+                  ? 'failed'
+                  : 'untested',
+            }"
+            :compact="!appSettings.app.kernel.cardMode"
             :selected="proxy.name === group.now"
-            interactive
-            @click="useProxyWithCatchError(group, proxy)"
-          >
-            <div class="flex items-center justify-between gap-4">
-              <div class="text-12 text-muted">
-                {{ proxy.type }}{{ proxy.udp ? ' · UDP' : '' }}
-              </div>
-              <Button
-                :data-test="`proxy-delay-${proxy.name}`"
-                :style="{ color: delayColor(proxy.delay) }"
-                :loading="isLoading(proxy.name)"
-                type="text"
-                size="small"
-                @click.stop="handleProxyDelay(proxy.name)"
-              >
-                <span class="text-12 font-bold">
-                  {{ proxy.delay ? proxy.delay + ' ms' : t('home.nodes.untested') }}
-                </span>
-              </Button>
-            </div>
-          </Card>
-        </div>
-        <div v-else class="flex flex-wrap gap-6 p-4">
-          <div
-            v-for="proxy in group.all"
-            :key="proxy.name"
-            v-tips.fast="proxy.name"
-            :style="{ background: delayColor(proxy.delay) }"
-            :class="proxy.name === group.now ? 'rounded-full shadow ring-active' : ''"
-            class="w-16 h-16 rounded-4 flex items-center justify-center cursor-pointer"
-            @click="useProxyWithCatchError(group, proxy)"
-          >
-            <Icon v-if="isLoading(proxy.name)" icon="loading" :size="12" class="rotation" />
-          </div>
+            :disabled="group.type !== 'Selector'"
+            :favorite="isFavorite(proxy.name)"
+            :testing="isLoading(proxy.name)"
+            @favorite="toggleFavorite(proxy.name)"
+            @select="useProxyWithCatchError(group, proxy)"
+            @test="handleProxyDelay(proxy.name)"
+          />
         </div>
       </div>
     </Transition>
   </div>
 
+  <Empty v-if="search.trim() && !groups.some((group) => group.all.length)">
+    <template #description>
+      <div class="text-12 text-muted">{{ t('workspace.noMatches', [search.trim()]) }}</div>
+      <Button type="link" @click="clearFilters">{{ t('workspace.clearFilters') }}</Button>
+    </template>
+  </Empty>
+
   <Modal
     v-model:open="showMoreSettings"
     :submit="false"
+    size="md"
     mask-closable
     cancel-text="common.close"
     title="common.more"
@@ -540,14 +567,14 @@ onScopeDispose(() => {
 <style lang="less" scoped>
 .groups-toolbar,
 .group-header {
-  background-color: var(--card-bg);
-  border: 1px solid var(--border-color);
+  background-color: var(--surface-bg);
+  border: 1px solid var(--surface-border);
 }
 
 .group-header {
   transition: border-color 0.16s ease;
   &:hover {
-    border-color: color-mix(in srgb, var(--accent-text) 45%, var(--border-color));
+    border-color: color-mix(in srgb, var(--accent-text) 45%, var(--surface-border));
   }
 }
 
@@ -577,15 +604,10 @@ onScopeDispose(() => {
   }
 }
 
-@media (max-width: 900px) {
-  .groups-card-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-}
-
-@media (max-width: 560px) {
-  .groups-card-grid {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
+.groups-card-grid {
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, max(175px, calc(100% / var(--columns) - 8px))), 1fr)
+  );
 }
 </style>

@@ -47,7 +47,10 @@ const mountComparison = () =>
     },
     global: {
       stubs: {
-        Modal: { props: ['open'], template: '<div v-if="open"><slot /></div>' },
+        Modal: {
+          props: ['open'],
+          template: '<div v-if="open"><slot /><slot name="action" /></div>',
+        },
         Button: { template: '<button><slot /></button>' },
         Select: true,
         Card: { template: '<div><slot /></div>' },
@@ -80,12 +83,13 @@ describe('DNS comparison', () => {
     ])
     expect(wrapper.text()).toContain('192.0.2.1 · 7 ms')
     expect(wrapper.emitted('select')).toBeUndefined()
-    mocks.confirm.mockRejectedValueOnce('cancel')
     await wrapper.findAll('button')[2]!.trigger('click')
     await flushPromises()
     expect(wrapper.emitted('select')).toBeUndefined()
+    await wrapper.findAll('button')[3]!.trigger('click')
+    expect(wrapper.emitted('select')).toBeUndefined()
     await wrapper.findAll('button')[2]!.trigger('click')
-    await flushPromises()
+    await wrapper.findAll('button')[4]!.trigger('click')
     expect(wrapper.emitted('select')).toEqual([['dns-id']])
     wrapper.unmount()
   })

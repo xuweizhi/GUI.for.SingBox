@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
+import { ClipboardGetText } from '@/bridge'
 import SplashView from '@/components/_common/SplashView.vue'
 import Button from '@/components/Button/index.vue'
 import Card from '@/components/Card/index.vue'
@@ -17,6 +18,7 @@ import Radio from '@/components/Radio/index.vue'
 import Select from '@/components/Select/index.vue'
 import Switch from '@/components/Switch/index.vue'
 import Table from '@/components/Table/index.vue'
+import { message } from '@/utils'
 
 vi.mock('@/bridge/browser/runtime/runtime', () => ({}))
 
@@ -41,6 +43,7 @@ vi.mock('@/lang', () => ({
 }))
 
 vi.mock('@/utils', () => ({
+  message: { info: vi.fn() },
   deepClone: <T>(value: T): T => structuredClone(value),
   debounce: <T extends (...args: any[]) => any>(fn: T) => Object.assign(fn, { cancel: vi.fn() }),
   getValue: (obj: Record<string, any>, key: string) =>
@@ -148,6 +151,20 @@ describe('interactive controls', () => {
     expect(wrapper.emitted('submit')?.[0]).toEqual([1000])
   })
 
+  it('submits a bordered runtime setting once on Enter', async () => {
+    const wrapper = mount(Input, {
+      attachTo: document.body,
+      props: { modelValue: 1080, type: 'number', submitOnEnter: true },
+      global: { stubs: { Button: true, Icon: true, CodeEditor: true } },
+    })
+    const input = wrapper.get('input')
+    input.element.focus()
+    await input.setValue('2080')
+    await input.trigger('keydown.enter')
+    expect(wrapper.emitted('submit')).toEqual([[2080]])
+    wrapper.unmount()
+  })
+
   it('commits lazy input only on blur and publishes an in-range number while typing', async () => {
     const wrapper = mount(Input, {
       props: { modelValue: 'old', modelModifiers: { lazy: true } },
@@ -173,6 +190,26 @@ describe('interactive controls', () => {
     await wrapper.get('[role="option"]').trigger('click')
     await wrapper.setProps({ modelValue: 'b' })
     expect(wrapper.get('[role="combobox"]').attributes('aria-label')).toBe('Beta')
+    wrapper.unmount()
+  })
+
+  it('selects the existing address for manual paste when clipboard access fails', async () => {
+    vi.mocked(ClipboardGetText).mockRejectedValueOnce(new Error('Clipboard permission denied'))
+    const wrapper = mount(Input, {
+      attachTo: document.body,
+      props: { modelValue: 'old address', allowPaste: true },
+      global: { components: { Button }, stubs: { Icon: true, CodeEditor: true } },
+    })
+    const input = wrapper.get('input')
+    await wrapper.get('[aria-label="common.paste"]').trigger('click')
+    expect(message.info).toHaveBeenCalledWith('common.pasteManually')
+    expect(document.activeElement).toBe(input.element)
+    expect(input.element.selectionStart).toBe(0)
+    expect(input.element.selectionEnd).toBe(input.element.value.length)
+    expect(input.element.value).toBe('old address')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await input.setValue('new address')
+    expect(wrapper.emitted('update:modelValue')).toEqual([['new address']])
     wrapper.unmount()
   })
 

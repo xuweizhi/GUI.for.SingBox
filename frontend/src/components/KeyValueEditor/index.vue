@@ -56,7 +56,7 @@ const emitUpdate = () => {
 </script>
 
 <template>
-  <div class="gui-kv-editor inline-flex flex-col gap-6">
+  <div class="gui-kv-editor flex w-full flex-col gap-6">
     <div v-for="(entry, i) in entries" :key="i" class="flex items-center gap-6">
       <Input
         v-model="entry[0]"
@@ -94,7 +94,7 @@ const emitUpdate = () => {
 
 <style lang="less" scoped>
 .gui-kv-editor {
-  width: 440px;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
 }

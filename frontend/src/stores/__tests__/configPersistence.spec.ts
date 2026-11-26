@@ -58,6 +58,7 @@ vi.mock('@/stores/env', () => ({
 }))
 
 import { FileExists, ReadFile, RemoveFile, Requests } from '@/bridge'
+import * as browserBridge from '@/bridge/browser/go/bridge/App'
 import { RequestMethod, RequestProxyMode } from '@/enums/app'
 import { useAppSettingsStore } from '@/stores/appSettings'
 import { useProfilesStore } from '@/stores/profiles'
@@ -153,6 +154,26 @@ describe('configuration store transaction regressions', () => {
     expect(store.subscribes).toHaveLength(0)
     expect(parse(disk.get(SubscribesFilePath)!)).toHaveLength(0)
     expect(profiles.profiles[0]!.outbounds[0]!.outbounds).toHaveLength(0)
+  })
+  it('only submits edited subscription settings and keeps newer node metadata', async () => {
+    const { store } = init()
+    const original = subscription('s')
+    store.subscribes = [{ ...original, updateTime: 123 }]
+    const patch = vi.spyOn(browserBridge, 'UpdateSubscriptionSettings').mockResolvedValue(undefined)
+    try {
+      await store.editSubscriptionSettings(original, structuredClone(original))
+      expect(patch).not.toHaveBeenCalled()
+      const draft = { ...original, url: 'https://new.example/sub' }
+      patch.mockRejectedValueOnce(new Error('conflict'))
+      await expect(store.editSubscriptionSettings(original, draft)).rejects.toThrow('conflict')
+      expect(store.subscribes[0]!.url).toBe(original.url)
+      await store.editSubscriptionSettings(original, draft)
+      expect(patch).toHaveBeenLastCalledWith('s', { url: { before: original.url, after: draft.url } })
+      expect(store.subscribes[0]).toMatchObject({ url: draft.url, updateTime: 123 })
+      expect(writeFile).not.toHaveBeenCalled()
+    } finally {
+      patch.mockRestore()
+    }
   })
   it('delete failure restores persisted subscription and preserves profile references', async () => {
     const { profiles, store } = init()
@@ -441,6 +462,19 @@ describe('configuration store transaction regressions', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('merges explicit login choices once after loading saved settings', async () => {
+    vi.mocked(FileExists).mockResolvedValue(true)
+    vi.mocked(ReadFile).mockResolvedValue('theme: light\nlang: en\nautoStartKernel: true')
+    const store = useAppSettingsStore()
+    store.previewLoginAppearance({ theme: 'dark', lang: 'zh' }, true)
+    const reloaded = useAppSettingsStore(createPinia())
+    await reloaded.setupAppSettings()
+    expect(reloaded.app).toMatchObject({ theme: 'dark', lang: 'zh', autoStartKernel: true })
+    expect(parse(writeFile.mock.calls.at(-1)![1])).toMatchObject({ theme: 'dark', lang: 'zh' })
+    await reloaded.setupAppSettings()
+    expect(reloaded.app).toMatchObject({ theme: 'light', lang: 'en' })
   })
 
   it('one transient settings read error preserves existing user.yaml', async () => {

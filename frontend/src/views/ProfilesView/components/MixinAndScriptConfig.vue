@@ -46,7 +46,7 @@ const onFormatChange = (val: 'json' | 'yaml', old: 'json' | 'yaml') => {
 </script>
 
 <template>
-  <Tabs v-model:active-key="activeTab" :items="tabItems">
+  <Tabs v-model:active-key="activeTab" tab-position="top" :items="tabItems">
     <template #mixin>
       <div class="form-item">
         {{ t('profile.mixinSettings.priority') }}
@@ -60,7 +60,12 @@ const onFormatChange = (val: 'json' | 'yaml', old: 'json' | 'yaml') => {
           @change="onFormatChange"
         />
       </div>
-      <CodeEditor :key="model.mixin.format" v-model="model.mixin.config" :lang="model.mixin.format" editable />
+      <CodeEditor
+        :key="model.mixin.format"
+        v-model="model.mixin.config"
+        :lang="model.mixin.format"
+        editable
+      />
     </template>
     <template #script>
       <CodeEditor v-model="model.script.code" lang="javascript" editable />

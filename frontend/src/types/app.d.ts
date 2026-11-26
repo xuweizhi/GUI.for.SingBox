@@ -137,6 +137,7 @@ declare global {
     interface Menu {
       label: string
       handler?: (...args: any) => void
+      disabled?: boolean
       separator?: boolean
       children?: Menu[]
     }
@@ -160,6 +161,7 @@ declare global {
       fontFamily: string
       fontSize: number
       customFontPresets: CustomFontPreset[]
+      nodeGroupsView: View
       profilesView: View
       subscribesView: View
       rulesetsView: View
@@ -208,6 +210,7 @@ declare global {
       githubApiToken: string
       githubDownloadAcceleration: boolean
       githubDownloadMirror: string
+      navigationVersion?: number
       pages: string[]
     }
 

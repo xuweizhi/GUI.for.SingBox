@@ -1,4 +1,4 @@
-import { shallowMount } from '@vue/test-utils'
+import { mount, shallowMount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/stores', () => ({
@@ -13,6 +13,8 @@ vi.mock('@/utils', () => ({
 }))
 vi.mock('@/lang', () => ({ default: { global: { t: (key: string) => key } } }))
 import { RuleType, RuleAction } from '@/enums/kernel'
+
+import Radio from '@/components/Radio/index.vue'
 
 import DnsRulesConfig from '../DnsRulesConfig.vue'
 import RouteRulesConfig from '../RouteRulesConfig.vue'
@@ -67,4 +69,70 @@ describe('review clearing missing rule set references', () => {
       wrapper.unmount()
     },
   )
+
+  it('keeps the target-type switch visible when a legacy group target has no node groups left', async () => {
+    const rule = {
+      id: 'rule-1',
+      type: RuleType.Domain,
+      payload: 'example.com',
+      action: RuleAction.Route,
+      server: '',
+      outbound: 'proxy',
+      enable: true,
+      invert: false,
+      sniffer: [],
+      strategy: 'default',
+    }
+    const wrapper = mount(RouteRulesConfig as any, {
+      props: {
+        modelValue: [rule],
+        inboundOptions: [],
+        outboundOptions: [{ label: 'Proxy', value: 'proxy' }],
+        serverOptions: [],
+        ruleSet: [],
+        outbounds: [
+          {
+            id: 'proxy',
+            tag: 'Proxy',
+            type: 'selector',
+            source_node_group: 'removed-group',
+            outbounds: [],
+          },
+        ],
+      },
+      global: {
+        components: { Radio },
+        stubs: {
+          Empty: true,
+          Divider: true,
+          Switch: true,
+          Select: { template: '<div class="select-stub" />' },
+          Input: true,
+          CodeEditor: true,
+          Modal: {
+            props: ['open'],
+            template: '<div class="modal-stub"><slot /><slot name="action" /></div>',
+          },
+          Card: { template: '<div><slot /></div>' },
+          Button: { template: '<button v-bind="$attrs"><slot /></button>' },
+          Tag: true,
+          Icon: true,
+        },
+        directives: { draggable: {} },
+      },
+    })
+    ;(wrapper.vm as any).editById('rule-1')
+    await wrapper.vm.$nextTick()
+
+    const options = wrapper.findAll('.gui-radio-button').map((item) => item.text())
+    expect(options).toContain('kernel.route.rules.outbound')
+    expect(options).toContain('router.nodeGroups')
+
+    const outbound = wrapper
+      .findAll('.gui-radio-button')
+      .find((item) => item.text() === 'kernel.route.rules.outbound')!
+    await outbound.trigger('click')
+    expect(wrapper.find('.select-stub').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })

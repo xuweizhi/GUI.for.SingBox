@@ -8,10 +8,12 @@ type TriggerType = 'click' | 'hover'
 interface Props {
   trigger?: TriggerType[]
   placement?: 'bottom' | 'top'
+  align?: 'start' | 'center' | 'end'
   delay?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  align: 'center',
   trigger: () => ['click'],
   placement: 'bottom',
   delay: 0,
@@ -82,7 +84,9 @@ const updatePosition = () => {
     overlayStyle.value.maxHeight = `${Math.max(0, availableHeight)}px`
   }
 
-  let left = triggerRect.left + triggerRect.width / 2 - overlayWidth / 2
+  let left = triggerRect.left
+  if (props.align === 'end') left = triggerRect.right - overlayWidth
+  else if (props.align !== 'start') left += (triggerRect.width - overlayWidth) / 2
 
   if (left + overlayWidth > window.innerWidth - screenEdgeMargin) {
     left = window.innerWidth - overlayWidth - screenEdgeMargin
@@ -211,6 +215,7 @@ onUnmounted(() => {
 
 .gui-dropdown-overlay {
   z-index: 10000;
+  max-width: calc(100vw - 16px);
   background: var(--dropdown-bg);
   border: 1px solid var(--surface-border, var(--border-color));
   border-radius: calc(var(--control-radius, 8px) + 3px);

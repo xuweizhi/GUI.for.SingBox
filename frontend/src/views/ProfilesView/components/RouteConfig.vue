@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref, useTemplateRef } from 'vue'
+import { computed, ref, nextTick, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useNodeGroupsStore } from '@/stores'
@@ -36,16 +36,21 @@ const tabs = [
 
 const { t } = useI18n()
 const nodeGroupsStore = useNodeGroupsStore()
-const currentOutlet = computed(() => outbounds.value.find((outbound) => outbound.id === model.value.final))
-const editFinalGroup = ref(false)
-const finalNodeGroup = ref('')
-const finalNodeGroupBehavior = ref<NodeGroupOutletBehavior>('manual')
-
-const chooseFinalGroup = () => {
-  finalNodeGroup.value = currentOutlet.value?.source_node_group || ''
-  finalNodeGroupBehavior.value = currentOutlet.value?.type === 'urltest' ? 'auto' : 'manual'
-  editFinalGroup.value = true
+const currentOutlet = computed(() =>
+  outbounds.value.find((outbound) => outbound.id === model.value.final),
+)
+const targetType = ref(currentOutlet.value?.source_node_group ? 'group' : 'outbound')
+const emit = defineEmits<{ editOutbound: [id: string] }>()
+const editRule = async (id: string) => {
+  activeKey.value = 'rules'
+  await nextTick()
+  rulesConfigRef.value?.editById(id)
 }
+const finalNodeGroup = ref(currentOutlet.value?.source_node_group || '')
+const finalNodeGroupBehavior = ref<NodeGroupOutletBehavior>(
+  currentOutlet.value?.type === 'urltest' ? 'auto' : 'manual',
+)
+
 const nodeGroupOptions = computed(() =>
   nodeGroupsStore.nodeGroups.map((group) => ({ label: group.name, value: group.id })),
 )
@@ -61,9 +66,7 @@ const applyFinalNodeGroup = () => {
     return
   }
   const label = t(
-    finalNodeGroupBehavior.value === 'auto'
-      ? 'nodeGroups.outletAuto'
-      : 'nodeGroups.outletManual',
+    finalNodeGroupBehavior.value === 'auto' ? 'nodeGroups.outletAuto' : 'nodeGroups.outletManual',
   )
   model.value.final = ensureNodeGroupOutlet(
     outbounds.value,
@@ -84,6 +87,10 @@ const handleAdd = () => {
 }
 
 defineExpose({ handleAdd })
+const resetTarget = () => {
+  model.value.final = ''
+  finalNodeGroup.value = ''
+}
 </script>
 
 <template>
@@ -94,6 +101,8 @@ defineExpose({ handleAdd })
         :route="model"
         :outbounds="outbounds"
         :dns="dns"
+        @edit-outbound="emit('editOutbound', $event)"
+        @edit-rule="editRule"
       />
     </template>
     <template #common>
@@ -119,13 +128,39 @@ defineExpose({ handleAdd })
       </div> -->
       <div class="form-item">
         {{ t('kernel.route.final') }}
-        <Select v-model="model.final" :options="outboundOptions" clearable />
-      </div>
-      <div v-if="nodeGroupOptions.length" class="form-item">
-        {{ t('router.nodeGroups') }}
-        <Button size="small" @click="chooseFinalGroup">
-          {{ nodeGroupsStore.getNodeGroupById(currentOutlet?.source_node_group || '')?.name || t('common.select') }}
-        </Button>
+        <div class="flex flex-col gap-8">
+          <Radio
+            v-if="nodeGroupOptions.length || targetType === 'group'"
+            v-model="targetType"
+            :options="[
+              { label: 'kernel.route.rules.outbound', value: 'outbound' },
+              { label: 'router.nodeGroups', value: 'group' },
+            ]"
+            @change="resetTarget"
+          />
+          <Select
+            v-if="targetType === 'outbound'"
+            v-model="model.final"
+            :options="outboundOptions"
+            clearable
+          />
+          <template v-else>
+            <Select
+              v-model="finalNodeGroup"
+              :options="nodeGroupOptions"
+              clearable
+              @change="applyFinalNodeGroup"
+            />
+            <Radio
+              v-model="finalNodeGroupBehavior"
+              :options="[
+                { label: 'nodeGroups.outletManual', value: 'manual' },
+                { label: 'nodeGroups.outletAuto', value: 'auto' },
+              ]"
+              @change="applyFinalNodeGroup"
+            />
+          </template>
+        </div>
       </div>
     </template>
     <template #rule_set>
@@ -147,14 +182,4 @@ defineExpose({ handleAdd })
       />
     </template>
   </Tabs>
-  <Modal v-model:open="editFinalGroup" title="router.nodeGroups" :on-ok="applyFinalNodeGroup">
-    <Select v-model="finalNodeGroup" :options="nodeGroupOptions" clearable />
-    <Radio
-      v-model="finalNodeGroupBehavior"
-      :options="[
-        { label: 'nodeGroups.outletManual', value: 'manual' },
-        { label: 'nodeGroups.outletAuto', value: 'auto' },
-      ]"
-    />
-  </Modal>
 </template>

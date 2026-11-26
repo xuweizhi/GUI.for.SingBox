@@ -296,10 +296,10 @@ export const useKernelApiStore = defineStore('kernelApi', () => {
 
   onLogs((data) => logsStore.recordKernelApiLog(data))
 
-  const refreshKernelLogs = async () => {
+  const refreshKernelLogs = async (reload = false) => {
     const revision = sessionRevision
     const logs = await ReadCoreLog().catch(() => '')
-    if (revision === sessionRevision) logsStore.hydrateKernelLogs(logs)
+    if (revision === sessionRevision) logsStore.hydrateKernelLogs(logs, reload)
   }
 
   const findOwnedCore = () => {

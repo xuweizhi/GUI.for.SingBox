@@ -7,5 +7,7 @@ declare module 'vue-router' {
     group?: 'control' | 'config' | 'system'
     hidden?: boolean
     public?: boolean
+    layout?: 'fill' | 'scroll'
+    fluid?: boolean
   }
 }

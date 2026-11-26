@@ -74,7 +74,7 @@ export const ExecBackground = async (
   return Number(data)
 }
 
-export const { FindOwnedCore, StopOwnedCore, ReadCoreLog } = Bridge
+export const { FindOwnedCore, StopOwnedCore, ReadCoreLog, CoreStartTime } = Bridge
 
 export const ProcessInfo = async (pid: number) => {
   const { flag, data } = await Bridge.ProcessInfo(pid)

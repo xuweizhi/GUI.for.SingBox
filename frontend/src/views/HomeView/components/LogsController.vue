@@ -1,7 +1,8 @@
 <script lang="ts" setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onActivated, watch, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { ClipboardSetText } from '@/bridge'
 import { LogLevelOptions } from '@/constant/kernel'
 import { useBool } from '@/hooks'
 import { useKernelApiStore, useLogsStore } from '@/stores'
@@ -32,14 +33,24 @@ const LogLevelMap = {
   panic: ['panic'],
 }
 
+const props = defineProps<{ initialSource?: 'api' | 'core' }>()
+const source = ref<'api' | 'core'>(props.initialSource || 'api')
+const follow = ref(true)
+const viewport = useTemplateRef<HTMLElement>('viewport')
+const sourceLogs = computed(() =>
+  source.value === 'api' ? logsStore.apiEntries : logsStore.processEntries,
+)
 const filteredLogs = computed(() => {
-  const logs = pause.value ? pausedLogs.value : logsStore.kernelApiLogs
+  const logs = pause.value ? pausedLogs.value : sourceLogs.value
 
-  return logs.filter((v) => {
-    const hitType = LogLevelMap[logType.value].includes(v.type)
-    const hitName = buildSmartRegExp(keywords.value, 'i').test(v.payload)
-    return hitName && hitType
-  })
+  const pattern = buildSmartRegExp(keywords.value, 'i')
+  return logs
+    .filter((v) => {
+      const hitType = LogLevelMap[logType.value].includes(v.type)
+      const hitName = pattern.test(v.payload)
+      return hitName && hitType
+    })
+    .reverse()
 })
 
 const addLogToRuleset = async (
@@ -54,7 +65,10 @@ const addLogToRuleset = async (
     /\[([a-fA-F\d:.%]+)\](?::\d+)?|((?:[a-zA-Z\d-]+\.)+[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3})(?::\d+)?|((?:[a-fA-F\d]{1,4}:){2,}[a-fA-F\d:]*)/g
   const addresses = [
     ...new Set(
-      Array.from(String(payload).matchAll(regex), (match) => match[1] || match[2] || match[3]).filter(
+      Array.from(
+        String(payload).matchAll(regex),
+        (match) => match[1] || match[2] || match[3],
+      ).filter(
         (address): address is string =>
           Boolean(address) &&
           (isValidIPv4(address!) ||
@@ -141,28 +155,58 @@ const logsStore = useLogsStore()
 
 const handleClear = () => {
   pausedLogs.value.splice(0)
-  logsStore.clearKernelLog(true)
+  logsStore.clearSource(source.value)
 }
 
-watch(pause, (value) => {
-  if (value) {
-    pausedLogs.value = logsStore.kernelApiLogs.slice()
-  }
+watch([pause, source], () => {
+  if (pause.value) pausedLogs.value = sourceLogs.value.slice()
 })
+const scrollToBottom = () => {
+  if (!follow.value) return
+  nextTick(() => {
+    if (follow.value && viewport.value) viewport.value.scrollTop = viewport.value.scrollHeight
+  })
+}
+watch([filteredLogs, follow], scrollToBottom, { flush: 'post', immediate: true })
+watch(
+  source,
+  (value) => {
+    if (value === 'core' && !logsStore.processEntries.length)
+      void kernelApiStore.refreshKernelLogs()
+  },
+  { immediate: true },
+)
+const onScroll = () => {
+  const el = viewport.value
+  if (!el || !follow.value) return
+  if (el.scrollHeight - el.scrollTop - el.clientHeight > 24) follow.value = false
+}
+onActivated(scrollToBottom)
+const copyLogs = async () => {
+  const content = filteredLogs.value
+    .map((log) => (source.value === 'api' ? `[${log.type}] ${log.payload}` : log.payload))
+    .join('\n')
+  try {
+    if (await ClipboardSetText(content)) message.success('common.copied')
+    else message.error('ClipboardSetText Error')
+  } catch (error) {
+    message.error(error)
+  }
+}
 
-onMounted(() => {
-  if (logsStore.isEmpty) {
-    void kernelApiStore.refreshKernelLogs()
-  }
-})
 </script>
 
 <template>
   <div class="flex flex-col h-full">
     <div class="flex flex-wrap items-center gap-8">
-      <span class="text-12 text-muted">
-        {{ t('kernel.log.level') }}
-      </span>
+      <Radio
+        v-model="source"
+        size="small"
+        :options="[
+          { label: 'common.apiLogs', value: 'api' },
+          { label: 'common.coreLogs', value: 'core' },
+        ]"
+      />
       <Select v-model="logType" :options="LogLevelOptions" size="small" />
       <Input
         v-model="keywords"
@@ -170,6 +214,22 @@ onMounted(() => {
         size="small"
         :placeholder="t('common.keywords')"
         class="flex-1 min-w-128"
+      />
+      <Switch v-model="follow" size="small" label="workspace.follow" />
+      <Button
+        size="small"
+        type="text"
+        icon="copy"
+        :aria-label="t('common.copy')"
+        :disabled="!filteredLogs.length"
+        @click="copyLogs"
+      />
+      <Button
+        v-if="source === 'core'"
+        size="small"
+        icon="refresh"
+        :aria-label="t('common.refresh')"
+        @click="kernelApiStore.refreshKernelLogs(true)"
       />
       <Button
         v-tips="pause ? 'common.resume' : 'common.pause'"
@@ -191,18 +251,26 @@ onMounted(() => {
 
     <Empty v-if="filteredLogs.length === 0" />
 
-    <div v-else class="mt-8 overflow-y-auto flex-1 flex flex-col gap-4">
+    <div v-else ref="viewport" class="mt-8 overflow-y-auto flex-1" @scroll.passive="onScroll">
       <div
         v-for="log in filteredLogs"
         :key="logKey(log)"
-        v-menu="menus.map((v) => ({ ...v, handler: () => v.handler?.(log) }))"
-        class="log select-text font-mono text-12 py-6 px-8 rounded-6 flex items-start gap-8"
+        v-menu="
+          log.type === 'info' ? menus.map((v) => ({ ...v, handler: () => v.handler?.(log) })) : []
+        "
+        class="log select-text font-mono text-12 py-2 px-8 flex items-start gap-8"
       >
+        <time
+          v-if="log.time"
+          class="text-muted shrink-0 whitespace-nowrap"
+          :datetime="log.time"
+          >{{ new Date(log.time).toLocaleTimeString() }}</time
+        >
         <Tag :color="logTagColor(log.type)" size="small" class="log-badge shrink-0">
           {{ log.type }}
         </Tag>
         <span class="flex-1 min-w-0 break-all leading-relaxed">{{ log.payload }}</span>
-        <Dropdown v-if="log.type === 'info'" class="log-actions shrink-0">
+        <Dropdown v-if="log.type === 'info'" align="end" class="log-actions shrink-0">
           <Button
             :aria-label="t('common.more')"
             icon="more"
@@ -261,18 +329,12 @@ onMounted(() => {
 
 <style lang="less" scoped>
 .log {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  transition:
-    background-color 0.14s ease,
-    border-color 0.14s ease;
-
-  &:hover {
-    background: var(--card-hover-bg);
-    border-color: color-mix(in srgb, var(--accent-text) 35%, var(--border-color));
-  }
+  min-height: 24px;
+  border-bottom: 1px solid var(--surface-border);
 }
-
+.log:nth-child(odd) {
+  background: var(--surface-bg);
+}
 .log-badge {
   min-width: 48px;
   justify-content: center;

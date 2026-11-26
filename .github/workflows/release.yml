@@ -36,6 +36,7 @@ jobs:
         run: |
           cd frontend
           pnpm install --frozen-lockfile
+          pnpm lint:utilities
           pnpm build
       - name: Build headless service
         env:

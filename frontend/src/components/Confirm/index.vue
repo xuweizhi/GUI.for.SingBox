@@ -110,13 +110,13 @@ useOverlayFocus(dialog, () => props.cancel ? handleCancel() : handleConfirm())
   max-height: min(76dvh, 640px);
   background: var(--modal-bg);
   color: var(--color);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--surface-border, var(--border-color));
   box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
   overflow: hidden;
 }
 
 .gui-confirm__header {
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--surface-border, var(--border-color));
 }
 
 .gui-confirm__body {
@@ -124,7 +124,7 @@ useOverlayFocus(dialog, () => props.cancel ? handleCancel() : handleConfirm())
 }
 
 .gui-confirm__footer {
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--surface-border, var(--border-color));
 }
 
 .dialog-pop-enter-active,

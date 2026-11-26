@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch 
 
 import { ClipboardGetText } from '@/bridge'
 import useI18n from '@/lang'
-import { debounce } from '@/utils'
+import { debounce, message } from '@/utils'
 
 export interface Props {
   modelModifiers?: { lazy?: boolean }
@@ -14,6 +14,7 @@ export interface Props {
   lang?: 'yaml' | 'json' | 'javascript'
   size?: 'default' | 'small'
   editable?: boolean
+  submitOnEnter?: boolean
   clearable?: boolean
   allowPaste?: boolean
   autofocus?: boolean
@@ -23,11 +24,14 @@ export interface Props {
   disabled?: boolean
   border?: boolean
   delay?: number
+  autocomplete?: string
   inputId?: string
   label?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  modelModifiers: undefined,
+  autocomplete: 'off',
   modelValue: '',
   autoSize: false,
   placeholder: undefined,
@@ -56,11 +60,7 @@ const draftValue = ref(props.modelValue === undefined ? '' : String(props.modelV
 const isFocused = ref(false)
 const inputRef = useTemplateRef('inputRef')
 const innerClearable = computed(
-  () =>
-    props.clearable &&
-    props.type !== 'code' &&
-    draftValue.value !== '' &&
-    !props.disabled,
+  () => props.clearable && props.type !== 'code' && draftValue.value !== '' && !props.disabled,
 )
 const innerAllowPaste = computed(() => props.allowPaste && props.type !== 'code' && !props.disabled)
 const canTogglePassword = computed(() => props.type === 'password' && !props.disabled)
@@ -143,10 +143,19 @@ const handleClear = () => {
 }
 
 const handlePaste = async () => {
-  cancelPending()
-  const revision = editRevision
-  const text = await ClipboardGetText()
+  const revision = ++editRevision
+  let text: string
+  try {
+    text = await ClipboardGetText()
+  } catch {
+    if (revision !== editRevision) return
+    inputRef.value?.focus()
+    inputRef.value?.select()
+    message.info('common.pasteManually')
+    return
+  }
   if (revision !== editRevision) return
+  delayedInput.cancel()
   const val = props.type === 'number' ? clampNumber(text) : text
   draftValue.value = String(val)
   emits('update:modelValue', val)
@@ -185,7 +194,7 @@ const onSubmit = (e: any) => {
 }
 
 const onKeydownEnter = () => {
-  if (props.editable) {
+  if (props.editable || props.submitOnEnter) {
     nextTick(() => inputRef.value?.blur())
   }
 }
@@ -201,7 +210,7 @@ defineExpose({
   <div
     v-bind="$attrs"
     :class="{
-      border: border && (!editable || showEdit),
+      border: border && type !== 'code' && (!editable || showEdit),
       'auto-size': autoSize,
       'bg-color': !editable || showEdit,
       'is-editable': editable && !showEdit,
@@ -247,6 +256,8 @@ defineExpose({
         :lang="lang"
         :editable="!disabled"
         :placeholder="placeholder"
+        :toolbar="false"
+        plain
         class="code w-full overflow-y-auto"
         @update:model-value="(value: string) => onInput({ target: { value } })"
       />
@@ -259,7 +270,7 @@ defineExpose({
         :placeholder="placeholder"
         :type="effectiveInputType"
         :disabled="disabled"
-        autocomplete="off"
+        :autocomplete="autocomplete || 'off'"
         class="flex-1 inline-block py-6 outline-none border-0 bg-transparent w-0"
         @focus="onFocus"
         @input="onInput"
@@ -374,7 +385,7 @@ defineExpose({
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 640px) {
   .gui-input:not(.auto-size) {
     min-width: 0;
     width: 100%;

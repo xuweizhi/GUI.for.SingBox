@@ -102,7 +102,8 @@ const updateRuleAction = () => {
   fields.value.client_subnet = ''
   fields.value.strategy = Strategy.Default
   if (action === RuleAction.Reject) fields.value.server = RuleActionReject.Default
-  else if (action === RuleAction.RouteOptions || action === RuleAction.Predefined) fields.value.server = '{}'
+  else if (action === RuleAction.RouteOptions || action === RuleAction.Predefined)
+    fields.value.server = '{}'
   else fields.value.server = action === RuleAction.Route ? props.serversOptions[0]?.value || '' : ''
 }
 
@@ -169,13 +170,12 @@ const formatRuleParts = (rule: App.DnsRule) => {
       .map((id) => props.ruleSet.find((v) => v.id === id)?.tag || id)
       .join(', ')
   } else if (type === RuleType.Inbound) {
-    displayPayload = props.inboundOptions.find((option) => option.value === payload)?.label || payload
+    displayPayload =
+      props.inboundOptions.find((option) => option.value === payload)?.label || payload
   } else if (type === RuleType.Inline && payload.includes('__is_fake_ip')) {
     displayPayload = 'FakeIP'
   }
-  const target = server
-    ? props.serversOptions.find((v) => v.value === server)?.label || server
-    : ''
+  const target = server ? props.serversOptions.find((v) => v.value === server)?.label || server : ''
   return { type, payload: displayPayload, action, target, invert }
 }
 
@@ -203,7 +203,7 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
   </Divider>
 
   <div v-draggable="[model, DraggableOptions]">
-    <Card v-for="(rule, index) in model" :key="rule.id" class="mb-6">
+    <Card v-for="(rule, index) in model" :key="rule.id" flush class="mb-6">
       <div v-if="rule.type === RuleType.InsertionPoint" class="text-center font-bold">
         <Divider class="cursor-move">
           <Button icon="add" type="text" size="small" @click="handleAdd">
@@ -273,18 +273,17 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
 
   <Modal
     v-model:open="showEditModal"
+    size="drawer"
     :on-ok="handleAddEnd"
     title="kernel.dns.tab.rules"
-    max-width="80"
-    max-height="80"
   >
     <div class="form-item">
       {{ t('kernel.dns.rules.type') }}
-      <Select v-model="fields.type" @change="updateRuleType" :options="DnsRuleTypeOptions" />
+      <Select v-model="fields.type" :options="DnsRuleTypeOptions" @change="updateRuleType" />
     </div>
     <div class="form-item">
       {{ t('kernel.dns.rules.action') }}
-      <Radio v-model="fields.action" @change="updateRuleAction" :options="DnsRuleActionOptions" />
+      <Radio v-model="fields.action" :options="DnsRuleActionOptions" @change="updateRuleAction" />
     </div>
     <div v-if="fields.type !== RuleType.RuleSet" class="form-item">
       {{ t('kernel.dns.rules.payload') }}

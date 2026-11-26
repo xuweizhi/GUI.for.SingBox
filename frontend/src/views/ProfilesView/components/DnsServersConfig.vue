@@ -110,7 +110,7 @@ const renderServer = (server: App.DnsServerConfig) => {
     </div>
 
     <div v-draggable="[model, DraggableOptions]">
-      <Card v-for="(server, index) in model" :key="server.id" class="mb-6">
+      <Card v-for="(server, index) in model" :key="server.id" flush class="mb-6">
         <div class="flex items-center py-6 gap-6">
           <Icon icon="drag" :size="15" color="var(--muted-color)" class="cursor-move shrink-0" />
           <component :is="renderServer(server)" />
@@ -138,10 +138,9 @@ const renderServer = (server: App.DnsServerConfig) => {
 
   <Modal
     v-model:open="showEditModal"
+    size="drawer"
     :on-ok="handleAddEnd"
     title="kernel.dns.tab.servers"
-    max-width="80"
-    max-height="80"
   >
     <div class="flex flex-col">
       <div class="form-item">
@@ -155,7 +154,11 @@ const renderServer = (server: App.DnsServerConfig) => {
       <template v-if="isSupportDetourAndDomainResolver">
         <div class="form-item">
           {{ t('kernel.dns.domain_resolver') }}
-          <Select v-model="fields.domain_resolver" :options="serversOptions.filter((option) => option.value !== fields.id)" clearable />
+          <Select
+            v-model="fields.domain_resolver"
+            :options="serversOptions.filter((option) => option.value !== fields.id)"
+            clearable
+          />
         </div>
         <div class="form-item">
           {{ t('kernel.dns.detour') }}

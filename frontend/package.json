@@ -11,6 +11,7 @@
     "test": "vitest run",
     "type-check": "vue-tsc --build",
     "lint": "run-s lint:*",
+    "lint:utilities": "node scripts/check-utilities.mjs",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
     "format": "oxfmt src/"

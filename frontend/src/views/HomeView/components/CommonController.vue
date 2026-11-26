@@ -16,7 +16,10 @@ const createValueWatcher = (
   return (newValue: number | boolean) => {
     if (newValue !== lastValue) {
       callback(newValue)
-        .then(() => (lastValue = newValue))
+        .then(() => {
+          lastValue = newValue
+          message.success('common.success')
+        })
         .catch((e) => message.error(e.message || e))
     }
   }
@@ -58,10 +61,9 @@ const onInterfaceChange = createValueWatcher(
           :min="0"
           :max="65535"
           type="number"
-          :border="false"
-          editable
           auto-size
           class="w-full"
+          submit-on-enter
           @submit="onMixedPortSubmit"
         />
       </Card>
@@ -71,10 +73,9 @@ const onInterfaceChange = createValueWatcher(
           :min="0"
           :max="65535"
           type="number"
-          :border="false"
-          editable
           auto-size
           class="w-full"
+          submit-on-enter
           @submit="onPortSubmit"
         />
       </Card>
@@ -84,10 +85,9 @@ const onInterfaceChange = createValueWatcher(
           :min="0"
           :max="65535"
           type="number"
-          editable
-          :border="false"
           auto-size
           class="w-full"
+          submit-on-enter
           @submit="onSocksPortSubmit"
         />
       </Card>
@@ -98,7 +98,6 @@ const onInterfaceChange = createValueWatcher(
         <Select
           v-model="kernelApiStore.config.tun.stack"
           :options="TunStackOptions"
-          :border="false"
           auto-size
           @change="conStackChange"
         />
@@ -106,17 +105,15 @@ const onInterfaceChange = createValueWatcher(
       <Card :title="t('kernel.inbounds.tun.interface_name')">
         <Input
           v-model="kernelApiStore.config.tun.device"
-          editable
-          :border="false"
           auto-size
           class="w-full"
+          submit-on-enter
           @submit="onTunDeviceSubmit"
         />
       </Card>
       <Card :title="t('kernel.route.default_interface')">
         <InterfaceSelect
           v-model="kernelApiStore.config['interface-name']"
-          :border="false"
           auto-size
           @change="onInterfaceChange"
         />

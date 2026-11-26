@@ -6,6 +6,8 @@ import { useWebuiAuthStore } from '@/stores'
 import { formatBytes, message } from '@/utils'
 import { withConfigMutation } from '@/utils/configPersistence'
 
+import AdvancedSettings from './components/AdvancedSettings.vue'
+
 interface Preview {
   created: string
   files: number
@@ -14,7 +16,15 @@ interface Preview {
   external: string[]
 }
 
-type BusyAction = '' | 'history' | 'export' | 'import' | 'snapshot' | 'upload' | 'download' | 'restore'
+type BusyAction =
+  | ''
+  | 'history'
+  | 'export'
+  | 'import'
+  | 'snapshot'
+  | 'upload'
+  | 'download'
+  | 'restore'
 
 const { t } = useI18n()
 const auth = useWebuiAuthStore()
@@ -131,29 +141,44 @@ const webdav = (upload: boolean) =>
 <template>
   <div class="flex flex-col gap-12">
     <Card :title="t('backup.local')">
-      <p class="text-13 text-muted mt-0 mb-12">{{ t('backup.contents') }}</p>
-      <div class="flex flex-wrap gap-8">
-        <Button
-          type="primary"
-          :loading="busyAction === 'export'"
-          :disabled="busy && busyAction !== 'export'"
-          @click="exportZip"
-        >
-          {{ t('backup.export') }}
-        </Button>
-        <Button
-          :loading="busyAction === 'import'"
-          :disabled="busy && busyAction !== 'import'"
-          @click="picker?.click()"
-        >
-          {{ t('backup.import') }}
-        </Button>
-        <input ref="picker" hidden type="file" accept=".zip,application/zip" @change="chooseFile" />
+      <div class="settings-row">
+        <p class="text-13 text-muted font-normal m-0">{{ t('backup.contents') }}</p>
+        <div class="flex flex-wrap gap-8">
+          <Button
+            type="primary"
+            :loading="busyAction === 'export'"
+            :disabled="busy && busyAction !== 'export'"
+            @click="exportZip"
+          >
+            {{ t('backup.export') }}
+          </Button>
+          <Button
+            :loading="busyAction === 'import'"
+            :disabled="busy && busyAction !== 'import'"
+            @click="picker?.click()"
+          >
+            {{ t('backup.import') }}
+          </Button>
+          <input
+            ref="picker"
+            hidden
+            type="file"
+            accept=".zip,application/zip"
+            @change="chooseFile"
+          />
+        </div>
       </div>
     </Card>
     <Card :title="t('backup.history')">
-      <Switch :model-value="auto" :disabled="busy" label="backup.auto" @update:model-value="toggle" />
-      <div v-if="history.length" class="flex flex-col items-start gap-4 mt-12">
+      <div class="settings-row">
+        <div>{{ t('backup.auto') }}</div>
+        <Switch
+          :model-value="auto"
+          :disabled="busy"
+          @update:model-value="toggle"
+        />
+      </div>
+      <div v-if="history.length" class="flex flex-col items-start gap-4 pb-12">
         <div class="text-12 text-muted">{{ t('backup.clickSnapshotHint') }}</div>
         <Button
           v-for="name in history"
@@ -172,13 +197,21 @@ const webdav = (upload: boolean) =>
       </div>
     </Card>
     <Card title="WebDAV">
-      <div class="flex flex-col gap-8">
-        <label for="backup-dav-url" class="text-13 font-bold">{{ t('backup.davUrl') }}</label>
-        <Input v-model="dav.url" input-id="backup-dav-url" placeholder="https://…/backup.zip" />
-        <label for="backup-dav-user" class="text-13 font-bold">{{ t('backup.username') }}</label>
-        <Input v-model="dav.username" input-id="backup-dav-user" />
-        <label for="backup-dav-password" class="text-13 font-bold">{{ t('backup.password') }}</label>
-        <Input v-model="dav.password" type="password" input-id="backup-dav-password" />
+      <div class="flex flex-col">
+        <div class="settings-row">
+          <label for="backup-dav-url" class="text-13 font-bold">{{ t('backup.davUrl') }}</label>
+          <Input v-model="dav.url" input-id="backup-dav-url" placeholder="https://…/backup.zip" />
+        </div>
+        <div class="settings-row">
+          <label for="backup-dav-user" class="text-13 font-bold">{{ t('backup.username') }}</label>
+          <Input v-model="dav.username" input-id="backup-dav-user" />
+        </div>
+        <div class="settings-row">
+          <label for="backup-dav-password" class="text-13 font-bold">{{
+            t('backup.password')
+          }}</label>
+          <Input v-model="dav.password" type="password" input-id="backup-dav-password" />
+        </div>
         <div class="flex flex-wrap gap-8 mt-4">
           <Button
             type="primary"
@@ -201,6 +234,7 @@ const webdav = (upload: boolean) =>
     <Modal
       v-model:open="showPreview"
       title="backup.preview"
+      size="md"
       submit-text="backup.restore"
       submit-type="danger"
       :on-ok="restore"
@@ -230,6 +264,7 @@ const webdav = (upload: boolean) =>
         </div>
       </div>
     </Modal>
+    <AdvancedSettings />
   </div>
 </template>
 

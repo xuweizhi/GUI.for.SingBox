@@ -47,10 +47,26 @@ vi.mock('@/lang', () => ({
 
 vi.mock('@/router/routes', () => ({
   default: [
-    { path: '/', name: 'Overview', meta: { name: 'router.overview', icon: 'overview', group: 'control' } },
-    { path: '/netcheck', name: 'NetCheck', meta: { name: 'router.netcheck', icon: 'speedTest', group: 'control' } },
-    { path: '/profiles', name: 'Profiles', meta: { name: 'router.profiles', icon: 'profiles', group: 'config' } },
-    { path: '/settings', name: 'Settings', meta: { name: 'router.settings', icon: 'settings2', group: 'system', hidden: false } },
+    {
+      path: '/',
+      name: 'Overview',
+      meta: { name: 'router.overview', icon: 'overview', group: 'control' },
+    },
+    {
+      path: '/netcheck',
+      name: 'NetCheck',
+      meta: { name: 'router.netcheck', icon: 'speedTest', group: 'control' },
+    },
+    {
+      path: '/profiles',
+      name: 'Profiles',
+      meta: { name: 'router.profiles', icon: 'profiles', group: 'config' },
+    },
+    {
+      path: '/settings',
+      name: 'Settings',
+      meta: { name: 'router.settings', icon: 'settings2', group: 'system', hidden: false },
+    },
   ],
 }))
 
@@ -153,14 +169,25 @@ vi.mock('@/views/HomeView/components/QuickStart.vue', () => ({
   default: { template: '<div class="quickstart-stub" />' },
 }))
 
-import AppearancePopover from '@/components/_common/AppearancePopover.vue'
-import AppShell from '@/components/_common/AppShell.vue'
-import FontPresetSelector from '@/components/_common/FontPresetSelector.vue'
-import NavigationBar from '@/components/_common/NavigationBar.vue'
 import CommonController from '@/views/HomeView/components/CommonController.vue'
 import HomeView from '@/views/HomeView/index.vue'
 import RulesetForm from '@/views/RulesetsView/components/RulesetForm.vue'
 
+import AppearanceControls from '@/components/_common/AppearanceControls.vue'
+import AppearancePopover from '@/components/_common/AppearancePopover.vue'
+import AppShell from '@/components/_common/AppShell.vue'
+import FontPresetSelector from '@/components/_common/FontPresetSelector.vue'
+import NavigationBar from '@/components/_common/NavigationBar.vue'
+
+const fontSelectStub = {
+  props: ['modelValue', 'options'],
+  template:
+    '<select :value="modelValue" @change="$emit(\'change\', $event.target.value)"><option v-for="opt in options" :value="opt.value">{{ opt.label }}</option></select>',
+}
+const fontButtonStub = {
+  props: ['disabled'],
+  template: '<button :disabled="disabled"><slot /></button>',
+}
 describe('layout and workspace interactions', () => {
   beforeEach(() => {
     routeState.query = {}
@@ -204,11 +231,13 @@ describe('layout and workspace interactions', () => {
     expect(wrapper.emitted('update:collapsed')?.[0]).toEqual([true])
   })
 
-  it('switches inline HomeView console tabs and toggles live vs core logs', async () => {
+  it('retains the group workspace across console tabs', async () => {
     const wrapper = mount(HomeView, {
       global: {
         stubs: {
-          Button: { template: '<button v-bind="$attrs" @click="$emit(\'click\')"><slot /></button>' },
+          Button: {
+            template: '<button v-bind="$attrs" @click="$emit(\'click\')"><slot /></button>',
+          },
           Card: { template: '<div><slot /></div>' },
           Dropdown: { template: '<div><slot /></div>' },
           Switch: true,
@@ -230,8 +259,8 @@ describe('layout and workspace interactions', () => {
     expect(wrapper.find('.overview-stub').isVisible()).toBe(true)
 
     await tabs[1]!.trigger('click')
+    const groups = wrapper.get('.groups-stub').element
     expect(wrapper.find('.groups-stub').exists()).toBe(true)
-    expect(mocks.kernelStore.refreshProviderProxies).toHaveBeenCalled()
 
     await tabs[2]!.trigger('click')
     expect(wrapper.find('.connections-stub').exists()).toBe(true)
@@ -239,15 +268,18 @@ describe('layout and workspace interactions', () => {
     await tabs[3]!.trigger('click')
     expect(wrapper.find('.api-logs-stub').exists()).toBe(true)
 
-    await wrapper.get('.log-source-toggle').trigger('click')
-    expect(wrapper.find('.core-logs-stub').exists()).toBe(true)
+    await tabs[1]!.trigger('click')
+    expect(wrapper.get('.groups-stub').element).toBe(groups)
   })
 
   it('renders only real settings cards in CommonController without a dummy empty card', () => {
     const wrapper = mount(CommonController, {
       global: {
         stubs: {
-          Card: { props: ['title'], template: '<div class="setting-card">{{ title }}<slot /></div>' },
+          Card: {
+            props: ['title'],
+            template: '<div class="setting-card">{{ title }}<slot /></div>',
+          },
           Input: true,
           Switch: true,
           Select: true,
@@ -262,9 +294,17 @@ describe('layout and workspace interactions', () => {
   })
 
   it('resets RulesetForm loading state after a failed save so users can retry or cancel', async () => {
-    mocks.rulesetsStore.addRuleset.mockRejectedValueOnce(new Error('save failed'))
+    mocks.rulesetsStore.getRulesetById.mockReturnValueOnce({
+      id: 'r',
+      name: 'Rules',
+      type: 'Manual',
+      path: 'rules.json',
+      format: 'source',
+    })
+    mocks.rulesetsStore.editRuleset.mockRejectedValueOnce(new Error('save failed'))
     const cancel = vi.fn()
     const wrapper = mount(RulesetForm, {
+      props: { id: 'r', isUpdate: true },
       global: {
         provide: { cancel },
         stubs: {
@@ -284,14 +324,15 @@ describe('layout and workspace interactions', () => {
     expect(cancel).not.toHaveBeenCalled()
   })
 
-  it('switches visual style, accent color, and navigation layout via AppearancePopover', async () => {
-    const wrapper = mount(AppearancePopover, {
+  it('switches visual style, accent color, and navigation layout in appearance settings', async () => {
+    const wrapper = mount(AppearanceControls, {
       global: {
         stubs: {
           Icon: true,
           Radio: true,
           ColorPicker: true,
-          Button: true,
+          Button: fontButtonStub,
+          Select: fontSelectStub,
           Input: {
             props: ['modelValue'],
             emits: ['update:modelValue'],
@@ -320,13 +361,10 @@ describe('layout and workspace interactions', () => {
     await layoutButtons[1]!.trigger('click')
     expect(mocks.appSettingsStore.app.navLayout).toBe('topnav')
 
-    const fontButtons = wrapper.findAll('.font-chip')
-    expect(fontButtons).toHaveLength(7)
-    await fontButtons[4]!.trigger('click')
+    const fontSelect = wrapper.get('.font-select')
+    await fontSelect.setValue('mono')
     expect(mocks.appSettingsStore.app.fontFamily).toContain('JetBrains Mono')
-    expect(wrapper.find('.custom-font-input').exists()).toBe(false)
-
-    await fontButtons[5]!.trigger('click')
+    await fontSelect.setValue('custom')
     expect(wrapper.find('.custom-font-input').exists()).toBe(true)
 
     const sizePresetButtons = wrapper.findAll('.size-preset-btn')
@@ -348,7 +386,8 @@ describe('layout and workspace interactions', () => {
           Icon: true,
           Radio: true,
           ColorPicker: true,
-          Button: true,
+          Button: fontButtonStub,
+          Select: fontSelectStub,
           Input: {
             props: ['modelValue'],
             emits: ['update:modelValue'],
@@ -363,7 +402,7 @@ describe('layout and workspace interactions', () => {
     })
 
     // Open preset creator and verify empty-name and invalid-URL validation
-    await wrapper.get('.font-chip--add').trigger('click')
+    await wrapper.get('.font-add').trigger('click')
     const form = wrapper.get('form.font-preset-creator')
     await form.trigger('submit')
     expect(wrapper.get('.font-preset-error').text()).toBe('settings.font.errorEmptyName')
@@ -389,17 +428,16 @@ describe('layout and workspace interactions', () => {
       },
     ])
     expect(mocks.appSettingsStore.app.fontFamily).toBe('"LXGW WenKai", serif')
-    expect(wrapper.find('.font-chip__web-dot').exists()).toBe(true)
+    expect(wrapper.text().includes('settings.font.webFont')).toBe(true)
 
     // Save another preset from ad-hoc custom font input
-    const customChip = wrapper
-      .findAll('.font-chip')
-      .find((btn) => btn.text().includes('settings.font.custom'))!
-    await customChip.trigger('click')
+    await wrapper.get('.font-select').setValue('custom')
     await wrapper.get('.custom-font-input').setValue('"Maple Mono", monospace')
     await wrapper.get('.font-save-preset-btn').trigger('click')
 
-    const prefilledInputs = wrapper.get('form.font-preset-creator').findAll('input.font-creator-input')
+    const prefilledInputs = wrapper
+      .get('form.font-preset-creator')
+      .findAll('input.font-creator-input')
     expect((prefilledInputs[0]!.element as HTMLInputElement).value).toBe('Maple Mono')
     expect((prefilledInputs[1]!.element as HTMLInputElement).value).toBe('"Maple Mono", monospace')
     await wrapper.get('form.font-preset-creator').trigger('submit')
@@ -408,14 +446,14 @@ describe('layout and workspace interactions', () => {
     expect(mocks.appSettingsStore.app.fontFamily).toBe('"Maple Mono", monospace')
 
     // Deleting an inactive preset keeps current fontFamily intact
-    const removeButtons = wrapper.findAll('.font-chip-remove')
+    const removeButtons = wrapper.findAll('.font-remove')
     expect(removeButtons).toHaveLength(2)
     await removeButtons[0]!.trigger('click')
     expect(mocks.appSettingsStore.app.customFontPresets).toHaveLength(1)
     expect(mocks.appSettingsStore.app.fontFamily).toBe('"Maple Mono", monospace')
 
     // Deleting the active preset falls back to default font family
-    await wrapper.get('.font-chip-remove').trigger('click')
+    await wrapper.get('.font-remove').trigger('click')
     expect(mocks.appSettingsStore.app.customFontPresets).toHaveLength(0)
     expect(mocks.appSettingsStore.app.fontFamily).toContain('system-ui')
   })
@@ -423,7 +461,8 @@ describe('layout and workspace interactions', () => {
   it('syncs custom presets between settings and popover selectors, blocks duplicates, and enforces limit', async () => {
     const stubs = {
       Icon: true,
-      Button: true,
+      Button: fontButtonStub,
+      Select: fontSelectStub,
       Input: {
         props: ['modelValue'],
         emits: ['update:modelValue'],
@@ -441,10 +480,7 @@ describe('layout and workspace interactions', () => {
     })
 
     // Enter an ad-hoc custom font in settings, then save it as a preset from popover
-    const customBtn = settingsSelector
-      .findAll('.font-chip')
-      .find((btn) => btn.text().includes('settings.font.custom'))!
-    await customBtn.trigger('click')
+    await settingsSelector.get('.font-select').setValue('custom')
     await settingsSelector.get('.custom-font-input').setValue('"LXGW WenKai", serif')
     expect(settingsSelector.find('.custom-font-input').exists()).toBe(true)
 
@@ -453,12 +489,12 @@ describe('layout and workspace interactions', () => {
 
     // Settings selector exits custom mode and highlights the synced custom preset with Aa badge
     expect(settingsSelector.find('.custom-font-input').exists()).toBe(false)
-    expect(settingsSelector.findAll('.font-chip-group')).toHaveLength(1)
-    expect(settingsSelector.get('.font-chip-group').classes()).toContain('is-active')
-    expect(settingsSelector.get('.font-chip-group .font-chip__sample').text()).toBe('Aa')
+    expect((settingsSelector.get('.font-select').element as HTMLSelectElement).value).toBe(
+      'preset:custom-font-1',
+    )
 
     // Duplicate fontFamily is rejected
-    await settingsSelector.get('.font-chip--add').trigger('click')
+    await settingsSelector.get('.font-add').trigger('click')
     const dupInputs = settingsSelector
       .get('form.font-preset-creator')
       .findAll('input.font-creator-input')
@@ -474,10 +510,8 @@ describe('layout and workspace interactions', () => {
       fontFamily: `"Font ${i + 1}", sans-serif`,
     }))
     await flushPromises()
-    await settingsSelector.get('.font-creator-btn--secondary').trigger('click')
-    expect((settingsSelector.get('.font-chip--add').element as HTMLButtonElement).disabled).toBe(
-      true,
-    )
+    await settingsSelector.get('.font-cancel').trigger('click')
+    expect((settingsSelector.get('.font-add').element as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('renders horizontal topnav links in AppShell when navLayout is topnav', async () => {

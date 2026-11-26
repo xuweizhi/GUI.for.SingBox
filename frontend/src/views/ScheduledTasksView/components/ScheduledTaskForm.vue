@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { ref, inject, h } from 'vue'
+import { computed, ref, inject, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { IsNotificationAvailable, RequestNotificationAuthorization } from '@/bridge'
 import { ScheduledTaskOptions } from '@/constant/app'
 import { ScheduledTasksType } from '@/enums/app'
-import { useScheduledTasksStore, useSubscribesStore, useRulesetsStore, usePluginsStore } from '@/stores'
-import { alert, deepClone, formatDate, isValidCron, message, sampleID } from '@/utils'
+import { useFormDraft } from '@/hooks/useFormDraft'
+import {
+  useScheduledTasksStore,
+  useSubscribesStore,
+  useRulesetsStore,
+  usePluginsStore,
+} from '@/stores'
+import { previewCode, deepClone, formatDate, isValidCron, message, sampleID } from '@/utils'
 
 import Button from '@/components/Button/index.vue'
 
@@ -42,10 +48,17 @@ const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
 
 const handleSave = async () => {
+  if (loading.value) return
+  errorField.value = ''
+  if (!task.value.name.trim()) {
+    return invalid('name')
+  }
+  if (!task.value.cron.trim()) {
+    return invalid('cron')
+  }
   const { ok, reason } = isValidCron(task.value.cron)
   if (!ok) {
-    message.error(reason)
-    return
+    return invalid('cron', String(reason))
   }
 
   switch (task.value.type) {
@@ -108,9 +121,15 @@ const handleViewNextRuns = () => {
     const index = (i + 1).toString().padStart(2, '0')
     return `${index}.  ${formatDate(v.getTime(), 'YYYY-MM-DD HH:mm:ss')}`
   })
-  alert(t('scheduledtasks.next'), list.join('\n'))
+  previewCode(t('scheduledtasks.next'), list.join('\n'), 'text')
 }
 
+const nextRuns = computed(
+  () =>
+    isValidCron(task.value.cron)
+      .instance?.nextRuns(3)
+      .map((d) => formatDate(d.getTime(), 'YYYY-MM-DD HH:mm:ss')) || [],
+)
 const onNotificationChange = async (v: boolean) => {
   if (v) {
     try {
@@ -132,6 +151,7 @@ if (props.id) {
   }
 }
 
+const { errorField, errorMessage, invalid } = useFormDraft(() => task.value)
 const modalSlots = {
   cancel: () =>
     h(
@@ -148,7 +168,6 @@ const modalSlots = {
       {
         type: 'primary',
         loading: loading.value,
-        disabled: !task.value.name || !task.value.cron,
         onClick: handleSave,
       },
       () => t('common.save'),
@@ -159,17 +178,44 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div>
-    <div class="form-item">
+  <div ref="formRoot" class="resource-form">
+    <div class="form-item" :data-invalid="errorField === 'name'">
       {{ t('scheduledtask.name') }} *
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Input v-model="task.name" autofocus class="w-full" />
+        <small v-if="errorField === 'name'" class="field-error" role="alert">{{
+          errorMessage
+        }}</small>
       </div>
     </div>
-    <div class="form-item items-start">
+    <div class="form-item items-start" :data-invalid="errorField === 'cron'">
       <div class="pt-6">{{ t('scheduledtask.cron') }} *</div>
-      <div class="min-w-[75%] flex flex-col gap-6">
-        <Input v-model="task.cron" :placeholder="t('scheduledtask.cronTips')" clearable class="w-full" />
+      <div class="w-full flex flex-col gap-6">
+        <div class="flex flex-wrap gap-4">
+          <Button
+            v-for="(cron, period) in {
+              hourly: '0 * * * *',
+              daily: '0 0 * * *',
+              weekly: '0 0 * * 1',
+            }"
+            :key="period"
+            size="small"
+            @click="task.cron = cron"
+            >{{ t('workspace.' + period) }}</Button
+          >
+        </div>
+        <Input
+          v-model="task.cron"
+          :placeholder="t('scheduledtask.cronTips')"
+          clearable
+          class="w-full"
+        />
+        <small v-if="errorField === 'cron'" class="field-error" role="alert">{{
+          errorMessage
+        }}</small>
+        <div v-if="nextRuns.length" aria-live="polite" class="text-muted text-12">
+          {{ t('scheduledtasks.next') }} · {{ nextRuns.join(' / ') }}
+        </div>
         <div class="flex flex-wrap items-center gap-6">
           <Button type="normal" size="small" :disabled="!task.cron" @click="handleValidate">
             {{ t('scheduledtask.validate') }}
@@ -182,7 +228,7 @@ defineExpose({ modalSlots })
     </div>
     <div class="form-item">
       <div>{{ t('scheduledtask.type') }}</div>
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Select v-model="task.type" :options="ScheduledTaskOptions" auto-size />
       </div>
     </div>

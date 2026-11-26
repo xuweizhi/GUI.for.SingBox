@@ -8,6 +8,7 @@ interface Props {
   subtitle?: string
   selected?: boolean
   disabled?: boolean
+  flush?: boolean
   interactive?: boolean
 }
 
@@ -39,12 +40,23 @@ const isInteractive = computed(() => {
 
 <template>
   <div
+    :tabindex="attrs.onClick && !disabled ? 0 : undefined"
+    :role="attrs.onClick && !attrs.role ? 'button' : undefined"
     :class="{
       'is-selected': selected,
+      'is-flush': flush,
       'is-disabled': disabled,
       'is-interactive': isInteractive,
     }"
     class="gui-card relative flex flex-col"
+    @keydown.enter.self="
+      attrs.onClick && !disabled && ($event.currentTarget as HTMLElement).click()
+    "
+    @keydown.space.self="
+      attrs.onClick &&
+      !disabled &&
+      ($event.preventDefault(), ($event.currentTarget as HTMLElement).click())
+    "
   >
     <div v-if="hasTitle" class="gui-card__header card-header flex items-center break-all">
       <slot name="title-prefix"></slot>
@@ -67,13 +79,6 @@ const isInteractive = computed(() => {
     <div class="gui-card__body flex-1" :class="{ 'has-title': hasTitle }">
       <slot></slot>
     </div>
-    <span
-      v-if="selected"
-      class="gui-card__state--selected"
-      aria-hidden="true"
-    >
-      <Icon :size="14" icon="selected" color="var(--btn-primary-color)" />
-    </span>
   </div>
 </template>
 
@@ -85,8 +90,6 @@ const isInteractive = computed(() => {
   color: var(--card-color);
   background-color: var(--surface-bg, var(--card-bg));
   box-shadow: var(--card-shadow);
-  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
-  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
   transition:
     box-shadow 0.2s ease,
     border-color 0.2s ease,
@@ -140,19 +143,20 @@ const isInteractive = computed(() => {
 .gui-card__body.has-title {
   padding-bottom: var(--card-pad-x, 16px);
 }
-.gui-card__state--selected {
+.gui-card__body:not(.has-title) {
+  padding-block: var(--card-pad-y);
+}
+.is-flush > .gui-card__body {
+  padding: 0;
+}
+.is-selected::before {
+  content: '';
   position: absolute;
-  right: 8px;
-  bottom: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  background-color: var(--primary-color);
-  background-image: var(--btn-primary-bg-image);
-  box-shadow: var(--btn-primary-shadow);
+  inset-inline-start: 0;
+  inset-block: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent-text);
   pointer-events: none;
 }
 </style>

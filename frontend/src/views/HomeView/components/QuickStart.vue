@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, inject, ref } from 'vue'
+import { computed, h, inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useProfilesStore, useAppSettingsStore, useSubscribesStore } from '@/stores'
@@ -20,8 +20,17 @@ const loading = ref(false)
 const handleCancel = inject('cancel') as any
 const handleSubmit = inject('submit') as any
 
+const attempted = ref(false)
+const valid = computed(() => {
+  try {
+    return ['http:', 'https:'].includes(new URL(url.value).protocol)
+  } catch {
+    return false
+  }
+})
 const handleSave = async () => {
-  if (loading.value) return
+  attempted.value = true
+  if (!valid.value || loading.value) return
   if (!name.value) {
     name.value = sampleID()
   }
@@ -68,7 +77,6 @@ const modalSlots = {
       Button,
       {
         type: 'primary',
-        disabled: !/^https?:\/\//.test(url.value),
         loading: loading.value,
         onClick: handleSave,
       },
@@ -80,25 +88,24 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
-    <div class="flex gap-4">
-      <Input v-model="name" :placeholder="$t('profile.name')" auto-size clearable class="w-[25%]" />
+  <div class="form-grid">
+    <label for="quick-name">{{ t('profile.name') }}</label
+    ><Input v-model="name" input-id="quick-name" clearable /> <label for="quick-url">URL</label>
+    <div>
       <Input
         v-model="url"
-        placeholder="http(s)://"
+        input-id="quick-url"
         autofocus
         clearable
         allow-paste
-        class="w-[75%]"
+        placeholder="https://"
+        class="w-full"
       />
+      <span v-if="(attempted || url) && !valid" role="alert" class="text-danger text-12">{{
+        t('workspace.url')
+      }}</span>
     </div>
-    <Input
-      v-model="decryptPassword"
-      :placeholder="$t('subscribe.decryptPassword')"
-      type="password"
-      clearable
-      allow-paste
-      class="w-full"
-    />
+    <label for="quick-password">{{ t('subscribe.decryptPassword') }}</label
+    ><Input v-model="decryptPassword" input-id="quick-password" type="password" clearable />
   </div>
 </template>

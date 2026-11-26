@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { ProcessMemory } from '@/bridge'
+import { GetSystemProxy, ProcessMemory } from '@/bridge'
 import { ModeOptions } from '@/constant/kernel'
 import { useKernelApiStore, useAppSettingsStore } from '@/stores'
-import { formatBytes, handleChangeMode, message } from '@/utils'
+import { formatBytes, handleChangeMode, message, modal } from '@/utils'
 
+import CommonController from './CommonController.vue'
 import CurrentNodeCard from './CurrentNodeCard.vue'
 
 const emit = defineEmits<{
@@ -31,10 +32,45 @@ const { t } = useI18n()
 const appSettings = useAppSettingsStore()
 const kernelApiStore = useKernelApiStore()
 
+const openSettings = () =>
+  modal({
+    title: 'home.overview.settings',
+    size: 'md',
+    submit: false,
+    cancelText: 'common.close',
+    maskClosable: true,
+  })
+    .setContent(CommonController)
+    .open()
+const setTun = async (enable: boolean) => {
+  try {
+    await kernelApiStore.updateConfig('tun', { enable })
+  } catch (error) {
+    if (kernelApiStore.running) kernelApiStore.config.tun.enable = !enable
+    message.error(error)
+  }
+}
+const modeKey = ref(0)
+const onModeChange = async (mode: 'direct' | 'global' | 'rule') => {
+  try {
+    await handleChangeMode(mode)
+  } catch (error) {
+    modeKey.value++
+    message.error(error)
+  }
+}
 const handleToggleRealMemoryUsage = () => {
   appSettings.app.kernel.realMemoryUsage = !appSettings.app.kernel.realMemoryUsage
 }
 
+const hasSystemProxy = ref<boolean>()
+onMounted(async () => {
+  try {
+    hasSystemProxy.value = Boolean(await GetSystemProxy())
+  } catch {
+    /* The host may not report a proxy. */
+  }
+})
 let latestCoreMemoryUsageTime: number
 const getCoreMemoryUsage = async (fallback: number) => {
   if (latestCoreMemoryUsageTime && Date.now() - latestCoreMemoryUsageTime < 30_000) {
@@ -91,10 +127,36 @@ onUnmounted(() => {
 
 <template>
   <div class="home-overview pb-16">
+    <div class="hero-grid mb-16">
+      <CurrentNodeCard />
+      <Card :title="t('kernel.mode')">
+        <Radio
+          :key="kernelApiStore.config.mode + '-' + modeKey"
+          :model-value="kernelApiStore.config.mode"
+          :options="ModeOptions"
+          @change="onModeChange"
+        />
+        <div class="flex flex-wrap items-center gap-8 mt-12">
+          <Switch v-model="kernelApiStore.config.tun.enable" @change="setTun">{{
+            t('home.overview.tunMode')
+          }}</Switch>
+          <span v-if="hasSystemProxy !== undefined" class="text-secondary text-12"
+            >{{ t('settings.systemProxy') }} ·
+            {{ t(hasSystemProxy ? 'common.enabled' : 'common.disabled') }}</span
+          >
+          <Button size="small" icon="settings" @click="openSettings">{{
+            t('home.overview.settings')
+          }}</Button>
+        </div>
+        <div class="flex flex-wrap gap-6 mt-12">
+          <Button size="small" @click="emit('open-groups')">{{
+            t('home.overview.allGroups')
+          }}</Button>
+          <Button size="small" @click="emit('open-logs')">{{ t('home.overview.logs') }}</Button>
+        </div>
+      </Card>
+    </div>
     <div class="home-stats overview-cards grid gap-12">
-      <div class="overview-node-slot">
-        <CurrentNodeCard />
-      </div>
       <Card
         :title="t('home.overview.realtimeTraffic')"
         class="home-stat-card home-stat-card--realtime"
@@ -104,10 +166,7 @@ onUnmounted(() => {
           <span class="metric metric--download">↓ {{ formatBytes(statistics.download) }}/s</span>
         </div>
       </Card>
-      <Card
-        :title="t('home.overview.totalTraffic')"
-        class="home-stat-card home-stat-card--total"
-      >
+      <Card :title="t('home.overview.totalTraffic')" class="home-stat-card home-stat-card--total">
         <div class="home-stat-card__value flex flex-col gap-4 py-4 font-mono">
           <span class="metric metric--upload">↑ {{ formatBytes(statistics.uploadTotal) }}</span>
           <span class="metric metric--download">↓ {{ formatBytes(statistics.downloadTotal) }}</span>
@@ -133,9 +192,17 @@ onUnmounted(() => {
         class="home-stat-card home-stat-card--memory"
         @click="handleToggleRealMemoryUsage"
       >
+        <template #extra>
+          <Tag size="small" :color="appSettings.app.kernel.realMemoryUsage ? 'green' : 'default'">
+            {{ t(appSettings.app.kernel.realMemoryUsage ? 'common.enabled' : 'common.disabled') }}
+          </Tag>
+        </template>
         <div class="home-stat-card__value py-4 font-mono">
           {{ formatBytes(statistics.inuse) }}
-          <span v-if="appSettings.app.kernel.realMemoryUsage" class="text-13 text-muted font-normal">
+          <span
+            v-if="appSettings.app.kernel.realMemoryUsage"
+            class="text-13 text-muted font-normal"
+          >
             / {{ formatBytes(statistics.memUsage) }}
           </span>
         </div>
@@ -149,36 +216,16 @@ onUnmounted(() => {
           <div class="font-bold" style="color: var(--card-color)">
             {{ t('home.overview.traffic') }}
           </div>
-          <Button type="link" size="small" @click="emit('open-logs')">
-            {{ t('home.overview.logs') }}
-          </Button>
         </div>
         <TrafficChart
           :series="trafficHistory"
           :legend="[t('home.overview.transmit'), t('home.overview.receive')]"
         />
-      </div>
-      <div class="mode-panel">
-        <div class="flex items-center justify-between pb-10">
-          <div class="font-bold" style="color: var(--card-color)">
-            {{ t('kernel.mode') }}
-          </div>
-          <Button type="link" size="small" @click="emit('open-groups')">
-            {{ t('home.overview.allGroups') }}
-          </Button>
-        </div>
-        <div class="mode-panel__list flex flex-col gap-10">
-          <Card
-            v-for="mode in ModeOptions"
-            :key="mode.value"
-            :selected="kernelApiStore.config.mode === mode.value"
-            :title="t(mode.label)"
-            interactive
-            :class="['home-mode-card', `home-mode-card--${String(mode.value).toLowerCase()}`]"
-            @click="handleChangeMode(mode.value as any).catch((error) => message.error(error))"
-          >
-            <div class="text-12 text-muted py-2">{{ t(mode.desc) }}</div>
-          </Card>
+        <div class="flex items-center justify-between text-12 text-secondary mt-6">
+          {{ t('workspace.trafficSamples', [60]) }}
+          <Button size="small" type="text" icon="reset" @click="trafficHistory = [[], []]">{{
+            t('common.reset')
+          }}</Button>
         </div>
       </div>
     </div>
@@ -187,13 +234,8 @@ onUnmounted(() => {
 
 <style lang="less" scoped>
 .overview-cards {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--grid-gap, 12px);
-}
-
-.overview-node-slot {
-  grid-column: span 2;
-  min-width: 0;
 }
 
 .home-stat-card {
@@ -241,35 +283,19 @@ onUnmounted(() => {
   color: #0ea5e9;
 }
 
-.mode-panel {
-  width: 340px;
-  flex-shrink: 0;
+.hero-grid {
+  display: grid;
+  grid-template-columns: 7fr 5fr;
+  gap: var(--grid-gap);
 }
-
-@media (max-width: 1100px) {
+@container (max-width: 1024px) {
   .overview-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .overview-node-slot {
-    grid-column: span 2;
+    grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
   }
 }
-
-@media (max-width: 860px) {
-  .home-dashboard {
-    flex-direction: column;
-  }
-  .mode-panel {
-    width: 100%;
-  }
-}
-
-@media (max-width: 560px) {
-  .overview-cards {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .overview-node-slot {
-    grid-column: span 1;
+@container (max-width: 640px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

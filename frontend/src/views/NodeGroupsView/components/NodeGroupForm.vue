@@ -3,6 +3,7 @@ import { computed, h, inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { DefaultNodeGroup } from '@/constant/nodeGroup'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
 import { deepClone, message, nodeGroupNodeKey, resolveNodeGroup } from '@/utils'
 
@@ -50,14 +51,17 @@ const selectedKeys = computed(
       group.value.members.map((member) => nodeGroupNodeKey(member.subscription_id, member.node_id)),
     ),
 )
+const source = ref('')
 const availableNodes = computed(() => {
   const query = keywords.value.trim().toLowerCase()
-  return subscribesStore.subscribes.flatMap((subscription) =>
-    subscription.proxies.flatMap((proxy) => {
-      const text = `${subscription.name} ${proxy.tag} ${proxy.type}`.toLowerCase()
-      return !query || text.includes(query) ? [{ subscription, proxy }] : []
-    }),
-  )
+  return subscribesStore.subscribes
+    .filter((sub) => !source.value || sub.id === source.value)
+    .flatMap((subscription) =>
+      subscription.proxies.flatMap((proxy) => {
+        const text = `${subscription.name} ${proxy.tag} ${proxy.type}`.toLowerCase()
+        return !query || text.includes(query) ? [{ subscription, proxy }] : []
+      }),
+    )
 })
 const resolution = computed(() => resolveNodeGroup(group.value, subscribesStore.subscribes))
 const matchExplanation = (node: ResolvedNodeGroupNode) => {
@@ -93,6 +97,12 @@ const toggleMember = (
   }
 }
 
+const selectFiltered = () => {
+  for (const { subscription, proxy } of availableNodes.value) {
+    if (!selectedKeys.value.has(nodeGroupNodeKey(subscription.id, proxy.id)))
+      toggleMember(subscription, proxy)
+  }
+}
 const clearMissing = () => {
   const subscriptions = new Map(subscribesStore.subscribes.map((sub) => [sub.id, sub]))
   if (group.value.mode === 'manual') {
@@ -100,11 +110,18 @@ const clearMissing = () => {
       subscriptions.get(member.subscription_id)?.proxies.some((node) => node.id === member.node_id),
     )
   } else {
-    group.value.subscription_ids = group.value.subscription_ids.filter((id) => subscriptions.has(id))
+    group.value.subscription_ids = group.value.subscription_ids.filter((id) =>
+      subscriptions.has(id),
+    )
   }
 }
 
 const handleSave = async () => {
+  if (loading.value) return
+  errorField.value = ''
+  if (!group.value.name.trim()) {
+    return invalid('name')
+  }
   loading.value = true
   try {
     if (props.id) await nodeGroupsStore.editNodeGroup(props.id, group.value)
@@ -117,6 +134,7 @@ const handleSave = async () => {
   }
 }
 
+const { errorField, errorMessage, invalid } = useFormDraft(() => group.value)
 const modalSlots = {
   cancel: () =>
     h(Button, { disabled: loading.value, onClick: handleCancel }, () => t('common.cancel')),
@@ -130,79 +148,99 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div class="h-full flex flex-col gap-12">
-    <div class="node-group-fields grid grid-cols-2 gap-12">
-      <div class="form-item">
+  <div ref="formRoot" class="resource-form group-editor">
+    <section class="flex flex-col gap-12">
+      <div class="form-item" :data-invalid="errorField === 'name'">
         {{ t('nodeGroups.name') }}
-        <Input v-model="group.name" autofocus />
+        <div>
+          <Input v-model="group.name" autofocus />
+          <small v-if="errorField === 'name'" class="field-error" role="alert">{{
+            errorMessage
+          }}</small>
+        </div>
       </div>
       <div class="form-item">
         {{ t('nodeGroups.icon') }}
         <Input v-model="group.icon" clearable placeholder="https://" />
       </div>
-    </div>
-    <div class="form-item">
-      {{ t('nodeGroups.mode') }}
-      <Radio v-model="group.mode" :options="modeOptions" />
-    </div>
-
-    <template v-if="group.mode === 'manual'">
-      <div class="text-14" aria-live="polite">
-        {{ t('common.selectedCount', [group.members.length]) }}
-      </div>
-      <Input v-model="keywords" :placeholder="t('nodeGroups.search')" clearable />
-      <div class="node-member-grid grid gap-8 overflow-y-auto min-h-128">
-        <Button
-          v-for="item in availableNodes"
-          :key="nodeGroupNodeKey(item.subscription.id, item.proxy.id)"
-          :type="
-            selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))
-              ? 'link'
-              : 'text'
-          "
-          :data-member="item.proxy.id"
-          :data-selected="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))"
-          :aria-pressed="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))"
-          class="node-member justify-start"
-          @click="toggleMember(item.subscription, item.proxy)"
-        >
-          <span class="node-member__check" aria-hidden="true">
-            <Icon
-              v-if="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))"
-              icon="selected"
-              :size="16"
-            />
-          </span>
-          <div class="text-left min-w-0">
-            <div class="line-clamp-1">{{ item.proxy.tag }}</div>
-            <div class="text-12 opacity-70 line-clamp-1">
-              {{ item.subscription.name }} · {{ item.proxy.type }}
-            </div>
-          </div>
-        </Button>
-      </div>
-      <Empty v-if="availableNodes.length === 0" />
-    </template>
-
-    <template v-else>
       <div class="form-item">
-        {{ t('nodeGroups.sources') }}
-        <Radio v-model="group.source_scope" :options="sourceOptions" />
+        {{ t('nodeGroups.mode') }}
+        <Radio v-model="group.mode" :options="modeOptions" />
       </div>
-      <div v-if="group.source_scope === 'selected'" class="form-item">
-        {{ t('nodeGroups.sources') }}
-        <Select v-model="group.subscription_ids" :options="subscriptionOptions" multiple clearable />
-      </div>
-      <div class="form-item">
-        {{ t('nodeGroups.matchField') }}
+
+      <template v-if="group.mode === 'manual'">
+        <div class="text-14" aria-live="polite">
+          {{ t('common.selectedCount', [group.members.length]) }}
+        </div>
         <Select
-          v-model="group.match_field"
-          :options="matchFieldOptions"
-          data-testid="node-group-match-field"
+          v-model="source"
+          :options="subscriptionOptions"
+          clearable
+          :placeholder="t('nodeGroups.allSources')"
         />
-        <span class="text-12 opacity-70">{{ t('nodeGroups.matchFieldHint') }}</span>
-      </div>
-      <div class="node-group-fields grid grid-cols-2 gap-12">
+        <div class="flex gap-6">
+          <Button size="small" @click="selectFiltered">{{ t('common.selectAll') }}</Button>
+          <Button size="small" @click="group.members = []">{{ t('common.clear') }}</Button>
+        </div>
+        <Input v-model="keywords" :placeholder="t('nodeGroups.search')" clearable />
+        <div class="node-member-grid grid gap-8 overflow-y-auto min-h-128">
+          <Button
+            v-for="item in availableNodes"
+            :key="nodeGroupNodeKey(item.subscription.id, item.proxy.id)"
+            :type="
+              selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))
+                ? 'link'
+                : 'text'
+            "
+            :data-member="item.proxy.id"
+            :data-selected="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))"
+            :aria-pressed="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))"
+            class="node-member justify-start"
+            @click="toggleMember(item.subscription, item.proxy)"
+          >
+            <span class="node-member__check" aria-hidden="true">
+              <Icon
+                v-if="selectedKeys.has(nodeGroupNodeKey(item.subscription.id, item.proxy.id))"
+                icon="selected"
+                :size="16"
+              />
+            </span>
+            <div class="text-left min-w-0">
+              <div class="line-clamp-1">{{ item.proxy.tag }}</div>
+              <div class="text-12 opacity-70 line-clamp-1">
+                {{ item.subscription.name }} · {{ item.proxy.type }}
+              </div>
+            </div>
+          </Button>
+        </div>
+        <Empty v-if="availableNodes.length === 0" />
+      </template>
+
+      <template v-else>
+        <div class="form-item">
+          {{ t('nodeGroups.sources') }}
+          <Radio v-model="group.source_scope" :options="sourceOptions" />
+        </div>
+        <div v-if="group.source_scope === 'selected'" class="form-item">
+          {{ t('nodeGroups.sources') }}
+          <Select
+            v-model="group.subscription_ids"
+            :options="subscriptionOptions"
+            multiple
+            clearable
+          />
+        </div>
+        <div class="form-item">
+          {{ t('nodeGroups.matchField') }}
+          <div>
+            <Select
+              v-model="group.match_field"
+              :options="matchFieldOptions"
+              data-testid="node-group-match-field"
+            />
+            <span class="field-hint text-12 opacity-70">{{ t('nodeGroups.matchFieldHint') }}</span>
+          </div>
+        </div>
         <div class="form-item">
           {{ t('nodeGroups.include') }}
           <Input v-model="group.include" placeholder="HK|Hong Kong" />
@@ -211,44 +249,76 @@ defineExpose({ modalSlots })
           {{ t('nodeGroups.exclude') }}
           <Input v-model="group.exclude" placeholder="Expire|Traffic" />
         </div>
+        <div class="form-item">
+          {{ t('nodeGroups.maxNodes') }}
+          <Input v-model="group.max_nodes" type="number" :min="0" />
+        </div>
+      </template>
+    </section>
+    <aside class="group-preview surface-panel p-12">
+      <Divider>{{ t('nodeGroups.resolved') }} · {{ resolution.nodes.length }}</Divider>
+      <div class="flex flex-wrap gap-6">
+        <div v-for="node in resolution.nodes" :key="node.key" class="min-w-0 max-w-full">
+          <Tag color="blue">{{ node.proxy.tag }} · {{ node.subscription.name }}</Tag>
+          <div
+            v-if="node.match"
+            class="text-12 opacity-70 break-all"
+            data-testid="node-group-match-reason"
+          >
+            {{ matchExplanation(node) }}
+          </div>
+        </div>
+        <span v-if="resolution.nodes.length === 0" class="text-12 opacity-70">{{
+          t('common.none')
+        }}</span>
       </div>
-      <div class="form-item">
-        {{ t('nodeGroups.maxNodes') }}
-        <Input v-model="group.max_nodes" type="number" :min="0" />
-      </div>
-    </template>
-
-    <Divider>{{ t('nodeGroups.resolved') }} · {{ resolution.nodes.length }}</Divider>
-    <div class="flex flex-wrap gap-6">
-      <div v-for="node in resolution.nodes" :key="node.key" class="min-w-0 max-w-full">
-        <Tag color="blue">{{ node.proxy.tag }} · {{ node.subscription.name }}</Tag>
-        <div
-          v-if="node.match"
-          class="text-12 opacity-70 break-all"
-          data-testid="node-group-match-reason"
+      <template v-if="resolution.issues.length">
+        <Divider>{{ t('nodeGroups.unresolved') }} · {{ resolution.issues.length }}</Divider>
+        <Button
+          v-if="resolution.issues.some((issue) => issue.type !== 'invalid-filter')"
+          size="small"
+          @click="clearMissing"
         >
-          {{ matchExplanation(node) }}
+          {{ t('common.clear') }}
+        </Button>
+        <div class="text-12" style="color: var(--color-danger)">
+          <div v-for="(issue, index) in resolution.issues" :key="index">
+            {{ t('nodeGroups.issues.' + issue.type) }} ·
+            {{ 'label' in issue ? issue.label : issue.expression }}
+          </div>
         </div>
-      </div>
-      <span v-if="resolution.nodes.length === 0" class="text-12 opacity-70">{{
-        t('common.none')
-      }}</span>
-    </div>
-    <template v-if="resolution.issues.length">
-      <Divider>{{ t('nodeGroups.unresolved') }} · {{ resolution.issues.length }}</Divider>
-      <Button v-if="resolution.issues.some((issue) => issue.type !== 'invalid-filter')" size="small" @click="clearMissing">
-        {{ t('common.clear') }}
-      </Button>
-      <div class="text-12" style="color: var(--level-4-color)">
-        <div v-for="(issue, index) in resolution.issues" :key="index">
-          {{ issue.type }} · {{ 'label' in issue ? issue.label : issue.expression }}
-        </div>
-      </div>
-    </template>
+      </template>
+    </aside>
   </div>
 </template>
 
 <style scoped>
+.group-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 16px;
+}
+.group-preview {
+  position: sticky;
+  top: 0;
+  max-height: 72vh;
+  overflow: auto;
+}
+.field-hint {
+  display: block;
+  margin-top: 4px;
+}
+@container (max-width: 860px) {
+  .group-editor {
+    grid-template-columns: 1fr;
+  }
+  .group-preview {
+    position: static;
+    max-height: none;
+  }
+}
+
 .node-member-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -272,14 +342,13 @@ defineExpose({ modalSlots })
   border-radius: 4px;
 }
 
-@media (max-width: 900px) {
+@container (max-width: 1024px) {
   .node-member-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 600px) {
-  .node-group-fields,
+@container (max-width: 640px) {
   .node-member-grid {
     grid-template-columns: minmax(0, 1fr);
   }

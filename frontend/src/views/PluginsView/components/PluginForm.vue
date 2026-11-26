@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { PluginsTriggerOptions, DraggableOptions } from '@/constant/app'
 import { PluginTrigger } from '@/enums/app'
 import { useBool } from '@/hooks'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { usePluginsStore } from '@/stores'
 import { deepClone, message, sampleID } from '@/utils'
 
@@ -81,7 +82,25 @@ const invalidConfiguration = computed(() =>
   plugin.value.configuration.some((field) => !field.component || !field.key.trim()),
 )
 const handleSave = async () => {
-  if (invalidConfiguration.value || loading.value) return
+  if (loading.value) return
+  errorField.value = ''
+  if (!plugin.value.name.trim()) {
+    return invalid('name')
+  }
+  if (!plugin.value.version.trim()) {
+    return invalid('version')
+  }
+  if (plugin.value.type === 'Http' && !plugin.value.url.trim()) {
+    return invalid('url')
+  }
+  if (!plugin.value.path.trim()) {
+    return invalid('path')
+  }
+  if (invalidConfiguration.value) {
+    showMore.value = true
+    return invalid('configuration')
+  }
+
   loading.value = true
   try {
     if (props.id) {
@@ -167,6 +186,7 @@ if (props.id) {
   p && (plugin.value = deepClone(p))
 }
 
+const { errorField, errorMessage, invalid } = useFormDraft(() => plugin.value)
 const modalSlots = {
   action: () =>
     official.value
@@ -189,12 +209,6 @@ const modalSlots = {
       {
         type: 'primary',
         loading: loading.value,
-        disabled:
-          invalidConfiguration.value ||
-          !plugin.value.name ||
-          !plugin.value.version ||
-          !plugin.value.path ||
-          (plugin.value.type === 'Http' && !plugin.value.url),
         onClick: handleSave,
       },
       () => t('common.save'),
@@ -205,7 +219,7 @@ defineExpose({ modalSlots })
 </script>
 
 <template>
-  <div class="w-full h-full">
+  <div ref="formRoot" class="resource-form w-full h-full">
     <div class="form-item">
       {{ t('plugin.type') }}
       <Radio
@@ -220,42 +234,54 @@ defineExpose({ modalSlots })
       <div class="mr-8">{{ t('plugin.trigger') }}</div>
       <MultipleSelect v-model="plugin.triggers" :options="PluginsTriggerOptions" clearable />
     </div>
-    <div class="form-item">
+    <div class="form-item" :data-invalid="errorField === 'name'">
       {{ t('plugin.name') }} *
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Input v-model="plugin.name" autofocus class="w-full" />
+        <small v-if="errorField === 'name'" class="field-error" role="alert">{{
+          errorMessage
+        }}</small>
       </div>
     </div>
-    <div class="form-item">
+    <div class="form-item" :data-invalid="errorField === 'version'">
       {{ t('plugin.version') }} *
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Input v-model="plugin.version" class="w-full" />
+        <small v-if="errorField === 'version'" class="field-error" role="alert">{{
+          errorMessage
+        }}</small>
       </div>
     </div>
-    <div v-show="plugin.type === 'Http'" class="form-item">
+    <div v-show="plugin.type === 'Http'" class="form-item" :data-invalid="errorField === 'url'">
       {{ t('plugin.url') }} *
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Input
           v-model="plugin.url"
           :placeholder="plugin.type === 'Http' ? 'http(s)://' : 'data/local/plugin-{filename}.js'"
           allow-paste
           class="w-full"
         />
+        <small v-if="errorField === 'url'" class="field-error" role="alert">{{
+          errorMessage
+        }}</small>
       </div>
     </div>
-    <div class="form-item">
+    <div class="form-item" :data-invalid="errorField === 'path'">
       {{ t('plugin.path') }} *
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Input
           v-model="plugin.path"
           placeholder="data/plugins/plugin-{filename}.js"
           class="w-full"
         />
+        <small v-if="errorField === 'path'" class="field-error" role="alert">{{
+          errorMessage
+        }}</small>
       </div>
     </div>
     <div class="form-item">
       {{ t('plugin.description') }}
-      <div class="min-w-[75%]">
+      <div class="w-full">
         <Input v-model="plugin.description" class="w-full" />
       </div>
     </div>
@@ -316,20 +342,31 @@ defineExpose({ modalSlots })
             </template>
             <div class="form-item">
               {{ t('plugin.confName') }}
-              <div class="min-w-[75%]">
+              <div class="w-full">
                 <Input v-model="conf.title" placeholder="title" class="w-full" />
               </div>
             </div>
             <div class="form-item">
               {{ t('plugin.confDescription') }}
-              <div class="min-w-[75%]">
+              <div class="w-full">
                 <Input v-model="conf.description" placeholder="description" class="w-full" />
               </div>
             </div>
-            <div class="form-item">
+            <div
+              class="form-item"
+              :data-invalid="
+                errorField === 'configuration' && (!conf.component || !conf.key.trim())
+              "
+            >
               {{ t('plugin.confKey') }}
-              <div class="min-w-[75%]">
+              <div class="w-full">
                 <Input v-model="conf.key" placeholder="key" class="w-full" />
+                <small
+                  v-if="errorField === 'configuration' && (!conf.component || !conf.key.trim())"
+                  class="field-error"
+                  role="alert"
+                  >{{ errorMessage }}</small
+                >
               </div>
             </div>
             <div class="form-item" :class="{ 'items-start': conf.value.length !== 0 }">
@@ -337,7 +374,7 @@ defineExpose({ modalSlots })
               <div
                 :class="
                   conf.component === 'CodeEditor' || conf.component === ('CodeViewer' as any)
-                    ? 'min-w-[75%]'
+                    ? 'w-full'
                     : ''
                 "
               >
@@ -365,14 +402,25 @@ defineExpose({ modalSlots })
                 {{ t('common.delete') }}
               </Button>
             </template>
-            <div class="flex grid grid-cols-4 gap-8">
-              <Button
-                v-for="item in componentList"
-                :key="item"
-                @click="onComponentChange(item, index)"
+            <div
+              class="component-picker"
+              :data-invalid="errorField === 'configuration' && !conf.component"
+            >
+              <div class="component-picker__grid">
+                <Button
+                  v-for="item in componentList"
+                  :key="item"
+                  @click="onComponentChange(item, index)"
+                >
+                  {{ item }}
+                </Button>
+              </div>
+              <small
+                v-if="errorField === 'configuration' && !conf.component"
+                class="field-error"
+                role="alert"
+                >{{ errorMessage }}</small
               >
-                {{ item }}
-              </Button>
             </div>
           </Card>
         </template>
@@ -384,3 +432,16 @@ defineExpose({ modalSlots })
     </div>
   </div>
 </template>
+
+<style scoped>
+.component-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+@container (max-width: 640px) {
+  .component-picker__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+</style>

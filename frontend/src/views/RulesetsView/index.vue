@@ -3,8 +3,7 @@ import { computed, ref } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n, I18nT } from 'vue-i18n'
 
-import { removeUnusedResourceCache } from '@/utils/configPersistence'
-import { DraggableOptions, ViewOptions } from '@/constant/app'
+import { DraggableOptions } from '@/constant/app'
 import { EmptyRuleSet } from '@/constant/kernel'
 import { DefaultRouteRule, DefaultRouteRuleset } from '@/constant/profile'
 import { View } from '@/enums/app'
@@ -21,6 +20,10 @@ import {
   deepClone,
   modal,
 } from '@/utils'
+import { removeUnusedResourceCache } from '@/utils/configPersistence'
+
+import ResourceActions from '@/components/_common/ResourceActions.vue'
+import ResourcePageShell from '@/components/_common/ResourcePageShell.vue'
 
 import RulesetForm from './components/RulesetForm.vue'
 import RulesetHub from './components/RulesetHub.vue'
@@ -41,19 +44,36 @@ const { t } = useI18n()
 const rulesetsStore = useRulesetsStore()
 const appSettingsStore = useAppSettingsStore()
 const profilesStore = useProfilesStore()
+const usedBy = (id: string) =>
+  profilesStore.profiles.filter((p) =>
+    p.route.rule_set.some((r) => r.type === RulesetType.Local && r.path === id),
+  )
 const keywords = ref('')
 
-const filteredRulesets = computed(() => {
+const matches = computed(() => {
   const q = keywords.value.trim().toLowerCase()
   if (!q) return rulesetsStore.rulesets
   return rulesetsStore.rulesets.filter(
     (r) => r.name.toLowerCase().includes(q) || (r.path || '').toLowerCase().includes(q),
   )
 })
+const filter = ref('')
+const sort = ref('manual')
+const filters = [
+  { label: 'common.enabled', value: 'enabled' },
+  { label: 'common.disabled', value: 'disabled' },
+]
+const filteredRulesets = computed(() => {
+  const records = matches.value.filter(
+    (item) => !filter.value || (filter.value === 'disabled' ? item.disabled : !item.disabled),
+  )
+  return sort.value === 'name' ? records.sort((a, b) => a.name.localeCompare(b.name)) : records
+})
 
 const handleImportRuleset = async () => {
   const m = modal({
     title: 'rulesets.hub',
+    toolbar: { minimize: true, maximize: true },
     cancelText: 'common.close',
     height: '90',
     width: '90',
@@ -67,7 +87,7 @@ const handleShowRulesetForm = async (id?: string, isUpdate = false) => {
   const m = modal({
     title: isUpdate ? 'common.edit' : 'common.add',
     maxHeight: '90',
-    minWidth: '70',
+    size: 'lg',
   })
   m.setContent(RulesetForm, { id, isUpdate }).open()
 }
@@ -110,11 +130,18 @@ const handleUpdateRuleset = async (r: App.RuleSet) => {
 
 const handleDeleteRuleset = async (r: App.RuleSet) => {
   try {
-    await confirm(t('common.delete'), t('common.confirmDelete', [r.name]), {
-      type: 'text',
-      okText: 'common.delete',
-      danger: true,
-    })
+    await confirm(
+      t('common.delete'),
+      [
+        t('common.confirmDelete', [r.name]),
+        ...usedBy(r.id).map((p) => t('workspace.usedBy', [p.name])),
+      ].join('\n'),
+      {
+        type: 'text',
+        okText: 'common.delete',
+        danger: true,
+      },
+    )
   } catch {
     return
   }
@@ -143,6 +170,17 @@ const handleClearRuleset = async (id: string) => {
   if (r.format != RulesetFormat.Source) return
 
   try {
+    if (
+      !(await confirm(t('common.clear'), t('common.confirmClear', [r.name]), {
+        type: 'text',
+        danger: true,
+        okText: 'common.clear',
+      }).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return
     await rulesetsStore.saveLocalRuleset(r.id, JSON.stringify(EmptyRuleSet, null, 2))
     message.success('common.success')
   } catch (error: any) {
@@ -156,8 +194,10 @@ const handleAddRulesetToProfile = async (id: string) => {
   if (!ruleset) return
 
   try {
-    const { items } = await picker.resource('profile', 'profiles.select', { max: 1, min: 1 })
-    const profile = items[0]
+    const selected = await picker
+      .resource('profile', 'profiles.select', { max: 1, min: 1 })
+      .catch(() => undefined)
+    const profile = selected?.items[0]
     if (!profile) return
 
     const insertionPointIndex = profile.route.rules.findIndex(
@@ -192,9 +232,9 @@ const handleAddRulesetToProfile = async (id: string) => {
       message.warn('kernel.route.rules.invalid')
       return
     }
-    const target = await picker.single('kernel.route.rules.outbound', outboundOptions, [
-      outboundOptions[0]!.value,
-    ]).catch(() => undefined)
+    const target = await picker
+      .single('kernel.route.rules.outbound', outboundOptions, [outboundOptions[0]!.value])
+      .catch(() => undefined)
     if (!target) return
 
     const nextProfile = deepClone(profile)
@@ -229,10 +269,24 @@ const generateMenus = (r: App.RuleSet) => {
     handler: (id: string) => handleAddRulesetToProfile(id),
   }
 
-  return {
+  const actions = {
     [RulesetFormat.Source]: [addToProfileMenu, ...sourceMenuList],
     [RulesetFormat.Binary]: [addToProfileMenu],
   }[r.format].map((v) => ({ ...v, handler: () => v.handler?.(r.id) }))
+  return [
+    {
+      label: 'common.update',
+      disabled: r.disabled || r.updating,
+      handler: () => handleUpdateRuleset(r),
+    },
+    ...actions,
+    {
+      label: r.disabled ? 'common.enable' : 'common.disable',
+      handler: () => handleDisableRuleset(r),
+    },
+    { label: 'common.edit', handler: () => handleShowRulesetForm(r.id, true) },
+    { label: 'common.delete', handler: () => handleDeleteRuleset(r) },
+  ]
 }
 
 const noUpdateNeeded = computed(() => rulesetsStore.rulesets.every((v) => v.disabled))
@@ -256,47 +310,39 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
     </Empty>
   </div>
 
-  <div v-else class="grid-list-header">
-    <Radio v-model="appSettingsStore.app.rulesetsView" :options="ViewOptions" />
-    <span class="resource-count-badge">
-      {{
-        keywords.trim()
-          ? `${filteredRulesets.length} / ${rulesetsStore.rulesets.length}`
-          : rulesetsStore.rulesets.length
-      }}
-    </span>
-    <Input
-      v-model="keywords"
-      size="small"
-      clearable
-      auto-size
-      :placeholder="t('common.search')"
-      class="resource-search mr-auto"
-    />
+  <ResourcePageShell
+    v-else
+    v-model:query="keywords"
+    v-model:view="appSettingsStore.app.rulesetsView"
+    v-model:sort="sort"
+    v-model:filter="filter"
+    :filters="filters"
+    :total="rulesetsStore.rulesets.length"
+    :count="filteredRulesets.length"
+  >
     <Button type="link" @click="handleImportRuleset">
       {{ t('rulesets.hub') }}
     </Button>
     <Button
       :disabled="noUpdateNeeded"
       :type="noUpdateNeeded ? 'text' : 'link'"
-      :loading="updatingAll" @click="handleUpdateRulesets"
+      :loading="updatingAll"
+      @click="handleUpdateRulesets"
     >
       {{ t('common.updateAll') }}
     </Button>
-    <Button type="primary" icon="add" class="ml-16" @click="handleShowRulesetForm()">
+    <Button type="primary" icon="add" @click="handleShowRulesetForm()">
       {{ t('common.add') }}
     </Button>
-  </div>
-
-  <Empty v-if="rulesetsStore.rulesets.length > 0 && filteredRulesets.length === 0" />
+  </ResourcePageShell>
 
   <VueDraggable
-    v-else-if="rulesetsStore.rulesets.length > 0"
+    v-if="filteredRulesets.length"
     v-model="rulesetsStore.rulesets"
     v-bind="DraggableOptions"
-    @update="onSortUpdate"
-    :disabled="Boolean(keywords.trim())"
+    :disabled="Boolean(keywords.trim() || filter || sort !== 'manual')"
     :class="'grid-list-' + appSettingsStore.app.rulesetsView"
+    @update="onSortUpdate"
   >
     <Card
       v-for="r in filteredRulesets"
@@ -312,148 +358,7 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
         </Tag>
       </template>
 
-      <template v-if="appSettingsStore.app.rulesetsView === View.Grid" #extra>
-        <Dropdown>
-          <Button
-            type="text"
-            size="small"
-            icon="more"
-            :aria-label="t('common.more') + ' · ' + r.name"
-          />
-          <template #overlay="{ close }">
-            <div class="flex flex-col gap-2 min-w-128 p-6">
-              <Button
-                :disabled="r.disabled"
-                :loading="r.updating"
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleUpdateRuleset(r)
-                  }
-                "
-              >
-                {{ t('common.update') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleAddRulesetToProfile(r.id)
-                  }
-                "
-              >
-                {{ t('rulesets.addToProfile') }}
-              </Button>
-              <Button
-                v-if="r.format === RulesetFormat.Source"
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleEditRulesetList(r.id)
-                  }
-                "
-              >
-                {{ t('rulesets.editRuleset') }}
-              </Button>
-              <Button
-                v-if="r.format === RulesetFormat.Source"
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleClearRuleset(r.id)
-                  }
-                "
-              >
-                {{ t('common.clear') }}
-              </Button>
-              <Divider size="small" />
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleDisableRuleset(r)
-                  }
-                "
-              >
-                {{ r.disabled ? t('common.enable') : t('common.disable') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleShowRulesetForm(r.id, true)
-                  }
-                "
-              >
-                {{ t('common.edit') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start text-danger"
-                @click="
-                  () => {
-                    close()
-                    handleDeleteRuleset(r)
-                  }
-                "
-              >
-                {{ t('common.delete') }}
-              </Button>
-            </div>
-          </template>
-        </Dropdown>
-      </template>
-
-      <template v-else #extra>
-        <Button
-          :disabled="r.disabled"
-          :loading="r.updating"
-          type="text"
-          size="small"
-          @click="handleUpdateRuleset(r)"
-        >
-          {{ t('common.update') }}
-        </Button>
-        <Button type="text" size="small" @click="handleAddRulesetToProfile(r.id)">
-          {{ t('rulesets.addToProfile') }}
-        </Button>
-        <Button
-          v-if="r.format === RulesetFormat.Source"
-          type="text"
-          size="small"
-          @click="handleEditRulesetList(r.id)"
-        >
-          {{ t('rulesets.editRuleset') }}
-        </Button>
-        <Button type="text" size="small" @click="handleDisableRuleset(r)">
-          {{ r.disabled ? t('common.enable') : t('common.disable') }}
-        </Button>
-        <Button type="text" size="small" @click="handleShowRulesetForm(r.id, true)">
-          {{ t('common.edit') }}
-        </Button>
-        <Button type="text" size="small" class="text-danger" @click="handleDeleteRuleset(r)">
-          {{ t('common.delete') }}
-        </Button>
-      </template>
+      <template #extra><ResourceActions :items="generateMenus(r)" :name="r.name" /></template>
 
       <div class="resource-meta-list">
         <div class="flex items-center gap-6 mb-4">
@@ -478,7 +383,7 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
         </div>
       </div>
 
-      <div v-if="appSettingsStore.app.rulesetsView === View.Grid" class="resource-card-footer">
+      <div class="resource-card-footer">
         <Button
           :disabled="r.disabled"
           :loading="r.updating"
@@ -497,14 +402,18 @@ const onSortUpdate = debounce(rulesetsStore.saveRulesets, 1000)
         >
           {{ t('rulesets.editRuleset') }}
         </Button>
-        <Button
-          v-else
-          type="text"
-          size="small"
-          @click="handleAddRulesetToProfile(r.id)"
-        >
+        <Button v-else type="text" size="small" @click="handleAddRulesetToProfile(r.id)">
           {{ t('rulesets.addToProfile') }}
         </Button>
+      </div>
+      <div v-if="usedBy(r.id).length" class="flex flex-wrap gap-6 mt-8">
+        <span class="text-muted">{{ t('nodeGroups.dependencies') }}</span>
+        <RouterLink
+          v-for="p in usedBy(r.id)"
+          :key="p.id"
+          :to="{ name: 'EditProfile', params: { id: p.id }, query: { step: 4 } }"
+          ><Tag size="small">{{ p.name }}</Tag></RouterLink
+        >
       </div>
     </Card>
   </VueDraggable>

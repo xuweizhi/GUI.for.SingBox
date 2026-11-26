@@ -9,22 +9,11 @@ const appSettings = useAppSettingsStore()
 
   <Card>
     <div class="settings-row">
-      <div>{{ $t('settings.realMemoryUsage') }}</div>
-      <Switch v-model="appSettings.app.kernel.realMemoryUsage" />
-    </div>
-    <div class="settings-row">
       <div>
         {{ $t('settings.logRetentionDays.name') }}
         <span class="font-normal text-12">{{ $t('settings.logRetentionDays.tips') }}</span>
       </div>
       <Input v-model="appSettings.app.log.retentionDays" :min="1" type="number" />
-    </div>
-    <div class="settings-row">
-      <div>
-        {{ $t('settings.autoRestartKernel.name') }}
-        <span class="font-normal text-12">{{ $t('settings.autoRestartKernel.tips') }}</span>
-      </div>
-      <Switch v-model="appSettings.app.autoRestartKernel" />
     </div>
   </Card>
 </template>

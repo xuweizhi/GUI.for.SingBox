@@ -479,6 +479,52 @@ describe('useNodeController', () => {
     scope.stop()
   })
 
+  it('keeps the new group progress and cancel handle when its predecessor finishes', async () => {
+    const first = Promise.withResolvers<ReturnType<typeof summary>>()
+    const second = Promise.withResolvers<ReturnType<typeof summary>>()
+    const cancelFirst = vi.fn()
+    const cancelSecond = vi.fn()
+    mocks.submit
+      .mockReturnValueOnce({ done: first.promise, cancel: cancelFirst })
+      .mockReturnValueOnce({ done: second.promise, cancel: cancelSecond })
+    mocks.store.proxies.Other = { ...proxies().Proxy, name: 'Other', all: ['JP 01'] }
+    const scope = effectScope()
+    const controller = scope.run(useNodeController)!
+    controller.selectGroup('Proxy')
+    const oldRun = controller.testGroup()
+    controller.selectGroup('Other')
+    const newRun = controller.testGroup()
+    expect(cancelFirst).toHaveBeenCalledOnce()
+    first.resolve(summary({ total: 2, cancelled: true }))
+    await oldRun
+    expect(controller.batch.value).toMatchObject({ running: true, total: 1, completed: 0 })
+    expect(controller.testingNodes.value.has('JP 01')).toBe(true)
+    controller.cancelGroupTest()
+    expect(cancelSecond).toHaveBeenCalledOnce()
+    second.resolve(summary({ cancelled: true }))
+    await newRun
+    scope.stop()
+  })
+
+  it('keeps the selector favorite filter out of the diagnostics node list', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => key === 'gfs.nodes.groupFilter' ? '"__favorites"' : null,
+      setItem: vi.fn(),
+    })
+    const scope = effectScope()
+    try {
+      const selector = scope.run(() => useNodeController({ persistPreferences: true }))!
+      const diagnostics = scope.run(() => useNodeController({ includePolicyNodes: true }))!
+      await selector.prepareModal()
+      diagnostics.selectGroup('Proxy')
+      expect(selector.nodes.value).toHaveLength(0)
+      expect(diagnostics.nodes.value.map((node) => node.name)).toEqual(['HK 01', 'JP 01'])
+    } finally {
+      scope.stop()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('filters busy and non-testable group nodes and handles all-busy groups', async () => {
     mocks.store.proxies.Proxy.all = ['HK 01', '剩余流量：1 GB', 'JP 01']
     mocks.store.proxies['剩余流量：1 GB'] = {

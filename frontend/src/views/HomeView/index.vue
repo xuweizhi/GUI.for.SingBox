@@ -4,15 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import logo from '@/assets/logo'
-import {
-  useAppSettingsStore,
-  useAppStore,
-  useKernelApiStore,
-  useProfilesStore,
-} from '@/stores'
-import { APP_TITLE, confirm, message, modal } from '@/utils'
+import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
+import { APP_TITLE, message, modal } from '@/utils'
 
-import CommonController from './components/CommonController.vue'
 import ConnectionsController from './components/ConnectionsController.vue'
 import GroupsController from './components/GroupsController.vue'
 import KernelLogs from './components/KernelLogs.vue'
@@ -21,7 +15,6 @@ import OverView from './components/OverView.vue'
 import QuickStart from './components/QuickStart.vue'
 
 type HomeTab = 'overview' | 'groups' | 'connections' | 'logs'
-type LogSource = 'api' | 'core'
 
 const VALID_TABS: readonly HomeTab[] = ['overview', 'groups', 'connections', 'logs']
 
@@ -29,7 +22,6 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
-const appStore = useAppStore()
 const appSettingsStore = useAppSettingsStore()
 const profilesStore = useProfilesStore()
 const kernelApiStore = useKernelApiStore()
@@ -40,11 +32,20 @@ const resolveTab = (raw: unknown): HomeTab => {
 }
 
 const activeTab = ref<HomeTab>(resolveTab(route.query.tab))
-const logSource = ref<LogSource>('api')
 const activeConnectionsCount = ref(0)
-const switchingProfileId = ref('')
 
 const activeProfileName = computed(() => profilesStore.currentProfile?.name || '')
+const visibleProfiles = computed(() => {
+  const list = profilesStore.profiles
+  if (list.length <= 4) return list
+  const head = list.slice(0, 3)
+  const selected = list.find((p) => p.id === appSettingsStore.app.kernel.profile)
+  if (selected && !head.includes(selected)) head.splice(2, 1, selected)
+  return head
+})
+const hiddenProfiles = computed(() =>
+  profilesStore.profiles.filter((profile) => !visibleProfiles.value.includes(profile)),
+)
 
 watch(
   () => route.query.tab,
@@ -58,9 +59,7 @@ watch(
 
 const setTab = (tab: HomeTab) => {
   activeTab.value = tab
-  if (tab === 'groups') {
-    void kernelApiStore.refreshProviderProxies()
-  } else if (tab === 'overview') {
+  if (tab === 'overview') {
     void kernelApiStore.refreshConfig()
   }
   const nextQuery = { ...route.query }
@@ -81,75 +80,8 @@ const handleStartKernel = async () => {
   }
 }
 
-const handleRestartKernel = async () => {
-  try {
-    await kernelApiStore.restartCore()
-  } catch (error: any) {
-    console.error(error)
-    message.error(error.message || error)
-  }
-}
-
-const handleStopKernel = async () => {
-  try {
-    await confirm(t('home.overview.stop'), t('common.confirmStopCore'), {
-      type: 'text',
-      okText: 'home.overview.stop',
-      danger: true,
-    })
-  } catch {
-    return
-  }
-
-  try {
-    await kernelApiStore.stopCore()
-    activeTab.value = 'overview'
-  } catch (error: any) {
-    console.error(error)
-    message.error(error.message || error)
-  }
-}
-
-const handleSwitchProfile = async (profileId: string) => {
-  const previous = appSettingsStore.app.kernel.profile
-  if (previous === profileId || switchingProfileId.value || kernelApiStore.starting || kernelApiStore.stopping || kernelApiStore.restarting) return
-  appSettingsStore.app.kernel.profile = profileId
-  switchingProfileId.value = profileId
-  try {
-    await kernelApiStore.restartCore()
-    message.success('common.success')
-  } catch (error: any) {
-    appSettingsStore.app.kernel.profile = previous
-    console.error(error)
-    message.error(error.message || error)
-  } finally {
-    switchingProfileId.value = ''
-  }
-}
-
-const onTunSwitchChange = async (enable: boolean) => {
-  try {
-    await kernelApiStore.updateConfig('tun', { enable })
-  } catch (error: any) {
-    kernelApiStore.config.tun.enable = kernelApiStore.running && !enable
-    console.error(error)
-    message.error(error.message || error)
-  }
-}
-
-const handleShowSettings = () => {
-  const m = modal({
-    title: 'home.overview.settings',
-    cancelText: 'common.close',
-    width: '90',
-    submit: false,
-    maskClosable: true,
-  })
-  m.setContent(CommonController).open()
-}
-
 const handleShowQuickStart = () => {
-  modal({ title: 'subscribes.enterLink' }).setContent(QuickStart).open()
+  modal({ title: 'subscribes.enterLink', size: 'md' }).setContent(QuickStart).open()
 }
 
 const handleShowKernelLogs = () => {
@@ -166,7 +98,7 @@ const handleShowKernelLogs = () => {
 
 const tabs = computed(() => [
   { key: 'overview' as const, label: t('home.overview.tabOverview'), icon: 'overview' as const },
-  { key: 'groups' as const, label: t('home.overview.tabGroups'), icon: 'folder' as const },
+  { key: 'groups' as const, label: t('home.overview.tabGroups'), icon: 'link' as const },
   {
     key: 'connections' as const,
     label: t('home.overview.tabConnections'),
@@ -184,7 +116,26 @@ const tabs = computed(() => [
       class="launchpad flex-1 flex flex-col items-center justify-center py-24"
     >
       <Card class="launchpad-card">
-        <div class="flex flex-col items-center py-24 px-8">
+        <div
+          v-if="activeTab !== 'overview'"
+          class="core-required-banner mb-12 flex flex-wrap items-center justify-center gap-8 rounded-8 px-12 py-8 text-12"
+        >
+          <span>{{
+            t('home.overview.coreRequiredForTab', [
+              tabs.find((tab) => tab.key === activeTab)?.label || '',
+            ])
+          }}</span>
+          <Button
+            v-if="profilesStore.currentProfile"
+            type="primary"
+            size="small"
+            :loading="kernelApiStore.starting"
+            @click="handleStartKernel"
+          >
+            {{ t('home.overview.start') }}
+          </Button>
+        </div>
+        <div class="flex flex-col items-center px-8">
           <img :src="logo" draggable="false" class="w-96 mb-16" />
 
           <template v-if="profilesStore.profiles.length === 0">
@@ -192,22 +143,25 @@ const tabs = computed(() => [
             <Button type="primary" size="large" @click="handleShowQuickStart">
               {{ t('home.quickStart') }}
             </Button>
+            <div class="flex flex-wrap justify-center gap-8 mt-12">
+              <Button @click="router.push('/profiles/new')"
+                >{{ t('common.add') }} · {{ t('router.profiles') }}</Button
+              >
+              <Button @click="router.push('/settings?tab=backup')">{{ t('backup.title') }}</Button>
+            </div>
           </template>
 
           <template v-else>
             <div class="home-profile-options flex flex-wrap justify-center gap-12 mb-24 w-full">
               <Card
-                v-for="p in profilesStore.profiles.slice(
-                  0,
-                  profilesStore.profiles.length > 4 ? 3 : 4,
-                )"
+                v-for="p in visibleProfiles"
                 :key="p.id"
                 :selected="appSettingsStore.app.kernel.profile === p.id"
                 interactive
                 @click="appSettingsStore.app.kernel.profile = p.id"
               >
                 <div
-                  class="w-128 h-full flex items-center justify-center py-20 text-center font-bold text-13"
+                  class="w-128 min-h-48 flex items-center justify-center py-6 text-center font-bold text-13"
                 >
                   {{ p.name }}
                 </div>
@@ -215,15 +169,15 @@ const tabs = computed(() => [
               <Dropdown v-if="profilesStore.profiles.length > 4" placement="top">
                 <Card interactive class="h-full">
                   <div
-                    class="w-128 h-full flex items-center justify-center py-20 text-center font-bold text-13"
+                    class="w-128 min-h-48 flex items-center justify-center py-6 text-center font-bold text-13"
                   >
-                    {{ t('common.more') }} ({{ profilesStore.profiles.length - 3 }})
+                    {{ t('common.more') }} ({{ hiddenProfiles.length }})
                   </div>
                 </Card>
                 <template #overlay="{ close }">
                   <div class="flex flex-col gap-2 p-6 min-w-160">
                     <Button
-                      v-for="p in profilesStore.profiles.slice(3)"
+                      v-for="p in hiddenProfiles"
                       :key="p.id"
                       type="text"
                       class="justify-between"
@@ -244,9 +198,9 @@ const tabs = computed(() => [
                   </div>
                 </template>
               </Dropdown>
-              <Card interactive @click="handleShowQuickStart">
+              <Card interactive class="quick-start-card" @click="handleShowQuickStart">
                 <div
-                  class="w-128 h-full flex items-center justify-center py-20 text-center font-bold text-13 text-muted"
+                  class="w-128 min-h-48 flex items-center justify-center py-6 text-center font-bold text-13 text-muted"
                 >
                   + {{ t('home.quickStart') }}
                 </div>
@@ -257,9 +211,13 @@ const tabs = computed(() => [
                 :loading="kernelApiStore.starting"
                 type="primary"
                 size="large"
+                class="start-profile-btn"
                 @click="handleStartKernel"
               >
-                {{ t('home.overview.start') }}
+                <span class="start-profile-btn__label"
+                  >{{ t('home.overview.start') }} ·
+                  {{ activeProfileName || t('profiles.select') }}</span
+                >
               </Button>
               <Button type="normal" icon="log" @click="handleShowKernelLogs">
                 {{ t('home.overview.viewlog') }}
@@ -272,114 +230,7 @@ const tabs = computed(() => [
 
     <template v-else-if="!kernelApiStore.coreStateLoading">
       <div class="console-header flex flex-col gap-10 mb-14 shrink-0">
-        <div class="console-bar flex flex-wrap items-center rounded-12 px-12 py-8 gap-8">
-          <Dropdown v-if="profilesStore.profiles.length > 0">
-            <Button
-              type="normal"
-              size="small"
-              icon="profiles"
-              :loading="Boolean(switchingProfileId)"
-              :title="t('home.overview.switchProfile')"
-              class="profile-switcher-btn"
-            >
-              <span class="profile-switcher-btn__text">
-                {{ activeProfileName || t('profiles.select') }}
-              </span>
-              <Icon icon="arrowDown" :size="12" color="var(--muted-color)" class="ml-4 shrink-0" />
-            </Button>
-            <template #overlay="{ close }">
-              <div class="flex flex-col gap-2 min-w-192 p-6">
-                <Button
-                  v-for="p in profilesStore.profiles"
-                  :key="p.id"
-                  type="text"
-                  size="small"
-                  class="justify-between"
-                  @click="
-                    () => {
-                      close()
-                      handleSwitchProfile(p.id)
-                    }
-                  "
-                >
-                  <span class="line-clamp-1">{{ p.name }}</span>
-                  <Icon
-                    v-if="appSettingsStore.app.kernel.profile === p.id"
-                    icon="selected"
-                    :size="15"
-                    color="var(--accent-text)"
-                    class="ml-8 shrink-0"
-                  />
-                </Button>
-                <Divider size="small" />
-                <Button
-                  type="text"
-                  size="small"
-                  icon="profiles"
-                  class="justify-start text-muted"
-                  @click="
-                    () => {
-                      close()
-                      router.push('/profiles')
-                    }
-                  "
-                >
-                  {{ t('router.profiles') }}
-                </Button>
-              </div>
-            </template>
-          </Dropdown>
-
-          <Switch
-            v-model="kernelApiStore.config.tun.enable"
-            size="small"
-            border="square"
-            @change="onTunSwitchChange"
-          >
-            {{ t('home.overview.tunMode') }}
-          </Switch>
-
-          <CustomAction :actions="appStore.customActions.core_state" />
-
-          <div class="ml-auto flex items-center gap-4">
-            <Button
-              v-tips="'home.overview.settings'"
-              :aria-label="t('home.overview.settings')"
-              type="text"
-              size="small"
-              icon="settings"
-              @click="handleShowSettings"
-            />
-            <Button
-              v-tips="'home.overview.restart'"
-              :aria-label="t('home.overview.restart')"
-              :loading="kernelApiStore.restarting"
-              :type="kernelApiStore.needRestart ? 'primary' : 'text'"
-              size="small"
-              icon="restart"
-              @click="handleRestartKernel"
-            >
-              <span v-if="kernelApiStore.needRestart">{{ t('home.overview.restart') }}</span>
-            </Button>
-            <Button
-              v-tips="'home.overview.stop'"
-              :aria-label="t('home.overview.stop')"
-              :loading="kernelApiStore.stopping"
-              type="text"
-              size="small"
-              icon="stop"
-              icon-color="var(--danger-color)"
-              class="stop-btn"
-              @click="handleStopKernel"
-            />
-          </div>
-        </div>
-
-        <nav
-          class="console-tabs"
-          role="tablist"
-          :aria-label="t('home.overview.workspace')"
-        >
+        <nav class="console-tabs" role="tablist" :aria-label="t('home.overview.workspace')">
           <button
             v-for="tab in tabs"
             :key="tab.key"
@@ -413,29 +264,24 @@ const tabs = computed(() => [
           />
         </div>
 
-        <div v-if="activeTab === 'groups'" class="console-pane console-pane--scroll pb-24">
-          <GroupsController />
-        </div>
-
-        <div v-if="activeTab === 'connections'" class="console-pane console-pane--fill">
-          <ConnectionsController />
-        </div>
-
-        <div v-if="activeTab === 'logs'" class="console-pane console-pane--fill flex flex-col gap-10">
-          <div class="flex items-center justify-between gap-8 shrink-0">
-            <Radio
-              v-model="logSource"
-              size="small"
-              :options="[
-                { label: 'common.apiLogs', value: 'api' },
-                { label: 'common.coreLogs', value: 'core' },
-              ]"
+        <div
+          v-show="activeTab !== 'overview'"
+          class="console-pane"
+          :class="activeTab === 'groups' ? 'console-pane--scroll' : 'console-pane--fill'"
+        >
+          <KeepAlive>
+            <component
+              :is="
+                {
+                  groups: GroupsController,
+                  connections: ConnectionsController,
+                  logs: LogsController,
+                }[activeTab]
+              "
+              v-if="activeTab !== 'overview'"
+              :key="activeTab"
             />
-          </div>
-          <div class="flex-1 min-h-0">
-            <LogsController v-if="logSource === 'api'" />
-            <KernelLogs v-else inline />
-          </div>
+          </KeepAlive>
         </div>
       </div>
     </template>
@@ -449,29 +295,6 @@ const tabs = computed(() => [
 
 .home-profile-options {
   max-width: 680px;
-}
-
-.console-bar {
-  background-color: var(--surface-bg, var(--card-bg));
-  border: 1px solid var(--surface-border, var(--border-color));
-  border-radius: var(--card-radius, 12px);
-  box-shadow: var(--card-shadow);
-  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
-  -webkit-backdrop-filter: blur(var(--surface-blur, 0px)) saturate(var(--surface-saturate, 100%));
-}
-
-.profile-switcher-btn {
-  max-width: 240px;
-}
-
-.profile-switcher-btn__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stop-btn:hover {
-  background-color: var(--danger-soft);
 }
 
 .console-tabs {
@@ -557,10 +380,30 @@ const tabs = computed(() => [
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-height: 360px;
+  min-height: 0;
 }
 
-@media (max-width: 700px) {
+.launchpad {
+  overflow-y: auto;
+  justify-content: safe center;
+}
+.core-required-banner {
+  color: var(--warning-color);
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
+}
+.quick-start-card {
+  border-style: dashed;
+}
+.start-profile-btn {
+  max-width: min(420px, 100%);
+}
+.start-profile-btn__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container (max-width: 640px) {
   .home-profile-options {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -573,8 +416,9 @@ const tabs = computed(() => [
 
   .console-tabs {
     width: 100%;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
   }
 
   .console-tab {

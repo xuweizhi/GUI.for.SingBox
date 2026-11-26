@@ -288,15 +288,15 @@ export const BuiltInOutbound = [Outbound.Direct, Outbound.Block]
 export const DefaultConnections = () => {
   return {
     visibility: {
-      'metadata.type': true,
+      'metadata.type': false,
       'metadata.processPath': false,
       'metadata.host': true,
       'metadata.sourceIP': false,
       'metadata.destinationIP': false,
       rule: true,
       chains: true,
-      up: true,
-      down: true,
+      up: false,
+      down: false,
       upload: true,
       download: true,
       start: true,

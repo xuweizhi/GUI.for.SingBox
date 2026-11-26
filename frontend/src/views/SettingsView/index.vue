@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useAppStore } from '@/stores'
 
@@ -12,12 +13,12 @@ import PluginSettings from './components/PluginSettings.vue'
 const settings = [
   {
     key: 'general',
-    tab: 'settings.general',
+    tab: 'workspace.general',
     component: GeneralSettings,
   },
   {
     key: 'kernel',
-    tab: 'router.kernel',
+    tab: 'workspace.core',
     component: CoreSettings,
   },
   {
@@ -25,10 +26,17 @@ const settings = [
     tab: 'router.plugins',
     component: PluginSettings,
   },
-  { key: 'backup', tab: 'backup.title', component: BackupSettings },
+  { key: 'backup', tab: 'workspace.backup', component: BackupSettings },
 ] as const
 
-const activeKey = ref(settings[0].key)
+const route = useRoute()
+const router = useRouter()
+const activeKey = computed({
+  get: () => settings.find((s) => s.key === route.query.tab)?.key ?? 'general',
+  set: (tab: string) => {
+    void router.replace({ query: { ...route.query, tab } })
+  },
+})
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -38,7 +46,7 @@ const appStore = useAppStore()
   <Tabs
     v-model:active-key="activeKey"
     :items="settings"
-    tab-width="160px"
+    tab-width="190px"
     content-width="auto"
     class="settings-tabs h-full"
   >
@@ -75,71 +83,23 @@ const appStore = useAppStore()
   :deep(.gui-tabs-content > .pr-20) {
     padding-right: 4px;
   }
-  :deep(.settings-row) {
-    display: grid;
-    grid-template-columns: minmax(160px, 0.8fr) minmax(0, 1.2fr);
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: var(--row-pad-y, 14px) 0;
-    > :first-child {
-      min-width: 0;
-      font-size: calc(14px * var(--font-scale, 1));
-      font-weight: 600;
-    }
-    > :last-child {
-      max-width: 100%;
-      justify-self: start;
-    }
-    > .gui-switch {
-      justify-self: end;
-    }
-    > .flex:last-child {
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .text-12 {
-      display: block;
-      color: var(--muted-color);
-      margin-top: 4px;
-    }
-    + .settings-row {
-      border-top: 1px solid var(--border-color);
-    }
-  }
 }
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .settings-tabs {
     flex-direction: column;
     gap: 16px;
     :deep(.gui-tabs-tab) {
       width: 100% !important;
       flex-direction: row;
-      flex-wrap: wrap;
+      overflow-x: auto;
+      flex-wrap: nowrap;
     }
     :deep(.gui-tabs-tab > .gui-button) {
-      flex: 1;
       justify-content: center;
       min-height: 44px;
     }
     :deep(.gui-tabs-content) {
       width: 100% !important;
-    }
-    :deep(.settings-row) {
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      gap: 10px;
-      > :last-child {
-        max-width: 100%;
-      }
-      > .flex:last-child {
-        justify-content: flex-start;
-      }
-      &:has(> .gui-switch) {
-        flex-direction: row;
-        align-items: center;
-      }
     }
   }
 }

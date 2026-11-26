@@ -59,7 +59,7 @@ const handleSelect = (val: string) => {
       :aria-checked="isActive(o.value)"
       :aria-pressed="isActive(o.value)"
       :class="{ active: isActive(o.value) }"
-      class="gui-checkbox-button cursor-pointer inline-flex items-center gap-6 px-10 py-6 transition duration-200"
+      class="gui-checkbox-button cursor-pointer inline-flex items-center gap-6 px-10 py-6 transition-all duration-200"
       @click="handleSelect(o.value)"
     >
       <span class="gui-checkbox-box" aria-hidden="true">

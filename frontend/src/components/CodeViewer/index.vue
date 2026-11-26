@@ -22,12 +22,14 @@ interface Props {
   modelValue?: string
   lang?: string
   copyable?: boolean
+  toolbar?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   modelValue: '',
   lang: '',
   copyable: true,
+  toolbar: true,
 })
 
 const langAliases: Record<string, string> = {
@@ -86,7 +88,10 @@ const onCopy = async () => {
 
 <template>
   <div class="code-block-viewer my-8 rounded-6">
-    <div class="code-block-toolbar flex items-center justify-between gap-8 min-h-32 px-8 py-4">
+    <div
+      v-if="toolbar"
+      class="code-block-toolbar flex items-center justify-between gap-8 min-h-32 px-8 py-4"
+    >
       <div class="inline-flex min-w-0 items-center gap-4 text-12">
         <Icon icon="code" :size="14" color="currentColor" />
         <span>{{ displayLang }}</span>
@@ -104,8 +109,8 @@ const onCopy = async () => {
 
 <style lang="less" scoped>
 .code-block-viewer {
-  border: 1px solid var(--divider-color);
-  background: var(--card-bg);
+  border: 1px solid var(--surface-border, var(--divider-color));
+  background: var(--surface-bg, var(--card-bg));
 }
 
 .code-block-toolbar {

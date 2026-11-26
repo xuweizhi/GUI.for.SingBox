@@ -46,8 +46,7 @@
     rgba(0, 0, 0, 0.08) 100%
   );
   --btn-danger-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    0 2px 6px -1px rgba(217, 48, 37, 0.34);
+    inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 2px 6px -1px rgba(217, 48, 37, 0.34);
   --btn-normal-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
   --btn-hover-lift: -1px;
 
@@ -64,7 +63,7 @@
   --row-pad-y: 14px;
   --btn-pad-x: 12px;
   --btn-pad-y: 6px;
-  --topbar-height: 54px;
+  --topbar-height: 48px;
 }
 
 // =============================================================================
@@ -79,7 +78,7 @@ body[ui-density='comfortable'] {
   --row-pad-y: 14px;
   --btn-pad-x: 12px;
   --btn-pad-y: 6px;
-  --topbar-height: 54px;
+  --topbar-height: 48px;
 }
 
 body[ui-density='compact'] {
@@ -126,18 +125,17 @@ body[ui-style='modern'][theme-mode='light'] {
   --control-radius: 8px;
   --modal-radius: 16px;
   --card-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.85),
-    0 1px 2px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 1px 2px rgba(15, 23, 42, 0.05),
     0 6px 16px -8px rgba(15, 23, 42, 0.1);
   --card-hover-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 12px 26px -10px rgba(15, 23, 42, 0.16);
+    inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 12px 26px -10px rgba(15, 23, 42, 0.16);
   --card-selected-shadow:
     0 0 0 1px color-mix(in srgb, var(--primary-color) 40%, transparent),
     0 8px 20px -10px color-mix(in srgb, var(--primary-color) 36%, transparent);
   --card-hover-lift: -2px;
   --btn-hover-lift: -1px;
-  --active-indicator-shadow: 0 2px 8px -2px color-mix(in srgb, var(--primary-color) 28%, transparent);
+  --active-indicator-shadow: 0 2px 8px -2px
+    color-mix(in srgb, var(--primary-color) 28%, transparent);
 }
 
 body[ui-style='modern'][theme-mode='dark'] {
@@ -169,18 +167,17 @@ body[ui-style='modern'][theme-mode='dark'] {
   --control-radius: 8px;
   --modal-radius: 16px;
   --card-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 2px 6px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 2px 6px rgba(0, 0, 0, 0.25),
     0 10px 22px -12px rgba(0, 0, 0, 0.48);
   --card-hover-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 14px 28px -10px rgba(0, 0, 0, 0.56);
+    inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 14px 28px -10px rgba(0, 0, 0, 0.56);
   --card-selected-shadow:
     0 0 0 1px color-mix(in srgb, var(--accent-text) 42%, transparent),
     0 8px 22px -8px color-mix(in srgb, var(--primary-color) 42%, transparent);
   --card-hover-lift: -2px;
   --btn-hover-lift: -1px;
-  --active-indicator-shadow: 0 2px 10px -2px color-mix(in srgb, var(--primary-color) 36%, transparent);
+  --active-indicator-shadow: 0 2px 10px -2px
+    color-mix(in srgb, var(--primary-color) 36%, transparent);
 }
 
 // =============================================================================
@@ -194,16 +191,8 @@ body[ui-style='glass'][theme-mode='light'] {
       color-mix(in srgb, var(--primary-color) 28%, transparent),
       transparent 66%
     ),
-    radial-gradient(
-      640px 520px at 92% 10%,
-      rgba(147, 51, 234, 0.2),
-      transparent 65%
-    ),
-    radial-gradient(
-      720px 520px at 54% 96%,
-      rgba(6, 182, 212, 0.22),
-      transparent 66%
-    ),
+    radial-gradient(640px 520px at 92% 10%, rgba(147, 51, 234, 0.2), transparent 65%),
+    radial-gradient(720px 520px at 54% 96%, rgba(6, 182, 212, 0.22), transparent 66%),
     linear-gradient(135deg, #eef4ff 0%, #f5f0ff 52%, #eaf8fb 100%);
   --app-bg-size: cover;
 
@@ -222,12 +211,9 @@ body[ui-style='glass'][theme-mode='light'] {
   --card-radius: 16px;
   --control-radius: 10px;
   --modal-radius: 18px;
-  --card-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.85),
-    0 8px 28px -12px rgba(30, 41, 59, 0.16);
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 8px 28px -12px rgba(30, 41, 59, 0.16);
   --card-hover-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    0 14px 34px -10px rgba(30, 41, 59, 0.22);
+    inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 14px 34px -10px rgba(30, 41, 59, 0.22);
   --card-selected-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
     0 0 0 1.5px color-mix(in srgb, var(--primary-color) 50%, transparent),
@@ -235,7 +221,8 @@ body[ui-style='glass'][theme-mode='light'] {
   --card-hover-lift: -2px;
   --btn-normal-bg: rgba(255, 255, 255, 0.72);
   --btn-normal-hover-bg: rgba(255, 255, 255, 0.92);
-  --btn-normal-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 2px 8px -2px rgba(15, 23, 42, 0.08);
+  --btn-normal-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 2px 8px -2px rgba(15, 23, 42, 0.08);
   --btn-hover-lift: -1px;
   --active-indicator-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.75),
@@ -250,16 +237,8 @@ body[ui-style='glass'][theme-mode='dark'] {
       color-mix(in srgb, var(--primary-color) 34%, transparent),
       transparent 66%
     ),
-    radial-gradient(
-      640px 520px at 94% 12%,
-      rgba(168, 85, 247, 0.24),
-      transparent 64%
-    ),
-    radial-gradient(
-      760px 520px at 48% 98%,
-      rgba(14, 165, 233, 0.22),
-      transparent 66%
-    ),
+    radial-gradient(640px 520px at 94% 12%, rgba(168, 85, 247, 0.24), transparent 64%),
+    radial-gradient(760px 520px at 48% 98%, rgba(14, 165, 233, 0.22), transparent 66%),
     linear-gradient(135deg, #0b1120 0%, #13122a 52%, #091726 100%);
   --app-bg-size: cover;
 
@@ -278,12 +257,9 @@ body[ui-style='glass'][theme-mode='dark'] {
   --card-radius: 16px;
   --control-radius: 10px;
   --modal-radius: 18px;
-  --card-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 10px 30px -12px rgba(0, 0, 0, 0.55);
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 10px 30px -12px rgba(0, 0, 0, 0.55);
   --card-hover-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 16px 36px -10px rgba(0, 0, 0, 0.65);
+    inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 16px 36px -10px rgba(0, 0, 0, 0.65);
   --card-selected-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
     0 0 0 1.5px color-mix(in srgb, var(--accent-text) 55%, transparent),
@@ -378,12 +354,11 @@ body[ui-style='minimal'][theme-mode='dark'] {
 // =============================================================================
 body[ui-style='cyber'][theme-mode='light'] {
   --bg-color: #eef2f7;
-  --app-bg-image:
-    radial-gradient(
-      circle at 1px 1px,
-      color-mix(in srgb, var(--primary-color) 18%, rgba(15, 23, 42, 0.14)) 1px,
-      transparent 0
-    );
+  --app-bg-image: radial-gradient(
+    circle at 1px 1px,
+    color-mix(in srgb, var(--primary-color) 18%, rgba(15, 23, 42, 0.14)) 1px,
+    transparent 0
+  );
   --app-bg-size: 22px 22px;
 
   --surface-bg: rgba(255, 255, 255, 0.92);
@@ -429,12 +404,11 @@ body[ui-style='cyber'][theme-mode='light'] {
 
 body[ui-style='cyber'][theme-mode='dark'] {
   --bg-color: #090d16;
-  --app-bg-image:
-    radial-gradient(
-      circle at 1px 1px,
-      color-mix(in srgb, var(--primary-color) 32%, rgba(148, 163, 184, 0.16)) 1px,
-      transparent 0
-    );
+  --app-bg-image: radial-gradient(
+    circle at 1px 1px,
+    color-mix(in srgb, var(--primary-color) 32%, rgba(148, 163, 184, 0.16)) 1px,
+    transparent 0
+  );
   --app-bg-size: 22px 22px;
 
   --surface-bg: rgba(15, 22, 36, 0.88);
@@ -476,7 +450,11 @@ body[ui-style='cyber'][theme-mode='dark'] {
     0 0 24px -2px color-mix(in srgb, var(--primary-color) 75%, transparent);
   --btn-normal-bg: rgba(19, 28, 45, 0.9);
   --btn-normal-hover-bg: rgba(26, 38, 61, 0.95);
-  --btn-normal-border-color: color-mix(in srgb, var(--primary-color) 36%, rgba(148, 163, 184, 0.25));
+  --btn-normal-border-color: color-mix(
+    in srgb,
+    var(--primary-color) 36%,
+    rgba(148, 163, 184, 0.25)
+  );
   --btn-normal-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
   --btn-hover-lift: -1px;
   --active-indicator-shadow:

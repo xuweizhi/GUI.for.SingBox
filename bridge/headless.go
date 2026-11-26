@@ -266,6 +266,16 @@ func (a *App) dispatchRPCCall(req rpcRequest) (any, error) {
 			return nil, err
 		}
 		return a.FileSHA256(value), nil
+	case "CoreStartTime":
+		if err := decodeRPCArgs(req.Args); err != nil {
+			return nil, err
+		}
+		coreStartMu.Lock()
+		defer coreStartMu.Unlock()
+		if a.sameCoreProcess() {
+			return a.coreStartTime, nil
+		}
+		return int64(0), nil
 	case "FindOwnedCore":
 		var branch string
 		var args []string
@@ -404,6 +414,13 @@ func (a *App) dispatchRPCCall(req rpcRequest) (any, error) {
 			return nil, err
 		}
 		return refreshSubscriptionUsage(id, proxy, userAgent)
+	case "UpdateSubscriptionSettings":
+		var id string
+		var changes map[string]subscriptionSettingChange
+		if err := decodeRPCArgs(req.Args, &id, &changes); err != nil {
+			return nil, err
+		}
+		return nil, updateSubscriptionSettings(id, changes)
 	case "ReloadScheduledTaskWorker":
 		if err := decodeRPCArgs(req.Args); err != nil {
 			return nil, err

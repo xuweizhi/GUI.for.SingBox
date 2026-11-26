@@ -252,6 +252,7 @@ describe('Modal', () => {
     let releaseCancel!: () => void
     const onCancel = vi.fn(() => new Promise<void>((resolve) => (releaseCancel = resolve)))
     const { api, modal } = await mountRealModal({
+      toolbar: { minimize: true, maximize: true },
       title: 'Persistent',
       destroyOnClose: false,
       onCancel,
@@ -259,7 +260,7 @@ describe('Modal', () => {
 
     const close = api.close()
     await nextTick()
-    await modal.findAll('button')[0]!.trigger('click')
+    await modal.get('[aria-label="common.minimize"]').trigger('click')
     await nextTick()
 
     expect(appStoreMock.modalMinimized).toHaveLength(0)
@@ -351,6 +352,7 @@ describe('Modal', () => {
     const afterClose = vi.fn()
     const afterDestroy = vi.fn()
     const { modal } = await mountRealModal({
+      toolbar: { minimize: true, maximize: true },
       title: 'Persistent',
       destroyOnClose: false,
       onCancel,
@@ -358,7 +360,7 @@ describe('Modal', () => {
       afterDestroy,
     })
 
-    await modal.findAll('button')[0]!.trigger('click')
+    await modal.get('[aria-label="common.minimize"]').trigger('click')
     await nextTick()
     expect(appStoreMock.modalMinimized).toHaveLength(1)
 
@@ -385,12 +387,13 @@ describe('Modal', () => {
           }),
       )
       const { modal } = await mountRealModal({
+        toolbar: { minimize: true, maximize: true },
         title: 'Persistent',
         destroyOnClose: false,
         onCancel,
       })
 
-      await modal.findAll('button')[0]!.trigger('click')
+      await modal.get('[aria-label="common.minimize"]').trigger('click')
       await nextTick()
       const item = appStoreMock.modalMinimized[0]!
       const destroy = item.closeFn()
@@ -427,13 +430,14 @@ describe('Modal', () => {
     const onCancel = vi.fn(() => new Promise<void>((resolve) => (releaseCancel = resolve)))
     const afterDestroy = vi.fn()
     const { modal } = await mountRealModal({
+      toolbar: { minimize: true, maximize: true },
       title: 'Persistent',
       destroyOnClose: false,
       onCancel,
       afterDestroy,
     })
 
-    await modal.findAll('button')[0]!.trigger('click')
+    await modal.get('[aria-label="common.minimize"]').trigger('click')
     await nextTick()
     const item = appStoreMock.modalMinimized[0]!
     const destroy = item.closeFn()
@@ -462,13 +466,14 @@ describe('Modal', () => {
       throw laterError
     })
     const { api, modal } = await mountRealModal({
+      toolbar: { minimize: true, maximize: true },
       title: 'Persistent',
       destroyOnClose: false,
       afterClose,
       afterDestroy,
     })
 
-    await modal.findAll('button')[0]!.trigger('click')
+    await modal.get('[aria-label="common.minimize"]').trigger('click')
     await nextTick()
     const destroy = api.destroy()
 
@@ -484,12 +489,13 @@ describe('Modal', () => {
       throw error
     })
     const { api, modal } = await mountRealModal({
+      toolbar: { minimize: true, maximize: true },
       title: 'Persistent',
       destroyOnClose: false,
       afterDestroy,
     })
 
-    await modal.findAll('button')[0]!.trigger('click')
+    await modal.get('[aria-label="common.minimize"]').trigger('click')
     await nextTick()
     expect(appStoreMock.modalMinimized).toHaveLength(1)
     expect(modal.get('.gui-modal-mask').attributes('style')).toContain('display: none')
@@ -505,13 +511,14 @@ describe('Modal', () => {
     const afterClose = vi.fn()
     const afterDestroy = vi.fn()
     const { api, modal } = await mountRealModal({
+      toolbar: { minimize: true, maximize: true },
       title: 'Persistent',
       destroyOnClose: false,
       afterClose,
       afterDestroy,
     })
 
-    await modal.findAll('button')[0]!.trigger('click')
+    await modal.get('[aria-label="common.minimize"]').trigger('click')
     await nextTick()
     expect(modal.get('.gui-modal-mask').attributes('style')).toContain('display: none')
     await expect(api.close()).resolves.toBeUndefined()

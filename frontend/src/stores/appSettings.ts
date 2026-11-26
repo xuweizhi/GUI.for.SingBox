@@ -143,6 +143,15 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
 
   let latestUserSettings: string | undefined
   let pendingSave = Promise.resolve()
+  type LoginAppearance = Partial<Pick<App.AppSettings, 'lang' | 'theme'>>
+  const loginChoiceKey = 'gfs.login.pendingAppearance'
+  let loginChoices: LoginAppearance = {}
+  try {
+    const saved = JSON.parse(window.sessionStorage.getItem(loginChoiceKey) || '{}')
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) loginChoices = saved
+  } catch {
+    // Preferences can still be carried through login in memory.
+  }
 
   const app = ref<App.AppSettings>({
     lang: Lang.EN,
@@ -156,6 +165,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     fontFamily: DefaultFontFamily,
     fontSize: DefaultFontSize,
     customFontPresets: [],
+    nodeGroupsView: View.Grid,
     profilesView: View.Grid,
     subscribesView: View.Grid,
     rulesetsView: View.Grid,
@@ -195,8 +205,13 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     githubApiToken: '',
     githubDownloadAcceleration: false,
     githubDownloadMirror: '',
+    navigationVersion: 2,
     pages: [
       'Overview',
+      'PolicyGroups',
+      'Connections',
+      'Logs',
+      'NodeGroups',
       'NetCheck',
       'Profiles',
       'Subscriptions',
@@ -236,7 +251,23 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     }
     const settings = mergeSettingsDefaults(deepClone(defaultSettings), parsedSettings)
 
+    if (
+      parsedSettings &&
+      typeof parsedSettings === 'object' &&
+      'pages' in parsedSettings &&
+      Array.isArray(parsedSettings.pages) &&
+      !('navigationVersion' in parsedSettings)
+    ) {
+      settings.pages = [
+        ...new Set([...settings.pages, 'PolicyGroups', 'Connections', 'Logs', 'NodeGroups']),
+      ]
+    }
     await appStore.loadLocales(false, false)
+    const loginLang = loginChoices.lang
+    if (loginLang && appStore.locales.some((option) => option.value === loginLang))
+      settings.lang = loginLang
+    if (loginChoices.theme === Theme.Dark || loginChoices.theme === Theme.Light)
+      settings.theme = loginChoices.theme
 
     settings.log = normalizeLogSettings(settings.log)
     settings.kernel = normalizeKernelSettings(settings.kernel)
@@ -286,6 +317,12 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     }
     latestUserSettings = normalizedSettings
     app.value = settings
+    loginChoices = {}
+    try {
+      window.sessionStorage.removeItem(loginChoiceKey)
+    } catch {
+      // Storage may be unavailable.
+    }
   }
 
   const applyAppSettings = {
@@ -365,8 +402,11 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
   })
   const setAppTheme = (theme: Extract<App.Theme, 'light' | 'dark'>) => {
     if (document.startViewTransition) {
-      document.startViewTransition(() => {
+      const transition = document.startViewTransition(() => {
         document.body.setAttribute('theme-mode', theme)
+      })
+      void transition.ready.catch((error) => {
+        if (error?.name !== 'AbortError') console.error('Theme transition failed:', error)
       })
     } else {
       document.body.setAttribute('theme-mode', theme)
@@ -379,5 +419,17 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
   applyAppSettings.fontSize(app.value.fontSize)
   applyAppSettings.customFontPresets(app.value.customFontPresets)
 
-  return { setupAppSettings, app, themeMode }
+  const previewLoginAppearance = (choice: LoginAppearance, remember = false) => {
+    if (choice.lang) applyAppSettings.lang(choice.lang)
+    if (choice.theme) applyAppSettings.theme(choice.theme)
+    if (!remember) return
+    Object.assign(loginChoices, choice)
+    try {
+      window.sessionStorage.setItem(loginChoiceKey, JSON.stringify(loginChoices))
+    } catch {
+      // The in-memory choices still apply to the next bootstrap.
+    }
+  }
+
+  return { setupAppSettings, app, themeMode, previewLoginAppearance }
 })

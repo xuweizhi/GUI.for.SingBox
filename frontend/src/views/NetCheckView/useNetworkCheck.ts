@@ -194,6 +194,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     running.value = true
 
     let coreAvailable = false
+    let testedLeaf: string | undefined
     const overviewItems: NetworkCheckResultItem[] = []
     const dnsItems: NetworkCheckResultItem[] = []
     const outboundItems: NetworkCheckResultItem[] = []
@@ -370,6 +371,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     } else {
       try {
         const outbound = await deps.getPrimaryOutboundState()
+        testedLeaf = outbound?.leafName
         if (!outbound) {
           outboundItems.push(
             createSkippedItem(
@@ -473,6 +475,7 @@ export const useNetworkCheck = (deps: NetworkCheckDeps) => {
     }
     syncGroups()
     running.value = false
+    return testedLeaf
   }
 
   return {

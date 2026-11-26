@@ -56,7 +56,7 @@ describe('useNetworkCheck', () => {
     const scope = effectScope()
     const vm = scope.run(() => useNetworkCheck(mocks))!
 
-    await vm.run('https://example.com')
+    expect(await vm.run('https://example.com')).toBe('HK 01')
 
     expect(vm.groups.value.map((group) => group.id)).toEqual(['overview', 'dns', 'outbound', 'rulesets'])
     expect(vm.groups.value[0]).toMatchObject({ status: 'success' })

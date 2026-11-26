@@ -9,7 +9,7 @@ import { useAppSettingsStore } from '@/stores/appSettings'
 import { useKernelApiStore } from '@/stores/kernelApi'
 import { useProfilesStore } from '@/stores/profiles'
 import { generateDnsTransports } from '@/utils/generator'
-import { confirm, message } from '@/utils/interaction'
+import { message } from '@/utils/interaction'
 import { resolvePrimaryProxyGroup, resolveProxyChain } from '@/views/HomeView/nodeController'
 
 const props = defineProps<{ profile: App.Profile }>()
@@ -33,8 +33,10 @@ const remoteTypes = ['udp', 'tcp', 'tls', 'https', 'quic', 'h3']
 const networkServers = computed(() =>
   props.profile.dns.servers.filter((s) => remoteTypes.includes(s.type)),
 )
+const pending = ref<App.DnsServerConfig>()
 let generation = 0
 const clear = () => {
+  pending.value = undefined
   generation++
   rows.value = {}
   busy.value = false
@@ -140,16 +142,10 @@ const format = (result?: Result) => {
   if (result.error) return te(result.error) ? t(result.error) : result.error
   return `${result.answers?.join(', ')} · ${result.durationMs} ms`
 }
-const apply = async (candidate: App.DnsServerConfig) => {
-  const revision = generation
-  try {
-    await confirm(t('diagnostics.applyDns'), t('diagnostics.confirmDns', [candidate.tag]))
-    if (revision !== generation) return
-    emit('select', candidate.id)
-    open.value = false
-  } catch {
-    /* cancelled */
-  }
+const apply = () => {
+  if (!pending.value) return
+  emit('select', pending.value.id)
+  open.value = false
 }
 </script>
 
@@ -157,12 +153,18 @@ const apply = async (candidate: App.DnsServerConfig) => {
   <Button size="small" class="mb-8" @click="open = true">{{ t('diagnostics.compareDns') }}</Button>
   <Modal
     v-model:open="open"
+    size="drawer"
     :submit="false"
     cancel-text="common.close"
     title="diagnostics.compareDns"
-    max-width="88"
-    max-height="82"
   >
+    <template #action
+      ><div v-if="pending" class="flex flex-wrap items-center gap-8">
+        {{ t('diagnostics.confirmDns', [pending.tag]) }}
+        <Button @click="pending = undefined">{{ t('common.cancel') }}</Button>
+        <Button type="primary" @click="apply">{{ t('common.confirm') }}</Button>
+      </div></template
+    >
     <div class="flex flex-col gap-8">
       <div class="flex flex-wrap items-center gap-8">
         <Input v-model="domain" :placeholder="t('diagnostics.domain')" />
@@ -193,7 +195,7 @@ const apply = async (candidate: App.DnsServerConfig) => {
             :disabled="
               !rows[server.id]?.direct?.answers?.length && !rows[server.id]?.proxy?.answers?.length
             "
-            @click="apply(server)"
+            @click="pending = server"
             >{{ t('diagnostics.applyDns') }}</Button
           >
         </div>

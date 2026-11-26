@@ -62,7 +62,7 @@ export const getCommands = () => {
       label: 'common.navigate',
       cmd: 'Go to',
       children: rawRoutes
-        .filter((r) => !r.meta?.public && r.meta?.name)
+        .filter((r) => !r.meta?.public && !r.meta?.hidden && r.meta?.name)
         .map((r) => ({
           label: r.meta!.name!,
           cmd: String(r.name || r.path),

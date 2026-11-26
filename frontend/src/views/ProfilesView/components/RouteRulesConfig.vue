@@ -41,6 +41,7 @@ const fields = ref<App.Rule>(DefaultRouteRule())
 
 const { t } = useI18n()
 const nodeGroupsStore = useNodeGroupsStore()
+const targetType = ref('outbound')
 const outletNodeGroup = ref('')
 const outletBehavior = ref<NodeGroupOutletBehavior>('manual')
 const nodeGroupOptions = computed(() =>
@@ -51,12 +52,17 @@ const [showEditModal] = useBool(false)
 const handleAdd = () => {
   ruleId = -1
   fields.value = DefaultRouteRule()
+  targetType.value = 'outbound'
   outletNodeGroup.value = ''
   outletBehavior.value = 'manual'
   showEditModal.value = true
 }
 
-defineExpose({ handleAdd })
+const editById = (id: string) => {
+  const index = model.value.findIndex((rule) => rule.id === id)
+  if (index >= 0) handleEdit(index)
+}
+defineExpose({ handleAdd, editById })
 
 const handleAddInsertionPoint = () => {
   model.value.unshift({
@@ -74,7 +80,7 @@ const handleAddInsertionPoint = () => {
 }
 
 const handleAddEnd = () => {
-  if (fields.value.action === RuleAction.Route && !fields.value.outbound && outletNodeGroup.value) {
+  if (fields.value.action === RuleAction.Route && targetType.value === 'group') {
     if (!applyNodeGroupOutlet()) return false
   }
   if (ruleId !== -1) {
@@ -93,6 +99,7 @@ const handleEdit = (index: number) => {
   ruleId = index
   fields.value = deepClone(model.value[index]!)
   const generated = props.outbounds.find((outbound) => outbound.id === fields.value.outbound)
+  targetType.value = generated?.source_node_group ? 'group' : 'outbound'
   outletNodeGroup.value = generated?.source_node_group || ''
   outletBehavior.value = generated?.type === 'urltest' ? 'auto' : 'manual'
   showEditModal.value = true
@@ -125,13 +132,15 @@ const updateRuleType = () => {
 }
 const updateRuleAction = () => {
   const { action } = fields.value
+  targetType.value = 'outbound'
   outletNodeGroup.value = ''
   fields.value.sniffer = []
   fields.value.server = ''
   fields.value.strategy = Strategy.Default
   if (action === RuleAction.Reject) fields.value.outbound = RuleActionReject.Default
   else if (action === RuleAction.RouteOptions) fields.value.outbound = '{}'
-  else fields.value.outbound = action === RuleAction.Route ? props.outboundOptions[0]?.value || '' : ''
+  else
+    fields.value.outbound = action === RuleAction.Route ? props.outboundOptions[0]?.value || '' : ''
 }
 
 const handleUse = (ruleset: any) => {
@@ -213,6 +222,10 @@ const formatRuleParts = (rule: App.Rule) => {
 }
 
 const isRulesetSelected = (id: string) => fields.value.payload.split(',').includes(id)
+const resetTarget = () => {
+  fields.value.outbound = ''
+  outletNodeGroup.value = ''
+}
 </script>
 
 <template>
@@ -237,7 +250,7 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
   </Divider>
 
   <div v-draggable="[model, DraggableOptions]">
-    <Card v-for="(rule, index) in model" :key="rule.id" class="mb-6">
+    <Card v-for="(rule, index) in model" :key="rule.id" flush class="mb-6">
       <div v-if="rule.type === RuleType.InsertionPoint" class="text-center font-bold">
         <Divider class="cursor-move">
           <Button icon="add" type="text" size="small" @click="handleAdd">
@@ -307,18 +320,17 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
 
   <Modal
     v-model:open="showEditModal"
+    size="drawer"
     :on-ok="handleAddEnd"
     title="kernel.route.tab.rules"
-    max-width="80"
-    max-height="80"
   >
     <div class="form-item">
       {{ t('kernel.route.rules.type') }}
-      <Select v-model="fields.type" @change="updateRuleType" :options="RulesTypeOptions" />
+      <Select v-model="fields.type" :options="RulesTypeOptions" @change="updateRuleType" />
     </div>
     <div class="form-item">
       {{ t('kernel.route.rules.action.name') }}
-      <Radio v-model="fields.action" @change="updateRuleAction" :options="RuleActionOptions" class="ml-8" />
+      <Radio v-model="fields.action" :options="RuleActionOptions" @change="updateRuleAction" />
     </div>
     <div v-if="isSupportPayload" class="form-item">
       {{ t('kernel.route.rules.payload') }}
@@ -362,12 +374,29 @@ const isRulesetSelected = (id: string) => fields.value.payload.split(',').includ
     <Card class="mt-4 mb-16">
       <template v-if="fields.action === RuleAction.Route">
         <div class="form-item">
-          {{ t('kernel.route.rules.outbound') }}
-          <Select v-model="fields.outbound" :options="outboundOptions" clearable @change="outletNodeGroup = ''" />
+          {{ t('kernel.route.rules.targetType') }}
+          <Radio
+            v-if="nodeGroupOptions.length || targetType === 'group'"
+            v-model="targetType"
+            :options="[
+              { label: 'kernel.route.rules.outbound', value: 'outbound' },
+              { label: 'router.nodeGroups', value: 'group' },
+            ]"
+            @change="resetTarget"
+          />
         </div>
-        <div v-if="nodeGroupOptions.length" class="form-item">
+        <div v-if="targetType === 'outbound'" class="form-item">
+          {{ t('kernel.route.rules.outbound') }}
+          <Select
+            v-model="fields.outbound"
+            :options="outboundOptions"
+            clearable
+            @change="outletNodeGroup = ''"
+          />
+        </div>
+        <div v-else class="form-item">
           {{ t('router.nodeGroups') }}
-          <div class="flex items-center gap-8">
+          <div class="flex flex-wrap items-center gap-8">
             <Select
               v-model="outletNodeGroup"
               :options="nodeGroupOptions"

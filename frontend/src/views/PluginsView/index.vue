@@ -3,11 +3,13 @@ import { computed, ref } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useI18n, I18nT } from 'vue-i18n'
 
-import { DraggableOptions, ViewOptions } from '@/constant/app'
+import { DraggableOptions } from '@/constant/app'
 import { PluginTriggerEvent, PluginTrigger, View } from '@/enums/app'
 import { usePluginsStore, useAppSettingsStore } from '@/stores'
 import { confirm, debounce, message, deepClone, modal } from '@/utils'
 
+import ResourceActions from '@/components/_common/ResourceActions.vue'
+import ResourcePageShell from '@/components/_common/ResourcePageShell.vue'
 import Button from '@/components/Button/index.vue'
 
 import PluginChangelog from './components/PluginChangelog.vue'
@@ -28,7 +30,7 @@ const handleReloadPlugin = async (id: string) => {
 }
 
 const handleConfigurePlugin = (plugin: App.Plugin) => {
-  const m = modal({ title: 'plugins.configuration' })
+  const m = modal({ title: 'plugins.configuration', size: 'md' })
   m.setContent(PluginConfigurator, { plugin }).open()
 }
 
@@ -45,18 +47,30 @@ const pluginsStore = usePluginsStore()
 const appSettingsStore = useAppSettingsStore()
 const keywords = ref('')
 
-const filteredPlugins = computed(() => {
+const matches = computed(() => {
   const q = keywords.value.trim().toLowerCase()
   if (!q) return pluginsStore.plugins
   return pluginsStore.plugins.filter(
-    (p) =>
-      p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q),
+    (p) => p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q),
   )
+})
+const filter = ref('')
+const sort = ref('manual')
+const filters = [
+  { label: 'common.enabled', value: 'enabled' },
+  { label: 'common.disabled', value: 'disabled' },
+]
+const filteredPlugins = computed(() => {
+  const records = matches.value.filter(
+    (item) => !filter.value || (filter.value === 'disabled' ? item.disabled : !item.disabled),
+  )
+  return sort.value === 'name' ? records.sort((a, b) => a.name.localeCompare(b.name)) : records
 })
 
 const handleImportPlugin = () => {
   const m = modal({
     title: 'plugins.hub',
+    toolbar: { minimize: true, maximize: true },
     height: '90',
     width: '90',
     submit: false,
@@ -67,7 +81,7 @@ const handleImportPlugin = () => {
 }
 
 const openPluginFormModal = (id?: string) => {
-  const m = modal({ title: id ? 'common.edit' : 'common.add', minWidth: '80' })
+  const m = modal({ title: id ? 'common.edit' : 'common.add', size: 'lg' })
   m.setContent(PluginForm, { id }).open()
 }
 
@@ -209,7 +223,21 @@ const generateMenus = (p: App.Plugin) => {
     handler: () => handlePluginMenuTrigger(p, fn),
   }))
 
-  return builtInMenus.concat(...pluginMenus)
+  return [
+    { label: 'common.update', disabled: p.updating, handler: () => handleUpdatePlugin(p) },
+    ...builtInMenus,
+    ...pluginMenus,
+    { label: 'plugins.source', handler: () => handleEditPluginCode(p.id, p.name) },
+    ...(p.triggers.includes(PluginTrigger.OnManual) && !p.disabled
+      ? [{ label: 'common.run', handler: () => handleOnRun(p) }]
+      : []),
+    {
+      label: p.disabled ? 'common.enable' : 'common.disable',
+      handler: () => handleDisablePlugin(p),
+    },
+    { label: 'common.develop', handler: () => handleEditPlugin(p.id) },
+    { label: 'common.delete', handler: () => handleDeletePlugin(p) },
+  ]
 }
 
 const noUpdateNeeded = computed(() => pluginsStore.plugins.every((v) => v.disabled))
@@ -233,50 +261,42 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
     </Empty>
   </div>
 
-  <div v-else class="grid-list-header">
-    <Radio v-model="appSettingsStore.app.pluginsView" :options="ViewOptions" />
-    <span class="resource-count-badge">
-      {{
-        keywords.trim()
-          ? `${filteredPlugins.length} / ${pluginsStore.plugins.length}`
-          : pluginsStore.plugins.length
-      }}
-    </span>
-    <Input
-      v-model="keywords"
-      size="small"
-      clearable
-      auto-size
-      :placeholder="t('common.search')"
-      class="resource-search mr-auto"
-    />
+  <ResourcePageShell
+    v-else
+    v-model:query="keywords"
+    v-model:view="appSettingsStore.app.pluginsView"
+    v-model:sort="sort"
+    v-model:filter="filter"
+    :filters="filters"
+    :total="pluginsStore.plugins.length"
+    :count="filteredPlugins.length"
+  >
     <Button type="link" @click="handleImportPlugin">
       {{ t('plugins.hub') }}
     </Button>
-    <Button
-      :loading="pluginsStore.pluginHubLoading"
-      type="link"
-      @click="handleUpdatePluginHub"
-    >
+    <Button :loading="pluginsStore.pluginHubLoading" type="link" @click="handleUpdatePluginHub">
       {{ t('plugins.checkForUpdates') }}
     </Button>
-    <Button :disabled="noUpdateNeeded" :type="noUpdateNeeded ? 'text' : 'link'" :loading="updatingAll" @click="handleUpdatePlugins">
+    <Button
+      :disabled="noUpdateNeeded"
+      :type="noUpdateNeeded ? 'text' : 'link'"
+      :loading="updatingAll"
+      @click="handleUpdatePlugins"
+    >
       {{ t('common.updateAll') }}
     </Button>
-    <Button type="primary" icon="add" class="ml-16" @click="handleAddPlugin">
+    <Button type="primary" icon="add" @click="handleAddPlugin">
       {{ t('common.add') }}
     </Button>
-  </div>
-
-  <Empty v-if="pluginsStore.plugins.length > 0 && filteredPlugins.length === 0" />
+  </ResourcePageShell>
 
   <VueDraggable
-    v-else-if="pluginsStore.plugins.length > 0"
+    v-if="filteredPlugins.length"
     v-model="pluginsStore.plugins"
     v-bind="DraggableOptions"
-    @update="onSortUpdate"
-    :disabled="Boolean(keywords.trim())"
+    :disabled="Boolean(keywords.trim() || filter || sort !== 'manual')"
     :class="'grid-list-' + appSettingsStore.app.pluginsView"
+    @update="onSortUpdate"
   >
     <Card
       v-for="p in filteredPlugins"
@@ -311,145 +331,7 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
         </Tag>
       </template>
 
-      <template #extra>
-        <Dropdown v-if="appSettingsStore.app.pluginsView === View.Grid">
-          <Button
-            type="text"
-            size="small"
-            icon="more"
-            :aria-label="t('common.more') + ' · ' + p.name"
-          />
-          <template #overlay="{ close }">
-            <div class="flex flex-col gap-2 min-w-128 p-6">
-              <Button
-                v-if="p.configuration.length"
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleConfigurePlugin(p)
-                  }
-                "
-              >
-                {{ t('plugins.configuration') }}
-              </Button>
-              <Button
-                :loading="p.updating"
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleUpdatePlugin(p)
-                  }
-                "
-              >
-                {{ t('common.update') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleReloadPlugin(p.id)
-                  }
-                "
-              >
-                {{ t('plugins.reload') }}
-              </Button>
-              <template v-if="Object.keys(p.menus).length">
-                <Divider size="small" />
-                <Button
-                  v-for="(fn, title) in p.menus"
-                  :key="title"
-                  type="text"
-                  size="small"
-                  class="justify-start"
-                  @click="
-                    () => {
-                      close()
-                      handlePluginMenuTrigger(p, fn)
-                    }
-                  "
-                >
-                  {{ t(title) }}
-                </Button>
-              </template>
-              <Divider size="small" />
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleDisablePlugin(p)
-                  }
-                "
-              >
-                {{ p.disabled ? t('common.enable') : t('common.disable') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start"
-                @click="
-                  () => {
-                    close()
-                    handleEditPlugin(p.id)
-                  }
-                "
-              >
-                {{ t('common.develop') }}
-              </Button>
-              <Button
-                type="text"
-                size="small"
-                class="justify-start text-danger"
-                @click="
-                  () => {
-                    close()
-                    handleDeletePlugin(p)
-                  }
-                "
-              >
-                {{ t('common.delete') }}
-              </Button>
-            </div>
-          </template>
-        </Dropdown>
-
-        <template v-else>
-          <Button
-            v-if="p.configuration.length"
-            type="text"
-            size="small"
-            @click="handleConfigurePlugin(p)"
-          >
-            {{ t('plugins.configuration') }}
-          </Button>
-          <Button :loading="p.updating" type="text" size="small" @click="handleUpdatePlugin(p)">
-            {{ t('common.update') }}
-          </Button>
-          <Button type="text" size="small" @click="handleReloadPlugin(p.id)">
-            {{ t('plugins.reload') }}
-          </Button>
-          <Button type="text" size="small" @click="handleDisablePlugin(p)">
-            {{ p.disabled ? t('common.enable') : t('common.disable') }}
-          </Button>
-          <Button type="text" size="small" @click="handleEditPlugin(p.id)">
-            {{ t('common.develop') }}
-          </Button>
-          <Button type="text" size="small" class="text-danger" @click="handleDeletePlugin(p)">
-            {{ t('common.delete') }}
-          </Button>
-        </template>
-      </template>
+      <template #extra><ResourceActions :items="generateMenus(p)" :name="p.name" /></template>
 
       <div class="resource-meta-list">
         <div class="flex flex-wrap items-center gap-4">
@@ -462,7 +344,7 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
             </Tag>
             <Tag
               v-if="p.triggers.length > 2"
-              v-tips="p.triggers.map((v) => t('plugin.' + v)).join('、')"
+              v-tips="p.triggers.map((v) => t('plugin.' + v)).join(', ')"
               size="small"
               color="cyan"
             >
@@ -486,12 +368,7 @@ const onSortUpdate = debounce(pluginsStore.savePlugins, 1000)
       </div>
 
       <div class="flex items-center gap-6 mt-10">
-        <Button
-          type="link"
-          size="small"
-          class="pl-0"
-          @click="handleEditPluginCode(p.id, p.name)"
-        >
+        <Button type="link" size="small" class="pl-0" @click="handleEditPluginCode(p.id, p.name)">
           {{ t('plugins.source') }}
         </Button>
         <Button

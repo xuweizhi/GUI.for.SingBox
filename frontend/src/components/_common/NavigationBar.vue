@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 
 import logo from '@/assets/logo'
 import rawRoutes from '@/router/routes'
 import { useAppSettingsStore, useKernelApiStore, useProfilesStore } from '@/stores'
+
+import CoreControls from './CoreControls.vue'
 
 const props = withDefaults(defineProps<{ topnav?: boolean }>(), {
   topnav: false,
@@ -16,7 +18,7 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
 
 const { t } = useI18n()
 const route = useRoute()
-const router = useRouter()
+
 const appSettings = useAppSettingsStore()
 const kernelApiStore = useKernelApiStore()
 const profilesStore = useProfilesStore()
@@ -50,23 +52,11 @@ const closeMobile = () => {
 const toggleCollapsed = () => {
   collapsed.value = !collapsed.value
 }
-
-const goOverview = () => {
-  closeMobile()
-  if (route.path !== '/') {
-    void router.push('/')
-  }
-}
 </script>
 
 <template>
   <Transition name="drawer-backdrop">
-    <div
-      v-if="mobileOpen"
-      class="sidebar-backdrop"
-      aria-hidden="true"
-      @click="closeMobile"
-    />
+    <div v-if="mobileOpen" class="sidebar-backdrop" aria-hidden="true" @click="closeMobile" />
   </Transition>
 
   <aside
@@ -121,10 +111,20 @@ const goOverview = () => {
         <RouterLink
           v-for="r in section.items"
           :key="r.path"
+          v-tips.fast="collapsed && r.meta?.name ? r.meta.name : ''"
           :to="r.path"
           class="sidebar-link"
-          active-class="is-active"
-          :title="collapsed ? (r.meta?.name ? t(r.meta.name) : String(r.name)) : undefined"
+          active-class=""
+          :class="{
+            'is-active':
+              route.path === '/'
+                ? r.path ===
+                  (['groups', 'connections', 'logs'].includes(String(route.query.tab))
+                    ? '/' + route.query.tab
+                    : '/')
+                : route.path === r.path ||
+                  (r.path === '/profiles' && route.path.startsWith('/profiles/')),
+          }"
           @click="closeMobile"
         >
           <Icon
@@ -141,7 +141,7 @@ const goOverview = () => {
       </div>
     </nav>
 
-    <div class="sidebar-footer">
+    <Dropdown class="sidebar-footer" placement="top" align="start">
       <button
         type="button"
         class="sidebar-core-card"
@@ -150,7 +150,6 @@ const goOverview = () => {
           (kernelApiStore.running ? t('common.coreRunning') : t('common.coreStopped')) +
           (activeProfileName ? ' · ' + activeProfileName : '')
         "
-        @click="goOverview"
       >
         <span class="sidebar-core-card__dot" aria-hidden="true"></span>
         <span class="sidebar-core-card__info">
@@ -162,7 +161,10 @@ const goOverview = () => {
           </span>
         </span>
       </button>
-    </div>
+      <template #overlay="{ show, close }"
+        ><CoreControls v-if="show" @close="close"
+      /></template>
+    </Dropdown>
   </aside>
 </template>
 
@@ -192,13 +194,19 @@ const goOverview = () => {
     width: 64px;
 
     .sidebar-header {
+      flex-direction: column;
       justify-content: center;
-      padding: 0 8px;
-      gap: 0;
+      padding: 2px 8px;
+      gap: 2px;
     }
 
     .sidebar-brand {
       justify-content: center;
+
+      img {
+        width: 18px;
+        height: 18px;
+      }
     }
 
     .sidebar-brand__name,
@@ -210,6 +218,8 @@ const goOverview = () => {
 
     .sidebar-collapse-btn {
       position: static;
+      width: 20px;
+      height: 20px;
     }
 
     .sidebar-group.has-divider::before {
@@ -291,7 +301,7 @@ const goOverview = () => {
 }
 
 .app-sidebar.is-collapsed .sidebar-brand {
-  display: none;
+  display: inline-flex;
 }
 
 .sidebar-close-btn {
@@ -436,7 +446,7 @@ const goOverview = () => {
   margin-top: 2px;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1024px) {
   .sidebar-backdrop {
     display: block;
     position: fixed;

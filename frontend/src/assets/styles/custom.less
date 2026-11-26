@@ -5,8 +5,7 @@ body {
   background-image: var(--app-bg-image);
   background-size: var(--app-bg-size);
   background-attachment: fixed;
-  user-select: none;
-  -webkit-user-select: none;
+
   font-size: calc(14px * var(--font-scale, 1));
   font-family:
     system-ui,
@@ -33,7 +32,7 @@ body {
   overflow-y: auto;
   font-size: calc(14px * var(--font-scale, 1));
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   align-content: start;
   gap: var(--grid-gap, 16px);
   padding: 2px 2px 16px;
@@ -170,15 +169,15 @@ pre {
   font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--muted-color);
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
+  background: var(--surface-bg, var(--card-bg));
+  border: 1px solid var(--surface-border, var(--border-color));
 }
 
 .resource-search {
   width: 220px;
 }
 
-@media (max-width: 700px) {
+@container (max-width: 640px) {
   .resource-search {
     width: 100%;
     order: 10;
@@ -186,13 +185,7 @@ pre {
   }
 }
 
-@media (max-width: 1100px) {
-  .grid-list-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 700px) {
+@container (max-width: 640px) {
   .grid-list-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
@@ -270,4 +263,167 @@ pre {
 .slide-down-enter-from,
 .slide-down-leave-to {
   transform: translateY(-100%);
+}
+
+button,
+.gui-button,
+.gui-tabs,
+.sidebar-link,
+.topbar-nav__link,
+.drag,
+.cursor-move {
+  user-select: none;
+}
+.app-page,
+.gui-modal-content {
+  container-type: inline-size;
+}
+.surface-card,
+.surface-panel,
+.surface-inset {
+  background: var(--surface-bg);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--card-radius);
+}
+.surface-inset {
+  background: var(--surface-active-bg);
+}
+body {
+  --text-secondary: color-mix(in srgb, var(--color) 72%, var(--muted-color));
+  --color-success: var(--success-color);
+  --color-warning: var(--warning-color);
+  --color-danger: var(--danger-color);
+}
+.text-secondary {
+  color: var(--text-secondary);
+}
+.opacity-70 {
+  opacity: 0.7;
+}
+.opacity-75 {
+  opacity: 0.75;
+}
+.max-w-full {
+  max-width: 100%;
+}
+.form-grid,
+.resource-form .form-item {
+  display: grid;
+  grid-template-columns: minmax(140px, 210px) minmax(0, 1fr);
+  gap: 12px 16px;
+  align-items: center;
+}
+.resource-form .form-item > :last-child {
+  min-width: 0;
+}
+.resource-form
+  .form-item:has(
+    .code-editor,
+    textarea,
+    .key-value-editor,
+    .input-list,
+    .gui-kv-editor,
+    .gui-input-list
+  ) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.resource-form [data-invalid='true'] {
+  outline: 1px solid var(--danger-color);
+  border-radius: var(--control-radius);
+}
+.field-error {
+  display: block;
+  color: var(--danger-color);
+  margin-top: 4px;
+}
+@container (max-width: 640px) {
+  .form-grid,
+  .resource-form .form-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Shared settings rows: usable both on the settings page and inside
+   teleported modals such as PluginConfigurator. */
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: var(--row-pad-y, 14px) 0;
+
+  > :first-child {
+    min-width: 0;
+    font-size: calc(14px * var(--font-scale, 1));
+    font-weight: 600;
+  }
+  > p:first-child {
+    font-weight: normal;
+  }
+  > :last-child {
+    max-width: 100%;
+    justify-self: start;
+  }
+  > .gui-switch {
+    justify-self: end;
+  }
+  > .flex:last-child {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .text-12 {
+    display: block;
+    color: var(--muted-color);
+    margin-top: 4px;
+  }
+  + .settings-row {
+    border-top: 1px solid var(--border-color);
+  }
+}
+
+@container (max-width: 640px) {
+  .settings-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+
+    > :last-child {
+      max-width: 100%;
+    }
+    > .flex:last-child {
+      justify-content: flex-start;
+    }
+    &:has(> .gui-switch) {
+      flex-direction: row;
+      align-items: center;
+    }
+  }
+}
+
+/* Avoid doubling the vertical padding when a titleless card is used only as
+   a container for `.settings-row` entries or compact single-line lists. */
+.gui-card__body:not(.has-title):has(> .settings-row) {
+  padding-block: 0;
+}
+.gui-card__body:not(.has-title) > .settings-row:first-child {
+  padding-top: 0;
+}
+.gui-card__body:not(.has-title) > .settings-row:last-child {
+  padding-bottom: 0;
+}
+
+body[ui-style='glass']
+  :is(
+    .gui-card,
+    .gui-table,
+    .group-header,
+    .gui-menu,
+    .node-card,
+    .console-tabs,
+    .gui-dropdown-overlay
+  ) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }

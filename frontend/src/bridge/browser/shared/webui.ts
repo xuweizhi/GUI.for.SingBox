@@ -166,7 +166,7 @@ export const invokeBridge = async <T = unknown>(method: string, args: unknown[] 
 
   if (!response.ok) {
     const message = await response.text()
-    throw message || `Bridge call failed: ${method}`
+    throw message.trim() || `Bridge call failed: ${method} (HTTP ${response.status})`
   }
 
   const text = await response.text()

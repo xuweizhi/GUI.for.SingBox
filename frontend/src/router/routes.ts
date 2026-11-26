@@ -28,9 +28,29 @@ const routes: RouteRecordRaw[] = [
     component: HomeView,
     meta: {
       name: 'router.overview',
+      layout: 'fill',
+      hidden: false,
       icon: 'overview',
       group: 'control',
     },
+  },
+  {
+    path: '/groups',
+    name: 'PolicyGroups',
+    redirect: { path: '/', query: { tab: 'groups' } },
+    meta: { name: 'home.overview.tabGroups', icon: 'link', group: 'control' },
+  },
+  {
+    path: '/connections',
+    name: 'Connections',
+    redirect: { path: '/', query: { tab: 'connections' } },
+    meta: { name: 'home.overview.tabConnections', icon: 'connections', group: 'control' },
+  },
+  {
+    path: '/logs',
+    name: 'Logs',
+    redirect: { path: '/', query: { tab: 'logs' } },
+    meta: { name: 'home.overview.tabLogs', icon: 'log', group: 'control' },
   },
   {
     path: '/netcheck',
@@ -53,6 +73,19 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
+    path: '/profiles/new',
+    name: 'NewProfile',
+    component: () => import('@/views/ProfilesView/components/ProfileForm.vue'),
+    meta: { name: 'router.profiles', hidden: true, layout: 'fill', fluid: true },
+  },
+  {
+    path: '/profiles/:id/edit',
+    name: 'EditProfile',
+    component: () => import('@/views/ProfilesView/components/ProfileForm.vue'),
+    props: (route) => ({ id: String(route.params.id), step: Number(route.query.step) || 1 }),
+    meta: { name: 'router.profiles', hidden: true, layout: 'fill', fluid: true },
+  },
+  {
     path: '/subscriptions',
     name: 'Subscriptions',
     component: SubscribesView,
@@ -70,7 +103,6 @@ const routes: RouteRecordRaw[] = [
       name: 'router.nodeGroups',
       icon: 'folder',
       group: 'config',
-      hidden: false,
     },
   },
   {

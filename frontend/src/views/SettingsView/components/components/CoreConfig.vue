@@ -51,7 +51,7 @@ const modalSlots = {
           message.success('common.success')
         },
       },
-      () => t('plugin.restore'),
+      () => t('common.reset'),
     ),
   cancel: () =>
     h(
@@ -111,7 +111,11 @@ defineExpose({ modalSlots })
       <template #args>
         <Empty v-if="model.args.length === 0" />
         <Card v-else :title="t('common.preview')">
-          <VueDraggable v-model="model.args" v-bind="DraggableOptions" class="flex flex-wrap items-center">
+          <VueDraggable
+            v-model="model.args"
+            v-bind="DraggableOptions"
+            class="flex flex-wrap items-center"
+          >
             <div v-for="(item, index) in model.args" :key="index">
               <Tag size="small">
                 <div class="py-2 break-all whitespace-pre-wrap">

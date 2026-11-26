@@ -2,12 +2,16 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { HttpGet } from '@/bridge'
 import { DefaultPluginHubSources } from '@/constant/app'
 import { useBool } from '@/hooks'
 import { useAppSettingsStore, usePluginsStore } from '@/stores'
-import { APP_TITLE, createTextMatcher, deepClone, message } from '@/utils'
+import { previewCode, createTextMatcher, deepClone, message } from '@/utils'
+
+import ResourceHubModal from '@/components/_common/ResourceHubModal.vue'
 
 const keywords = ref('')
+const category = ref('')
 
 const { t } = useI18n()
 const [settingsModalOpen, toggleSettingsModal] = useBool(false)
@@ -45,9 +49,12 @@ const groups = computed(() => {
 
 const filteredPlugins = computed(() => {
   const keyword = keywords.value.trim()
-  if (!keyword) return groups.value
+  const visible = category.value
+    ? groups.value.filter((g) => g.name === category.value)
+    : groups.value
+  if (!keyword) return visible
   const match = createTextMatcher(keyword.toLocaleLowerCase(), '')
-  return groups.value
+  return visible
     .map((group) => ({
       name: group.name,
       plugins: group.plugins.filter((plugin) =>
@@ -58,9 +65,11 @@ const filteredPlugins = computed(() => {
 })
 
 const handleAddPlugin = async (plugin: App.Plugin) => {
+  if (loadingSet.value.has(plugin.id) || isAlreadyAdded(plugin.id)) return
   loadingSet.value.add(plugin.id)
   try {
     await pluginsStore.addPlugin(deepClone(plugin))
+    message.success('common.added')
   } catch (err: any) {
     message.error(err.message || err)
   } finally {
@@ -68,6 +77,20 @@ const handleAddPlugin = async (plugin: App.Plugin) => {
   }
 }
 
+const previewingId = ref('')
+const previewPlugin = async (plugin: App.Plugin) => {
+  if (previewingId.value) return
+  previewingId.value = plugin.id
+  try {
+    const { status, body } = await HttpGet<string>(plugin.url)
+    if (status < 200 || status >= 300) throw new Error('HTTP ' + status)
+    previewCode(plugin.name, body, 'javascript')
+  } catch (error) {
+    message.error(error)
+  } finally {
+    previewingId.value = ''
+  }
+}
 const handleUpdatePluginHub = async () => {
   try {
     await pluginsStore.updatePluginHub()
@@ -92,59 +115,26 @@ const restoreDefaultSources = () => {
 const isAlreadyAdded = (id: string) => pluginsStore.getPluginById(id)
 
 if (pluginsStore.pluginHub.length === 0) {
-  pluginsStore.updatePluginHub()
+  void handleUpdatePluginHub()
 }
 </script>
 
 <template>
-  <div class="pr-8">
-    <div class="text-22 text-center pb-12">{{ t('plugins.slogan', [APP_TITLE]) }}</div>
-    <div class="plugin-hub__search flex items-center gap-8 sticky top-0 z-2 py-8 mb-8">
-      <Input
-        v-model="keywords"
-        :placeholder="t('plugins.total') + ': ' + pluginsStore.pluginHub.length"
-        clearable
-        class="flex-1"
-      >
-        <template #prefix>
-          <Icon icon="search" :size="16" color="var(--muted-color)" />
-        </template>
-        <template #suffix>
-          <Button
-            v-tips="'plugins.update'"
-            icon="refresh"
-            :loading="pluginsStore.pluginHubLoading"
-            type="text"
-            size="small"
-            @click="handleUpdatePluginHub"
-          />
-          <Button
-            v-tips="'plugins.sourceConfig.name'"
-            icon="settings3"
-            type="text"
-            size="small"
-            @click="toggleSettingsModal"
-          />
-        </template>
-      </Input>
-    </div>
-
-    <div v-if="filteredPlugins.length == 0" class="flex items-center justify-center h-256">
-      <Empty>
-        <template #description>
-          <Button
-            icon="refresh"
-            :loading="pluginsStore.pluginHubLoading"
-            type="primary"
-            size="small"
-            @click="handleUpdatePluginHub"
-          >
-            {{ $t('plugins.update') }}
-          </Button>
-        </template>
-      </Empty>
-    </div>
-
+  <ResourceHubModal
+    v-model:query="keywords"
+    v-model:category="category"
+    :categories="groups.map((g) => g.name)"
+    :loading="pluginsStore.pluginHubLoading"
+    :count="filteredPlugins.length"
+    @refresh="handleUpdatePluginHub"
+  >
+    <template #actions
+      ><Button
+        icon="settings3"
+        size="small"
+        :aria-label="t('plugins.sourceConfig.name')"
+        @click="toggleSettingsModal"
+    /></template>
     <div v-for="group in filteredPlugins" :key="group.name">
       <div class="text-16 font-bold mt-20 px-4">{{ group.name }}</div>
 
@@ -157,20 +147,36 @@ if (pluginsStore.pluginHub.length === 0) {
             <div v-tips="plugin.description" class="flex-1 line-clamp-2 text-12 text-muted">
               {{ plugin.description || '--' }}
             </div>
+            <Button
+              v-if="plugin.url"
+              icon="preview"
+              size="small"
+              type="text"
+              :loading="previewingId === plugin.id"
+              :aria-label="t('common.preview')"
+              @click="previewPlugin(plugin)"
+            />
             <Button v-if="loadingSet.has(plugin.id)" loading type="text" size="small" />
             <div v-else class="flex items-center shrink-0">
-              <Button v-if="isAlreadyAdded(plugin.id)" icon="selected" type="text" size="small" />
-              <Button v-else type="normal" icon="add" size="small" @click="handleAddPlugin(plugin)" />
+              <Tag v-if="isAlreadyAdded(plugin.id)" size="small">{{ t('common.added') }}</Tag>
+              <Button
+                v-else
+                type="normal"
+                icon="add"
+                size="small"
+                @click="handleAddPlugin(plugin)"
+              />
             </div>
           </div>
         </Card>
       </div>
     </div>
-  </div>
+  </ResourceHubModal>
 
   <Modal
     v-model:open="settingsModalOpen"
     title="plugins.sourceConfig.name"
+    size="md"
     :submit="false"
     cancel-text="common.close"
   >
@@ -200,13 +206,9 @@ if (pluginsStore.pluginHub.length === 0) {
 </template>
 
 <style scoped>
-.plugin-hub__search {
-  background: var(--modal-bg);
-}
-
 .plugin-hub__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 10px;
 }
 </style>

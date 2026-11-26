@@ -304,3 +304,9 @@ export const getDelayTestableNodeNames = (
 ) => {
   return (group.all || []).filter((name) => isDelayTestableNode(name, proxies[name]))
 }
+
+export const delayColor = (delay?: number | null) => {
+  if (!delay) return 'var(--muted-color)'
+  const level = delay < 500 ? 1 : delay < 1000 ? 2 : delay < 1500 ? 3 : 4
+  return `var(--level-${level}-color)`
+}

@@ -6,12 +6,14 @@ export const IS_IN_MODAL = 'IS_IN_MODAL'
 import { computed, markRaw, nextTick, onUnmounted, provide, ref, useTemplateRef, watch } from 'vue'
 
 import { useBool } from '@/hooks'
+import { draftGuardKey } from '@/hooks/useFormDraft'
 import { useAppStore } from '@/stores'
 import { sampleID } from '@/utils'
 
 export interface Props {
   title?: string
   footer?: boolean
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'drawer'
   maxHeight?: string
   maxWidth?: string
   minWidth?: string
@@ -51,11 +53,12 @@ export interface Slots {
 const slots = defineSlots<Slots>()
 
 const props = withDefaults(defineProps<Props>(), {
+  size: undefined,
   title: '',
   footer: true,
   maxHeight: '90',
-  maxWidth: '90',
-  minWidth: '60',
+  maxWidth: '94',
+  minWidth: '',
   minHeight: '',
   width: '',
   height: '',
@@ -68,16 +71,25 @@ const props = withDefaults(defineProps<Props>(), {
   class: undefined,
   container: 'body',
   destroyOnClose: true,
-  toolbar: () => ({
-    maximize: true,
-    minimize: true,
-  }),
+  toolbar: () => ({}),
   onOk: undefined,
   onCancel: undefined,
   beforeClose: undefined,
   afterClose: undefined,
   afterDestroy: undefined,
 })
+
+const draftGuards = new Set<() => Promise<boolean>>()
+provide(draftGuardKey, (guard) => {
+  draftGuards.add(guard)
+  return () => {
+    draftGuards.delete(guard)
+  }
+})
+const canDiscard = async () => {
+  for (const guard of draftGuards) if (!(await guard())) return false
+  return true
+}
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -145,7 +157,10 @@ const runCloseLifecycle = async (context: CloseContext) => {
   loading.value = true
   try {
     const actionAccepted = !options.runAction || ((await action?.()) ?? true)
-    const closeAccepted = actionAccepted && ((await props.beforeClose?.(options.isOk)) ?? true)
+    const closeAccepted =
+      actionAccepted &&
+      (options.isOk || !draftGuards.size || (await canDiscard())) &&
+      ((await props.beforeClose?.(options.isOk)) ?? true)
     if (!closeAccepted) {
       if (options.restoreOnFailure) restoreOpen()
       finishLifecycle(context)
@@ -245,14 +260,49 @@ const handleDestroy = () => handleAction(false, !isMinimize.value, true)
 
 const onMaskClick = () => (props.maskClosable ? handleCancel() : Promise.resolve())
 
-const contentStyle = computed(() => ({
-  maxHeight: isMaximize.value ? '100%' : props.maxHeight + '%',
-  maxWidth: isMaximize.value ? '100%' : props.maxWidth + '%',
-  minWidth: isMaximize.value ? '100%' : props.minWidth ? props.minWidth + '%' : '0',
-  minHeight: isMaximize.value ? '100%' : props.minHeight ? props.minHeight + '%' : '0',
-  width: isMaximize.value ? '100%' : props.width ? props.width + '%' : undefined,
-  height: isMaximize.value ? '100%' : props.height ? props.height + '%' : undefined,
+const widths = { sm: 460, md: 680, lg: 920, xl: 1120, drawer: 560 }
+const toLength = (value: string | number | undefined, unit: string) => {
+  if (value === undefined || value === '') return ''
+  const text = String(value).trim()
+  return /^-?\d+(\.\d+)?$/.test(text) ? text + unit : text
+}
+// Modals without an explicit size still need a real width, because container queries
+// (`container-type: inline-size`) zero out `max-content` intrinsic sizing.
+const effectiveSize = computed(() => props.size ?? (props.width ? undefined : 'md'))
+const toolbar = computed(() => ({
+  minimize: false,
+  maximize: true,
+  close: true,
+  ...props.toolbar,
 }))
+const contentStyle = computed(() => {
+  if (isMaximize.value)
+    return { width: '100%', height: '100%', maxWidth: '100%', maxHeight: '100%' }
+  const drawer = effectiveSize.value === 'drawer'
+  const limit = widths[effectiveSize.value ?? 'xl'] + 'px'
+  const maxWidth = toLength(props.maxWidth, 'vw') || '94vw'
+  const cap = `min(94vw, ${maxWidth}, ${limit})`
+  return {
+    maxWidth: drawer ? 'min(92vw, 560px)' : cap,
+    width: drawer
+      ? '92vw'
+      : props.width
+        ? toLength(props.width, '%')
+        : effectiveSize.value
+          ? limit
+          : 'max-content',
+    minWidth: drawer
+      ? undefined
+      : props.minWidth
+        ? `min(${toLength(props.minWidth, 'vw')}, ${cap})`
+        : effectiveSize.value
+          ? undefined
+          : `min(60vw, ${cap})`,
+    height: drawer ? '100%' : props.height ? toLength(props.height, '%') : undefined,
+    minHeight: props.minHeight ? toLength(props.minHeight, '%') : undefined,
+    maxHeight: drawer ? '100%' : toLength(props.maxHeight, '%'),
+  }
+})
 
 const shouldRender = computed(
   () => open.value || isMinimize.value || (!props.destroyOnClose && hasOpened.value),
@@ -288,7 +338,11 @@ const handleDialogKeydown = (event: KeyboardEvent) => {
   const first = focusable[0]!
   const last = focusable[focusable.length - 1]!
   if (event.shiftKey) {
-    if (document.activeElement === dialogRef.value || document.activeElement === first || !dialogRef.value?.contains(document.activeElement)) {
+    if (
+      document.activeElement === dialogRef.value ||
+      document.activeElement === first ||
+      !dialogRef.value?.contains(document.activeElement)
+    ) {
       event.preventDefault()
       last.focus()
     }
@@ -338,53 +392,57 @@ const handleMinimize = () => {
   minimizeNow()
 }
 
-watch(open, (v) => {
-  if (v) {
-    if (closeState.phase === 'leaving') {
-      open.value = false
-      return
-    }
-    if (closeState.phase === 'running-hooks') return
-    removeMinimizedModal()
-    if (props.toolbar.minimize) appStore.modalMinimizers.add(handleMinimize)
-    previouslyFocused = document.activeElement as HTMLElement | null
-    hasOpened.value = true
-    isMinimize.value = false
-    modalZindex.value = ++appStore.modalZIndexCounter
-    if (!appStore.modalStack.includes(closeFn)) appStore.modalStack.push(closeFn)
-    nextTick(() => {
-      if (dialogRef.value && !dialogRef.value.contains(document.activeElement)) {
-        dialogRef.value.focus()
+watch(
+  open,
+  (v) => {
+    if (v) {
+      if (closeState.phase === 'leaving') {
+        open.value = false
+        return
       }
-    })
-  } else {
-    if (closeState.phase === 'running-hooks') {
-      restoreOpen()
-      return
+      if (closeState.phase === 'running-hooks') return
+      removeMinimizedModal()
+      if (props.toolbar.minimize) appStore.modalMinimizers.add(handleMinimize)
+      previouslyFocused = document.activeElement as HTMLElement | null
+      hasOpened.value = true
+      isMinimize.value = false
+      modalZindex.value = ++appStore.modalZIndexCounter
+      if (!appStore.modalStack.includes(closeFn)) appStore.modalStack.push(closeFn)
+      nextTick(() => {
+        if (dialogRef.value && !dialogRef.value.contains(document.activeElement)) {
+          dialogRef.value.focus()
+        }
+      })
+    } else {
+      if (closeState.phase === 'running-hooks') {
+        restoreOpen()
+        return
+      }
+      if (closeState.phase === 'idle' && isMinimize.value) {
+        // Standalone minimize is not an action-close lifecycle.
+      } else if (closeState.phase === 'idle' && !props.destroyOnClose) {
+        handleMinimize()
+      } else if (closeState.phase === 'idle') {
+        restoreOpen()
+        void requestClose({
+          isOk: false,
+          runAction: false,
+          waitForAnimation: false,
+          destroy: props.destroyOnClose,
+          restoreOnFailure: true,
+        }).catch((error) => console.error(error))
+        return
+      }
+      appStore.modalMinimizers.delete(handleMinimize)
+      const idx = appStore.modalStack.findIndex((fn) => fn === closeFn)
+      if (idx !== -1) {
+        appStore.modalStack.splice(idx, 1)
+      }
+      restoreFocus()
     }
-    if (closeState.phase === 'idle' && isMinimize.value) {
-      // Standalone minimize is not an action-close lifecycle.
-    } else if (closeState.phase === 'idle' && !props.destroyOnClose) {
-      handleMinimize()
-    } else if (closeState.phase === 'idle') {
-      restoreOpen()
-      void requestClose({
-        isOk: false,
-        runAction: false,
-        waitForAnimation: false,
-        destroy: props.destroyOnClose,
-        restoreOnFailure: true,
-      }).catch((error) => console.error(error))
-      return
-    }
-    appStore.modalMinimizers.delete(handleMinimize)
-    const idx = appStore.modalStack.findIndex((fn) => fn === closeFn)
-    if (idx !== -1) {
-      appStore.modalStack.splice(idx, 1)
-    }
-    restoreFocus()
-  }
-}, { immediate: open.value })
+  },
+  { immediate: open.value },
+)
 
 onUnmounted(() => {
   appStore.modalMinimizers.delete(handleMinimize)
@@ -409,6 +467,7 @@ defineExpose({ handleCancel, handleDestroy })
         v-if="shouldRender"
         v-show="open && !isMinimize"
         :style="{ zIndex: modalZindex }"
+        :class="{ 'is-drawer': effectiveSize === 'drawer' }"
         class="gui-modal-mask fixed inset-0 flex items-center justify-center backdrop-blur-sm"
         @click.self="onMaskClick"
       >
@@ -420,13 +479,13 @@ defineExpose({ handleCancel, handleDestroy })
           aria-modal="true"
           tabindex="-1"
           :aria-label="title ? $t(title) : undefined"
-          class="gui-modal-modal transition duration-200 flex flex-col rounded-8 shadow outline-none"
+          class="gui-modal-modal transition-all duration-200 flex flex-col rounded-8 shadow outline-none"
           @keydown="handleDialogKeydown"
         >
           <div
             v-if="title || slots.title || slots.toolbar"
             class="gui-modal-header flex items-center gap-8 px-16 py-12"
-            @dblclick.self="toggleMaximize"
+            @dblclick.self="effectiveSize !== 'drawer' && toggleMaximize()"
           >
             <div class="min-w-0 flex-1">
               <slot name="title">
@@ -444,7 +503,7 @@ defineExpose({ handleCancel, handleDestroy })
                 @click="handleMinimize"
               />
               <Button
-                v-if="toolbar.maximize"
+                v-if="toolbar.maximize && effectiveSize !== 'drawer'"
                 :aria-label="$t('common.resize')"
                 :icon="isMaximize ? 'maximize2' : 'maximize'"
                 type="text"
@@ -471,12 +530,7 @@ defineExpose({ handleCancel, handleDestroy })
           >
             <slot name="action"></slot>
             <slot name="cancel">
-              <Button
-                v-if="cancel"
-                :loading="cancelLoading"
-                type="normal"
-                @click="handleCancel"
-              >
+              <Button v-if="cancel" :loading="cancelLoading" type="normal" @click="handleCancel">
                 {{ $t(cancelText) }}
               </Button>
             </slot>
@@ -550,14 +604,27 @@ defineExpose({ handleCancel, handleDestroy })
 }
 
 .gui-modal-footer {
+  flex-wrap: wrap;
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
-@media (max-width: 700px) {
-  .gui-modal-mask .gui-modal-modal:not(.is-maximized) {
-    max-width: calc(100% - 24px) !important;
-    min-width: calc(100% - 24px) !important;
+.gui-modal-mask.is-drawer {
+  justify-content: flex-end;
+}
+.is-drawer .gui-modal-modal {
+  border-radius: 0;
+}
+.modal-enter-from.is-drawer .gui-modal-modal,
+.modal-leave-to.is-drawer .gui-modal-modal {
+  transform: translateX(100%);
+}
+@media (max-width: 640px) {
+  .gui-modal-mask:not(.is-drawer) .gui-modal-modal:not(.is-maximized) {
+    width: 94vw !important;
+  }
+  .gui-modal-footer > :deep(.gui-button) {
+    flex: 1 0 40%;
   }
 }
 </style>

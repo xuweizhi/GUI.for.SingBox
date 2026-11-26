@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { ref, inject, computed, useTemplateRef, h } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 
+import { RuleAction, RuleType } from '@/enums/kernel'
 import { useNodeGroupsStore, useProfilesStore } from '@/stores'
 import {
-  alert,
+  previewCode,
+  confirm,
   deepClone,
   findOutboundGraphIssues,
   generateConfig,
   getOutboundChainLabels,
   getPrimaryProxyOutbound,
+  isValidJson,
   message,
 } from '@/utils'
-
-import Button from '@/components/Button/index.vue'
 
 interface Props {
   id?: string
@@ -32,7 +34,7 @@ enum Step {
 
 const props = withDefaults(defineProps<Props>(), {
   id: '',
-  step: Step.Name,
+  step: Step.General,
 })
 
 import DnsConfig from './DnsConfig.vue'
@@ -43,18 +45,24 @@ import OutboundsConfig from './OutboundsConfig.vue'
 import RouteConfig from './RouteConfig.vue'
 
 const { t } = useI18n()
-const inboundsRef = useTemplateRef('inboundsRef')
-const outboundsRef = useTemplateRef('outboundsRef')
-const routeRef = useTemplateRef('routeRef')
-const dnsRef = useTemplateRef('dnsRef')
+const router = useRouter()
+const route = useRoute()
+const outboundEditor = useTemplateRef('outboundEditor')
+const editOutbound = async (id: string) => {
+  currentStep.value = Step.Outbounds
+  await nextTick()
+  outboundEditor.value?.editById(id)
+}
+onMounted(() => {
+  if (typeof route.query.outbound === 'string') void editOutbound(route.query.outbound)
+})
 const profilesStore = useProfilesStore()
 const nodeGroupsStore = useNodeGroupsStore()
 
 const loading = ref(false)
-const currentStep = ref(props.step)
+const currentStep = ref(Math.max(1, Math.min(Step.MixinScript, props.step)))
 
 const stepItems = [
-  { title: 'profile.step.name' },
   { title: 'profile.step.general' },
   { title: 'profile.step.inbounds' },
   { title: 'profile.step.outbounds' },
@@ -67,7 +75,9 @@ const profile = ref<App.Profile>(profilesStore.getProfileTemplate())
 
 const primaryProxy = computed({
   get: () => getPrimaryProxyOutbound(profile.value)?.id || '',
-  set: (id) => { profile.value.primary_proxy_outbound = id },
+  set: (id) => {
+    profile.value.primary_proxy_outbound = id
+  },
 })
 
 const inboundOptions = computed(() =>
@@ -102,18 +112,73 @@ const mixinAndScriptConfig = computed({
   },
 })
 
-const handleCancel = inject('cancel') as any
-const handleSubmit = inject('submit') as any
-const handlePrevStep = () => currentStep.value--
-const handleNextStep = () => currentStep.value++
-
+const nameRequired = ref(false)
+const graphIssues = computed(() =>
+  findOutboundGraphIssues(profile.value.outbounds, nodeGroupsStore.nodeGroups),
+)
+const validationIssueCount = computed(() => {
+  const p = profile.value
+  let count = p.name.trim() ? 0 : 1
+  count += graphIssues.value.length
+  const outboundIds = new Set(p.outbounds.map((outbound) => outbound.id))
+  const rulesetIds = new Set(p.route.rule_set.map((ruleset) => ruleset.id))
+  const inboundIds = new Set(p.inbounds.map((inbound) => inbound.id))
+  const serverIds = new Set(p.dns.servers.map((server) => server.id))
+  if (p.route.final && !outboundIds.has(p.route.final)) count++
+  if (p.dns.final && !serverIds.has(p.dns.final)) count++
+  const routeRuleLost = (rule: App.Rule) => {
+    if (rule.type === RuleType.InsertionPoint) return false
+    let lost = !rule.payload
+    if (rule.action === RuleAction.Route) lost ||= !outboundIds.has(rule.outbound)
+    else if (rule.action === RuleAction.RouteOptions) lost ||= !isValidJson(rule.outbound)
+    if (rule.type === RuleType.Inbound) lost ||= !inboundIds.has(rule.payload)
+    else if (rule.type === RuleType.IpIsPrivate)
+      lost ||= !['true', 'false'].includes(rule.payload)
+    else if (rule.type === RuleType.RuleSet)
+      lost ||= rule.payload.split(',').some((id) => !rulesetIds.has(id))
+    return lost
+  }
+  const dnsRuleLost = (rule: App.DnsRule) => {
+    if (rule.type === RuleType.InsertionPoint) return false
+    let lost = !rule.payload
+    if (rule.action === RuleAction.Route) lost ||= !serverIds.has(rule.server)
+    else if (
+      rule.action === RuleAction.RouteOptions ||
+      rule.action === RuleAction.Predefined
+    )
+      lost ||= !isValidJson(rule.server)
+    else if (rule.action === RuleAction.Reject)
+      lost ||= !['default', 'drop'].includes(rule.server)
+    if (rule.type === RuleType.Inbound) lost ||= !inboundIds.has(rule.payload)
+    else if (rule.type === RuleType.RuleSet)
+      lost ||= rule.payload.split(',').some((id) => !rulesetIds.has(id))
+    else if (rule.type === RuleType.Inline) lost ||= !isValidJson(rule.payload)
+    return lost
+  }
+  count += p.route.rules.filter((rule) => rule.enable && routeRuleLost(rule)).length
+  count += p.dns.rules.filter((rule) => rule.enable && dnsRuleLost(rule)).length
+  return count
+})
+const counts = computed(() => [
+  null,
+  profile.value.inbounds.length,
+  profile.value.outbounds.length,
+  profile.value.route.rules.length,
+  profile.value.dns.servers.length + profile.value.dns.rules.length,
+  null,
+])
 const handleSave = async () => {
-  const graphIssues = findOutboundGraphIssues(profile.value.outbounds, nodeGroupsStore.nodeGroups)
-  if (graphIssues.some((issue) => issue.type === 'reserved-tag')) {
+  if (loading.value || missing) return
+  if (!profile.value.name.trim()) {
+    nameRequired.value = true
+    document.getElementById('profile-name')?.focus()
+    return
+  }
+  if (graphIssues.value.some((issue) => issue.type === 'reserved-tag')) {
     message.error(t('kernel.outbounds.reservedTag'))
     return
   }
-  const cycle = graphIssues.find((issue) => issue.type === 'cycle')
+  const cycle = graphIssues.value.find((issue) => issue.type === 'cycle')
   if (cycle) {
     message.error(
       t('kernel.outbounds.cycle', [
@@ -122,7 +187,7 @@ const handleSave = async () => {
     )
     return
   }
-  const missingNodeGroup = graphIssues.find((issue) => issue.type === 'missing-node-group')
+  const missingNodeGroup = graphIssues.value.find((issue) => issue.type === 'missing-node-group')
   if (missingNodeGroup) {
     message.error(t('kernel.outbounds.missingNodeGroup', [missingNodeGroup.targetId]))
     return
@@ -137,7 +202,8 @@ const handleSave = async () => {
     } else {
       await profilesStore.addProfile(profile.value)
     }
-    await handleSubmit()
+    baseline = JSON.stringify(profile.value)
+    await router.push('/profiles')
   } catch (error: any) {
     console.error('handleSave: ', error)
     message.error(error)
@@ -148,214 +214,183 @@ const handleSave = async () => {
 const handlePreview = async () => {
   try {
     const config = await generateConfig(profile.value)
-    alert(profile.value.name || t('common.preview'), JSON.stringify(config, null, 2))
+    previewCode(profile.value.name || t('common.preview'), JSON.stringify(config, null, 2))
   } catch (error: any) {
     message.error(error.message || error)
   }
 }
 
-const goToStep = (index: number) => {
-  if (!profile.value.name && index !== Step.Name) return
-  currentStep.value = index
-}
-
-if (props.id) {
-  const p = profilesStore.getProfileById(props.id)
-  if (p) {
-    profile.value = deepClone(p)
+const original = props.id ? profilesStore.getProfileById(props.id) : undefined
+const missing = Boolean(props.id && !original)
+if (original) profile.value = deepClone(original)
+let baseline = JSON.stringify(profile.value)
+const dirty = () => JSON.stringify(profile.value) !== baseline
+const allowLeave = async () => {
+  if (!dirty()) return true
+  try {
+    await confirm(t('common.warning'), t('workspace.discard'))
+    return true
+  } catch {
+    return false
   }
 }
-
-const modalSlots = {
-  title: () =>
-    h(
-      'div',
-      { class: 'font-bold text-16 line-clamp-1' },
-      profile.value.name
-        ? `${profile.value.name} · ${t(stepItems[currentStep.value]!.title)}`
-        : t(stepItems[currentStep.value]!.title),
-    ),
-
-  toolbar: () => [
-    h(
-      Button,
-      {
-        type: 'text',
-        size: 'small',
-        icon: 'preview',
-        onClick: handlePreview,
-      },
-      () => t('common.preview'),
-    ),
-  ],
-  action: () => [
-    h(
-      Button,
-      {
-        disabled: currentStep.value === Step.Name,
-        onClick: handlePrevStep,
-      },
-      () => t('common.prevStep'),
-    ),
-    h(
-      Button,
-      {
-        class: 'mr-auto',
-        disabled: !profile.value.name || currentStep.value === stepItems.length - 1,
-        onClick: handleNextStep,
-      },
-      () => t('common.nextStep'),
-    ),
-  ],
-  cancel: () =>
-    h(
-      Button,
-      {
-        disabled: loading.value,
-        onClick: handleCancel,
-      },
-      () => t('common.cancel'),
-    ),
-  submit: () =>
-    h(
-      Button,
-      {
-        type: 'primary',
-        loading: loading.value,
-        disabled: !profile.value.name,
-        onClick: handleSave,
-      },
-      () => t('common.save'),
-    ),
+onBeforeRouteLeave(allowLeave)
+onBeforeRouteUpdate((to, from) => to.fullPath === from.fullPath || allowLeave())
+const beforeUnload = (event: BeforeUnloadEvent) => {
+  if (dirty()) {
+    event.preventDefault()
+    event.returnValue = ''
+  }
 }
-
-defineExpose({ modalSlots })
+onMounted(() => window.addEventListener('beforeunload', beforeUnload))
+onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 </script>
 
 <template>
-  <div class="profile-form flex flex-col gap-12">
-    <nav class="profile-stepper" role="tablist" :aria-label="t('router.profiles')">
-      <button
-        v-for="(item, index) in stepItems"
-        :key="item.title"
-        type="button"
-        role="tab"
-        :aria-selected="currentStep === index"
-        :disabled="!profile.name && index !== Step.Name"
-        :class="{ 'is-active': currentStep === index }"
-        class="profile-stepper__item"
-        @click="goToStep(index)"
-      >
-        <span class="profile-stepper__index">{{ index + 1 }}</span>
-        <span>{{ t(item.title) }}</span>
-      </button>
-    </nav>
-
-    <div v-if="currentStep === Step.Name" class="form-item">
-      {{ t('profile.name') }} *
+  <Empty v-if="missing" description="workspace.missingProfile" />
+  <section v-else class="profile-workspace">
+    <header class="profile-header flex flex-wrap items-center gap-8">
+      <RouterLink to="/profiles">← {{ t('router.profiles') }}</RouterLink>
       <Input
         v-model="profile.name"
-        autofocus
-        clearable
+        input-id="profile-name"
+        :label="t('profile.name')"
         :placeholder="t('profile.name')"
-        class="flex-1"
+        class="flex-1 min-w-128"
       />
-    </div>
-    <div v-if="currentStep === Step.General">
-      <GeneralConfig v-model="generalConfig" :outbound-options="outboundOptions" />
-    </div>
-    <div v-if="currentStep === Step.Inbounds">
-      <InboundsConfig ref="inboundsRef" v-model="profile.inbounds" />
-    </div>
-    <div v-if="currentStep === Step.Outbounds">
-      <OutboundsConfig ref="outboundsRef" v-model="profile.outbounds" :native="profile.native" />
-    </div>
-    <div v-if="currentStep === Step.Route">
-      <RouteConfig
-        ref="routeRef"
-        v-model="profile.route"
-        v-model:outbounds="profile.outbounds"
-        v-model:primary-proxy-outbound="primaryProxy"
-        :inbound-options="inboundOptions"
-        :outbound-options="outboundOptions"
-        :server-options="serverOptions"
-        :dns="profile.dns"
-      />
-    </div>
-    <div v-if="currentStep === Step.Dns">
-      <DnsConfig
-        ref="dnsRef"
-        v-model="profile.dns"
-        :profile="profile"
-        :inbound-options="inboundOptions"
-        :outbound-options="outboundOptions"
-        :rule-set="profile.route.rule_set"
-      />
-    </div>
-    <div v-if="currentStep === Step.MixinScript">
-      <MixinAndScript v-model="mixinAndScriptConfig" />
-    </div>
-  </div>
+      <Button icon="preview" @click="handlePreview">{{ t('common.preview') }}</Button>
+      <Button @click="router.push('/profiles')">{{ t('common.cancel') }}</Button>
+      <Button type="primary" :loading="loading" @click="handleSave">{{ t('common.save') }}</Button>
+      <small v-if="nameRequired && !profile.name.trim()" class="field-error" role="alert"
+        >{{ t('profile.name') }} · {{ t('workspace.required') }}</small
+      >
+    </header>
+    <nav class="profile-stepper" :aria-label="t('router.profiles')">
+      <Button
+        v-for="(item, index) in stepItems"
+        :key="item.title"
+        :type="index + 1 === currentStep ? 'link' : 'text'"
+        :aria-current="index + 1 === currentStep ? 'page' : undefined"
+        class="justify-start"
+        @click="currentStep = index + 1"
+      >
+        {{ t(item.title)
+        }}<span v-if="counts[index] != null" class="ml-4 text-12 text-secondary">{{
+          counts[index]
+        }}</span>
+      </Button>
+      <span
+        v-if="validationIssueCount"
+        class="profile-health profile-health--issue text-12 text-danger"
+        role="status"
+        >{{ t('kernel.route.policy.validationTitle') }} · {{ validationIssueCount }}</span
+      >
+      <span v-else class="profile-health profile-health--ok text-12" role="status"
+        >{{ t('workspace.validationOk') }}</span
+      >
+    </nav>
+    <main class="profile-content">
+      <div v-if="currentStep === Step.General">
+        <GeneralConfig v-model="generalConfig" :outbound-options="outboundOptions" />
+      </div>
+      <div v-if="currentStep === Step.Inbounds">
+        <InboundsConfig v-model="profile.inbounds" />
+      </div>
+      <div v-if="currentStep === Step.Outbounds">
+        <OutboundsConfig
+          ref="outboundEditor"
+          v-model="profile.outbounds"
+          :native="profile.native"
+        />
+      </div>
+      <div v-if="currentStep === Step.Route">
+        <RouteConfig
+          v-model="profile.route"
+          v-model:outbounds="profile.outbounds"
+          v-model:primary-proxy-outbound="primaryProxy"
+          :inbound-options="inboundOptions"
+          :outbound-options="outboundOptions"
+          :server-options="serverOptions"
+          :dns="profile.dns"
+          @edit-outbound="editOutbound"
+        />
+      </div>
+      <div v-if="currentStep === Step.Dns">
+        <DnsConfig
+          v-model="profile.dns"
+          :profile="profile"
+          :inbound-options="inboundOptions"
+          :outbound-options="outboundOptions"
+          :rule-set="profile.route.rule_set"
+        />
+      </div>
+      <div v-if="currentStep === Step.MixinScript">
+        <MixinAndScript v-model="mixinAndScriptConfig" />
+      </div>
+    </main>
+  </section>
 </template>
-
-<style lang="less" scoped>
+<style scoped>
+.profile-workspace {
+  display: grid;
+  grid-template: auto minmax(0, 1fr) / minmax(150px, 190px) minmax(0, 1fr);
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+.profile-header {
+  grid-column: 1/-1;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--surface-border);
+}
 .profile-stepper {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border-color);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
 }
-
-.profile-stepper__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  background: var(--card-bg);
-  color: var(--muted-color);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition:
-    background-color 0.14s ease,
-    border-color 0.14s ease,
-    color 0.14s ease;
-
-  &:hover:not(:disabled) {
-    color: var(--color);
-    border-color: color-mix(in srgb, var(--accent-text) 45%, var(--border-color));
-  }
-
-  &.is-active {
-    background: var(--accent-soft);
-    border-color: var(--accent-text);
-    color: var(--accent-text);
-    font-weight: 600;
-    .profile-stepper__index {
-      background: var(--primary-color);
-      color: var(--btn-primary-color);
-    }
-  }
-
-  &:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-}
-
-.profile-stepper__index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
+.profile-health {
+  margin-top: 8px;
+  padding: 4px 10px;
   border-radius: 999px;
-  background: var(--bg-color);
-  font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
+}
+.profile-health--ok {
+  color: var(--color-success);
+  background: var(--success-soft);
+}
+.profile-health--issue {
+  background: var(--danger-soft);
+}
+.profile-content {
+  min-width: 0;
+  overflow: auto;
+}
+@container (max-width: 640px) {
+  .profile-workspace {
+    grid-template: auto auto minmax(0, 1fr) / minmax(0, 1fr);
+    gap: 8px;
+  }
+  .profile-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+  }
+  .profile-header > a {
+    grid-column: 1;
+  }
+  .profile-header > .gui-input {
+    grid-column: 2 / -1;
+    width: 100%;
+  }
+  .profile-header > .gui-button {
+    min-width: 0;
+  }
+  .profile-header > .field-error {
+    grid-column: 1 / -1;
+  }
+  .profile-stepper {
+    flex-direction: row;
+    overflow-x: auto;
+  }
 }
 </style>

@@ -2,6 +2,10 @@
 import { computed, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { delayColor } from '@/views/HomeView/nodeController'
+
+import NodeCard from '@/components/_common/NodeCard.vue'
+
 import type { NodeController } from '@/views/HomeView/useNodeController'
 
 import type { RuntimeNodeDetails } from '../runtimeNodeDetails'
@@ -16,18 +20,20 @@ const props = defineProps<{
 const { t } = useI18n()
 const nodeFilter = ref('')
 const operationError = ref('')
-watch(() => props.controller.selectedGroupName.value, () => {
-  nodeFilter.value = ''
-  operationError.value = ''
-})
+watch(
+  () => props.controller.selectedGroupName.value,
+  () => {
+    nodeFilter.value = ''
+    operationError.value = ''
+  },
+)
 
 const filteredNodes = computed(() => {
   const q = nodeFilter.value.trim().toLowerCase()
   if (!q || props.controller.nodes.value.length <= 6) return props.controller.nodes.value
   return props.controller.nodes.value.filter(
     (node) =>
-      node.name.toLowerCase().includes(q) ||
-      (node.proxy?.type || '').toLowerCase().includes(q),
+      node.name.toLowerCase().includes(q) || (node.proxy?.type || '').toLowerCase().includes(q),
   )
 })
 
@@ -49,13 +55,6 @@ const displayChain = computed(() => {
   const primary = props.controller.primary.value
   return primary.chain.join(' → ')
 })
-
-const delayColor = (delay?: number | null) => {
-  if (!delay) return 'var(--muted-color)'
-  if (delay < 500) return 'var(--level-1-color)'
-  if (delay < 1000) return 'var(--level-2-color)'
-  return 'var(--level-3-color)'
-}
 
 watchEffect(() => {
   if (!props.coreReady) return
@@ -99,7 +98,11 @@ watchEffect(() => {
       <div class="node-diag-summary rounded-8 p-12 mb-12">
         <div class="flex flex-wrap items-center justify-between gap-8">
           <div class="font-bold text-15 line-clamp-1">
-            {{ controller.primary.value.groupName || t('home.nodes.noSelectableNode') }}
+            {{
+              controller.primary.value.leafName ||
+              controller.primary.value.groupName ||
+              t('home.nodes.noSelectableNode')
+            }}
           </div>
           <div
             v-if="controller.primary.value.delay"
@@ -108,6 +111,12 @@ watchEffect(() => {
           >
             {{ controller.primary.value.delay }} ms
           </div>
+        </div>
+        <div
+          v-if="controller.primary.value.groupName"
+          class="text-12 text-muted mt-4 line-clamp-1"
+        >
+          {{ t('router.nodeGroups') }}: {{ controller.primary.value.groupName }}
         </div>
         <div v-if="displayChain" class="text-12 text-muted mt-4 font-mono line-clamp-1">
           {{ displayChain }}
@@ -164,55 +173,28 @@ watchEffect(() => {
         />
       </div>
 
-      <div v-if="operationError" class="mb-8 text-12 text-danger" role="alert">{{ t(operationError) }}</div>
+      <div v-if="operationError" class="mb-8 text-12 text-danger" role="alert">
+        {{ t(operationError) }}
+      </div>
       <Empty v-if="filteredNodes.length === 0" />
       <div v-else class="node-list flex flex-col gap-8">
-        <div
+        <NodeCard
           v-for="node in filteredNodes"
           :key="node.name"
-          :data-node="node.name"
-          :class="{ 'is-selected': node.name === controller.selectedGroup.value?.now }"
-          class="node-row rounded-8 p-10 cursor-pointer"
-          role="button"
-          tabindex="0"
-          :aria-pressed="node.name === controller.selectedGroup.value?.now"
-          @click="switchNode(node.name)"
-          @keydown.enter.self.prevent="switchNode(node.name)"
-          @keydown.space.self.prevent="switchNode(node.name)"
-        >
-          <div class="flex items-center gap-8">
-            <div class="min-w-0 flex-1">
-              <div class="font-bold line-clamp-1">
-                {{ node.name }}
-              </div>
-              <div class="text-12 text-muted mt-2">
-                {{ node.proxy?.type || t('home.nodes.unknownType') }}
-              </div>
-            </div>
-
-            <button
-              :data-delay="node.name"
-              type="button"
-              class="delay-button"
-              @click.stop="testNode(node.name)"
-            >
-              <span v-if="controller.testingNodes.value.has(node.name)" class="text-muted">
-                ...
-              </span>
-              <span
-                v-else-if="node.delayStatus === 'success'"
-                class="font-bold font-mono"
-                :style="{ color: delayColor(node.delay) }"
-              >
-                {{ node.delay }} ms
-              </span>
-              <span v-else-if="node.delayStatus === 'failed'" class="text-danger">
-                {{ t('home.nodes.unavailable') }}
-              </span>
-              <span v-else class="text-muted">{{ t('home.nodes.untested') }}</span>
-            </button>
-          </div>
-        </div>
+          :node="node"
+          compact
+          :selected="node.name === controller.selectedGroup.value?.now"
+          :testing="controller.testingNodes.value.has(node.name)"
+          :disabled="
+            controller.readonlyMode?.value || controller.selectedGroup.value?.type !== 'Selector'
+          "
+          :favorite="node.favorite"
+          :phase="controller.nodePhases?.value.get(node.name)"
+          :query="nodeFilter"
+          @favorite="controller.toggleFavorite(node.name)"
+          @select="switchNode(node.name)"
+          @test="testNode(node.name)"
+        />
       </div>
     </template>
   </Card>
@@ -220,49 +202,9 @@ watchEffect(() => {
 
 <style scoped lang="less">
 .node-diag-summary {
-  background: var(--bg-color);
-  border: 1px solid var(--border-color);
+  background: var(--surface-bg);
+  border: 1px solid var(--surface-border);
   user-select: text;
   -webkit-user-select: text;
-}
-
-.node-list {
-  max-height: 460px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.node-row {
-  border: 1px solid var(--border-color, #e5e7eb);
-  background: var(--card-bg, #fff);
-  transition:
-    border-color 0.14s ease,
-    background-color 0.14s ease;
-
-  &:hover {
-    border-color: color-mix(in srgb, var(--accent-text) 50%, var(--border-color));
-    background: var(--card-hover-bg);
-  }
-
-  &.is-selected {
-    border-color: var(--accent-text);
-    background: var(--accent-soft);
-  }
-}
-
-.delay-button {
-  border: 0;
-  border-radius: 6px;
-  padding: 4px 8px;
-  background: transparent;
-  color: inherit;
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background-color 0.14s ease;
-
-  &:hover {
-    background: var(--btn-text-hover-bg);
-  }
 }
 </style>

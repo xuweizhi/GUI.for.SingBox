@@ -82,7 +82,7 @@ const handleUse = (ruleset: any) => {
     </div>
 
     <div v-draggable="[model, DraggableOptions]">
-      <Card v-for="(ruleset, index) in model" :key="ruleset.id" class="mb-6">
+      <Card v-for="(ruleset, index) in model" :key="ruleset.id" flush class="mb-6">
         <div class="flex items-center py-6 gap-6">
           <Icon icon="drag" :size="15" color="var(--muted-color)" class="cursor-move shrink-0" />
           <div class="font-bold flex items-center flex-wrap gap-4 flex-1 min-w-0">
@@ -134,9 +134,8 @@ const handleUse = (ruleset: any) => {
   <Modal
     v-model:open="showEditModal"
     :on-ok="handleAddEnd"
+    size="drawer"
     title="kernel.route.tab.rule_set"
-    max-width="80"
-    max-height="80"
   >
     <div class="form-item">
       {{ t('kernel.route.rule_set.tag') }}
