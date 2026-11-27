@@ -8,17 +8,20 @@ import { delayColor, isDelayTestableNode } from '@/views/HomeView/nodeController
 import { useNodeController } from '@/views/HomeView/useNodeController'
 
 import NodeSelectorModal from './NodeSelectorModal.vue'
+import PreProxySelectorModal from './PreProxySelectorModal.vue'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), {
   active: true,
 })
 
 const open = ref(false)
+const preProxyOpen = ref(false)
 const mountedActive = ref(false)
 const controller = useNodeController({ persistPreferences: true })
 const kernelApiStore = useKernelApiStore()
 const { t, te } = useI18n()
 const { mode, primary, stale } = controller
+const activePreProxy = computed(() => controller.activePreProxy?.value)
 
 const displayChain = computed(() => primary.value.chain.join(' → '))
 
@@ -33,6 +36,15 @@ const openSelector = () => {
     return
   }
   open.value = true
+}
+
+const openPreProxySelector = () => {
+  if (!kernelApiStore.running) {
+    message.warn('home.nodes.startCoreFirst')
+    return
+  }
+  open.value = false
+  preProxyOpen.value = true
 }
 
 const syncPolling = () => {
@@ -61,7 +73,10 @@ onUnmounted(stop)
 watch(
   [() => kernelApiStore.running, () => props.active],
   ([running]) => {
-    if (!running) open.value = false
+    if (!running) {
+      open.value = false
+      preProxyOpen.value = false
+    }
     syncPolling()
   },
 )
@@ -142,11 +157,53 @@ watch(
         <div v-tips="displayChain" class="text-12 text-muted line-clamp-1 mt-4">
           {{ t('home.nodes.via') }} {{ displayChain }}
         </div>
+        <div
+          v-if="primary.kind === 'group'"
+          data-pre-proxy-trigger
+          role="button"
+          tabindex="0"
+          class="pre-proxy-bar mt-8 inline-flex flex-wrap items-center gap-6 rounded-6 px-8 py-4 text-12"
+          @click.stop="openPreProxySelector"
+          @keydown.enter.stop.prevent="openPreProxySelector"
+          @keydown.space.stop.prevent="openPreProxySelector"
+        >
+          <span class="text-muted">{{ t('home.nodes.preProxyTitle') }}:</span>
+          <Tag v-if="activePreProxy?.status === 'active'" size="small" color="purple">
+            {{ activePreProxy.nodeName }}
+          </Tag>
+          <span v-else class="text-muted">
+            {{
+              t(
+                activePreProxy?.status === 'direct'
+                  ? 'home.nodes.preProxyDirect'
+                  : 'home.nodes.preProxyNone',
+              )
+            }}
+          </span>
+          <span class="pre-proxy-action">
+            {{
+              t(
+                activePreProxy?.status === 'active'
+                  ? 'home.nodes.preProxyChange'
+                  : 'home.nodes.preProxySelect',
+              )
+            }}
+          </span>
+        </div>
       </div>
     </Card>
   </div>
 
-  <NodeSelectorModal v-model:open="open" :controller="controller" />
+  <NodeSelectorModal
+    v-model:open="open"
+    :controller="controller"
+    @open-pre-proxy="openPreProxySelector"
+  />
+  <PreProxySelectorModal
+    v-if="preProxyOpen"
+    v-model:open="preProxyOpen"
+    :controller="controller"
+  />
 </template>
 
 <style scoped>
@@ -156,6 +213,19 @@ watch(
 .current-node-extra {
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+.pre-proxy-bar {
+  background: var(--surface-bg);
+  border: 1px solid var(--surface-border, var(--border-color));
+  cursor: pointer;
+  transition: border-color 0.16s ease;
+}
+.pre-proxy-bar:hover {
+  border-color: color-mix(in srgb, var(--accent-text) 48%, var(--surface-border));
+}
+.pre-proxy-action {
+  color: var(--accent-text, var(--primary-color));
+  font-weight: 500;
 }
 @container (max-width: 640px) {
   .current-node-switch {

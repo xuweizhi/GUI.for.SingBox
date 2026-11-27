@@ -2,7 +2,7 @@
 import { ref, inject, computed, h, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { GetSystemProxy, HttpGet } from '@/bridge'
+import { FileExists, GetSystemProxy, HttpGet, ReadFile } from '@/bridge'
 import {
   DefaultTestTimeout,
   DefaultTestURL,
@@ -13,10 +13,23 @@ import { RequestProxyMode } from '@/enums/app'
 import { useBool } from '@/hooks'
 import { useFormDraft } from '@/hooks/useFormDraft'
 import { useAppSettingsStore, useSubscribesStore } from '@/stores'
-import { deepClone, GetRequestProxy, message } from '@/utils'
-import { parseSubscriptionDnsAddresses } from '@/utils/subscriptionConfig'
+import {
+  buildSingBoxOutbound,
+  deepClone,
+  DefaultCustomNodeDraft,
+  GetRequestProxy,
+  message,
+  sampleID,
+  type CustomNodeDraft,
+} from '@/utils'
+import {
+  extractSubscriptionConfig,
+  parseSubscriptionDnsAddresses,
+  validateSubscriptionEntries,
+} from '@/utils/subscriptionConfig'
 
 import Button from '@/components/Button/index.vue'
+import CustomNodeEditor from './CustomNodeEditor.vue'
 
 interface Props {
   id?: string
@@ -33,6 +46,13 @@ const appSettingsStore = useAppSettingsStore()
 const loading = ref(false)
 const proxyTesting = ref(false)
 const sub = ref<App.Subscription>(subscribeStore.getSubscribeTemplate())
+const formMode = ref<'Http' | 'File' | 'Manual' | 'CustomNode'>(sub.value.type)
+const customNodeDraft = ref<CustomNodeDraft>(DefaultCustomNodeDraft('socks'))
+const manualSubs = computed(() =>
+  subscribeStore.subscribes.filter((item) => item.type === 'Manual'),
+)
+const customTargetMode = ref<'new' | 'existing'>('new')
+const customTargetSubId = ref('')
 
 const dnsAddresses = ref('')
 const importedDnsSummary = computed(() =>
@@ -44,9 +64,26 @@ const importedDnsSummary = computed(() =>
     .join(' · '),
 )
 
-const isManual = computed(() => sub.value.type === 'Manual')
-const isRemote = computed(() => sub.value.type === 'Http')
+const isCustomNode = computed(() => !props.id && formMode.value === 'CustomNode')
+const isManual = computed(() => !isCustomNode.value && sub.value.type === 'Manual')
+const isRemote = computed(() => !isCustomNode.value && sub.value.type === 'Http')
 const isCustomProxy = computed(() => sub.value.requestProxyMode === RequestProxyMode.Custom)
+
+const handleModeChange = (mode: string) => {
+  const next = mode as 'Http' | 'File' | 'Manual' | 'CustomNode'
+  formMode.value = next
+  if (next !== 'CustomNode') {
+    sub.value.type = next
+  } else if (manualSubs.value.length && !customTargetSubId.value) {
+    customTargetSubId.value = manualSubs.value[0]!.id
+  }
+}
+
+const handleCustomNodeParsed = (parsed: CustomNodeDraft) => {
+  if (!sub.value.name.trim() && parsed.tag.trim()) {
+    sub.value.name = parsed.tag.trim()
+  }
+}
 const showProxyTest = computed(() => {
   if (sub.value.requestProxyMode === RequestProxyMode.None) {
     return false
@@ -64,6 +101,67 @@ const handleSave = async () => {
   if (loading.value) return
   if (props.id && !isDirty()) return handleSubmit()
   errorField.value = ''
+
+  if (isCustomNode.value) {
+    const built = buildSingBoxOutbound(customNodeDraft.value)
+    if (!built.ok) {
+      return invalid(built.field, t(built.error))
+    }
+    try {
+      validateSubscriptionEntries([built.outbound])
+    } catch (error: any) {
+      message.error(error.message || error)
+      return
+    }
+    const outbound = built.outbound
+    loading.value = true
+    try {
+      if (customTargetMode.value === 'existing' && customTargetSubId.value) {
+        const target = subscribeStore.getSubscribeById(customTargetSubId.value)
+        if (!target) throw new Error('Target subscription not found')
+        const raw = await ReadFile(target.path).catch(async (error) => {
+          if (target.proxies.length || (await FileExists(target.path))) throw error
+          return '[]'
+        })
+        const { outbounds: existingEntries } = extractSubscriptionConfig(JSON.parse(raw))
+        if (existingEntries.some((entry) => entry.tag === outbound.tag)) {
+          return invalid('tag', t('subscribe.duplicateNodeTag', [outbound.tag]))
+        }
+        const nextEntries = [...existingEntries, outbound]
+        const nextSub = deepClone(target)
+        nextSub.proxies.push({
+          id: sampleID(),
+          tag: outbound.tag,
+          type: outbound.type,
+        })
+        await subscribeStore.editSubscribe(target.id, nextSub, {
+          content: JSON.stringify(nextEntries, null, 2),
+          assignments: [],
+        })
+      } else {
+        const nextSub = deepClone(sub.value)
+        nextSub.type = 'Manual'
+        nextSub.name = nextSub.name.trim() || String(outbound.tag)
+        nextSub.proxies = [
+          {
+            id: sampleID(),
+            tag: outbound.tag,
+            type: outbound.type,
+          },
+        ]
+        await subscribeStore.addSubscribe(nextSub, true, JSON.stringify([outbound], null, 2))
+      }
+      message.success('common.success')
+      await handleSubmit()
+    } catch (error: any) {
+      console.error(error)
+      message.error(error.message || error)
+    } finally {
+      loading.value = false
+    }
+    return
+  }
+
   if (!sub.value.name.trim()) {
     return invalid('name')
   }
@@ -142,6 +240,7 @@ if (props.id) {
   const s = subscribeStore.getSubscribeById(props.id)
   if (s) {
     sub.value = deepClone(s)
+    formMode.value = s.type
   }
 }
 
@@ -152,6 +251,10 @@ const original = deepClone(sub.value)
 const { errorField, errorMessage, invalid, isDirty } = useFormDraft(() => [
   sub.value,
   dnsAddresses.value,
+  formMode.value,
+  customNodeDraft.value,
+  customTargetMode.value,
+  customTargetSubId.value,
 ])
 const modalSlots = {
   cancel: () =>
@@ -183,50 +286,96 @@ defineExpose({ modalSlots })
     <div class="form-item">
       {{ t('subscribes.subtype') }}
       <Radio
-        v-model="sub.type"
+        :model-value="formMode"
         :options="[
           { label: 'common.http', value: 'Http' },
           { label: 'common.file', value: 'File' },
           { label: 'subscribe.manual', value: 'Manual' },
+          ...(!props.id ? [{ label: 'subscribe.customNode.tab', value: 'CustomNode' }] : []),
         ]"
+        @update:model-value="handleModeChange(String($event))"
       />
     </div>
-    <div class="form-item" :data-invalid="errorField === 'name'">
-      {{ t('subscribe.name') }} *
-      <div class="w-full">
-        <Input v-model="sub.name" :label="t('subscribe.name')" autofocus class="w-full" />
-        <small v-if="errorField === 'name'" class="field-error" role="alert">{{
-          errorMessage
-        }}</small>
-      </div>
-    </div>
-    <div v-if="!isManual" class="form-item" :data-invalid="errorField === 'url'">
-      {{ t(sub.type === 'Http' ? 'subscribe.url' : 'subscribe.localPath') }} *
-      <div class="w-full">
-        <Input
-          v-model="sub.url"
-          :label="t(sub.type === 'Http' ? 'subscribe.url' : 'subscribe.localPath')"
-          :placeholder="sub.type === 'Http' ? 'http(s)://' : 'data/local/{filename}.json'"
-          allow-paste
-          class="w-full"
+
+    <template v-if="isCustomNode">
+      <CustomNodeEditor
+        v-model="customNodeDraft"
+        :error-field="errorField"
+        :error-message="errorMessage"
+        @parsed="handleCustomNodeParsed"
+      />
+      <Divider />
+      <div v-if="manualSubs.length" class="form-item">
+        {{ t('subscribe.customNode.targetMode') }}
+        <Radio
+          v-model="customTargetMode"
+          size="small"
+          :options="[
+            { label: 'subscribe.customNode.targetNew', value: 'new' },
+            { label: 'subscribe.customNode.targetExisting', value: 'existing' },
+          ]"
         />
-        <small v-if="errorField === 'url'" class="field-error" role="alert">{{
-          errorMessage
-        }}</small>
       </div>
-    </div>
-    <Divider>
-      <Button
-        type="text"
-        :aria-expanded="showMore"
-        :aria-controls="advancedId"
-        @click="toggleShowMore"
-      >
-        <Icon icon="arrowDown" :size="14" class="advanced-chevron mr-4" :class="{ 'is-open': showMore }" />
-        {{ t('common.advancedSettings') }}
-      </Button>
-    </Divider>
-    <div v-show="showMore" :id="advancedId">
+      <div v-if="customTargetMode === 'existing' && manualSubs.length" class="form-item">
+        {{ t('subscribe.customNode.selectManualSub') }}
+        <div class="w-full">
+          <Select
+            v-model="customTargetSubId"
+            :options="manualSubs.map((item) => ({ label: item.name, value: item.id }))"
+            class="w-full"
+          />
+        </div>
+      </div>
+      <div v-else class="form-item">
+        {{ t('subscribe.name') }}
+        <div class="w-full">
+          <Input
+            v-model="sub.name"
+            :label="t('subscribe.name')"
+            :placeholder="customNodeDraft.tag || t('subscribe.name')"
+            class="w-full"
+          />
+        </div>
+      </div>
+    </template>
+
+    <template v-else>
+      <div class="form-item" :data-invalid="errorField === 'name'">
+        {{ t('subscribe.name') }} *
+        <div class="w-full">
+          <Input v-model="sub.name" :label="t('subscribe.name')" autofocus class="w-full" />
+          <small v-if="errorField === 'name'" class="field-error" role="alert">{{
+            errorMessage
+          }}</small>
+        </div>
+      </div>
+      <div v-if="!isManual" class="form-item" :data-invalid="errorField === 'url'">
+        {{ t(sub.type === 'Http' ? 'subscribe.url' : 'subscribe.localPath') }} *
+        <div class="w-full">
+          <Input
+            v-model="sub.url"
+            :label="t(sub.type === 'Http' ? 'subscribe.url' : 'subscribe.localPath')"
+            :placeholder="sub.type === 'Http' ? 'http(s)://' : 'data/local/{filename}.json'"
+            allow-paste
+            class="w-full"
+          />
+          <small v-if="errorField === 'url'" class="field-error" role="alert">{{
+            errorMessage
+          }}</small>
+        </div>
+      </div>
+      <Divider>
+        <Button
+          type="text"
+          :aria-expanded="showMore"
+          :aria-controls="advancedId"
+          @click="toggleShowMore"
+        >
+          <Icon icon="arrowDown" :size="14" class="advanced-chevron mr-4" :class="{ 'is-open': showMore }" />
+          {{ t('common.advancedSettings') }}
+        </Button>
+      </Divider>
+      <div v-show="showMore" :id="advancedId">
       <div v-if="isRemote" class="form-item">
         {{ t('subscribe.decryptPassword') }}
         <div class="w-full">
@@ -376,6 +525,7 @@ defineExpose({ modalSlots })
         </template>
       </template>
     </div>
+    </template>
   </div>
 </template>
 

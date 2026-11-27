@@ -4,7 +4,7 @@ import { parse } from 'yaml'
 
 import { RefreshSubscriptionUsage, UpdateSubscriptionSettings } from '@/bridge/browser/go/bridge/App'
 
-import { ReadFile, WriteFile, Requests, GetSystemProxy } from '@/bridge'
+import { ReadFile, RemoveFile, WriteFile, Requests, GetSystemProxy } from '@/bridge'
 import { DefaultSubscribeScript, SubscribesFilePath, NodeGroupsFilePath } from '@/constant/app'
 import { DefaultExcludeProtocols } from '@/constant/kernel'
 import { PluginTriggerEvent, RequestMethod, RequestProxyMode } from '@/enums/app'
@@ -197,16 +197,30 @@ export const useSubscribesStore = defineStore('subscribes', () => {
       return { added, removed }
     })
 
-  const addSubscribe = (s: App.Subscription, attachToCurrentProfile = true) =>
+  const addSubscribe = (
+    s: App.Subscription,
+    attachToCurrentProfile = true,
+    nodeContent?: string,
+  ) =>
     withConfigMutation(async () => {
       const profilesStore = useProfilesStore()
       const profiles = deepClone(profilesStore.profiles)
       const current = profiles.find((profile) => profile.id === profilesStore.currentProfile?.id)
       const changed = attachToCurrentProfile && addSubscribeToDefaultOutbounds(s, current)
       const content = serialize([...subscribes.value, s])
-      if (changed)
-        await profilesStore.writeProfiles(profiles, [{ path: SubscribesFilePath, content }])
-      else await WriteFile(SubscribesFilePath, content)
+      if (nodeContent !== undefined) {
+        await WriteFile(s.path, nodeContent)
+      }
+      try {
+        if (changed)
+          await profilesStore.writeProfiles(profiles, [{ path: SubscribesFilePath, content }])
+        else await WriteFile(SubscribesFilePath, content)
+      } catch (error) {
+        if (nodeContent !== undefined) {
+          await ignoredError(RemoveFile, s.path)
+        }
+        throw error
+      }
       subscribes.value.push(s)
       if (changed) publishProfiles(profiles)
       // A new HTTP subscription has no runtime nodes until its first successful refresh.

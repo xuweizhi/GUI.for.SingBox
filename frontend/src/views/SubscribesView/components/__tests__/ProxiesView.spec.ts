@@ -55,6 +55,11 @@ const mountEditor = () => {
           template:
             '<textarea :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)"/>',
         },
+        Radio: {
+          props: ['modelValue', 'options'],
+          template:
+            '<div><button v-for="o in options" :key="o.value" @click="$emit(\'update:modelValue\', o.value)">{{ o.label }}</button></div>',
+        },
         Empty: true,
         Divider: true,
         Tag: true,
@@ -93,6 +98,7 @@ describe('subscription node editor', () => {
     await click(view, 'common.delete')
     await flushPromises()
     await click(view, 'subscribes.proxies.add')
+    await click(view, 'subscribe.customNode.modeJson')
     await view
       .get('textarea')
       .setValue(JSON.stringify({ tag: 'Example', type: 'http', server: 'new' }))
@@ -108,6 +114,34 @@ describe('subscription node editor', () => {
     ).toEqual([{ tag: 'Example', type: 'http', server: 'new' }])
     expect(sub.proxies[0]!.id).not.toBe('old')
     expect(useNodeGroupsStore().nodeGroups[0]!.members[0]?.node_id).toBe(sub.proxies[0]!.id)
+    view.unmount()
+  })
+
+  it('parses a socks5 share link directly in form mode and saves valid sing-box JSON', async () => {
+    const view = mountEditor()
+    await click(view, 'subscribes.proxies.add')
+    await view
+      .get('[data-testid="custom-node-uri"]')
+      .setValue('socks5://demoUser:demoPass@209.227.81.152:443')
+    await view.get('[data-testid="custom-node-parse"]').trigger('click')
+    await flushPromises()
+    await view.get('[data-testid="custom-node-tag"]').setValue('MySocks5')
+    await click(view, 'confirm')
+    await flushPromises()
+    await (view.vm as any).modalSlots.submit().props.onClick()
+    const sub = useSubscribesStore().subscribes[0]!
+    const written = JSON.parse(
+      vi.mocked(WriteFile).mock.calls.find(([path]) => path === sub.path)![1],
+    )
+    expect(written).toContainEqual({
+      type: 'socks',
+      tag: 'MySocks5',
+      server: '209.227.81.152',
+      server_port: 443,
+      version: '5',
+      username: 'demoUser',
+      password: 'demoPass',
+    })
     view.unmount()
   })
 })

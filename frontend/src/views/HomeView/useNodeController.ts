@@ -9,6 +9,7 @@ import {
   useSubscribesStore,
 } from '@/stores'
 import { handleUseProxy } from '@/utils/helper'
+import { resolveActivePreProxyState } from '@/utils/homePreProxy'
 import { getNodeGroupRuntimeNames } from '@/utils/nodeGroup'
 import { normalizeErrorMessage } from '@/utils/others'
 import { getOutboundRole } from '@/utils/outboundPolicy'
@@ -109,6 +110,13 @@ export const useNodeController = (
   })
   const proxyGroup = computed(() =>
     resolvePrimaryProxyGroup(profilesStore.currentProfile, kernelApiStore.proxies),
+  )
+  const activePreProxy = computed(() =>
+    resolveActivePreProxyState(
+      profilesStore.currentProfile,
+      kernelApiStore.proxies,
+      primary.value.leafName,
+    ),
   )
   const proxyActive = computed(() => {
     if (mode.value === 'rule') return true
@@ -526,6 +534,7 @@ export const useNodeController = (
     mode,
     primary,
     proxyGroup,
+    activePreProxy,
     proxyActive,
     selectedGroup,
     nodes,

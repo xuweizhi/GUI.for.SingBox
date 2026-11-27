@@ -8,7 +8,16 @@ import { DraggableOptions } from '@/constant/app'
 import { useBool } from '@/hooks'
 import { useFormDraft } from '@/hooks/useFormDraft'
 import { useNodeGroupsStore, useSubscribesStore } from '@/stores'
-import { buildSmartRegExp, deepClone, message, sampleID } from '@/utils'
+import {
+  buildSingBoxOutbound,
+  buildSmartRegExp,
+  deepClone,
+  DefaultCustomNodeDraft,
+  message,
+  outboundToCustomNodeDraft,
+  sampleID,
+  type CustomNodeDraft,
+} from '@/utils'
 import {
   extractSubscriptionConfig,
   isSubscriptionEndpoint,
@@ -16,6 +25,7 @@ import {
 } from '@/utils/subscriptionConfig'
 
 import Button from '@/components/Button/index.vue'
+import CustomNodeEditor from './CustomNodeEditor.vue'
 
 interface Props {
   sub: App.Subscription
@@ -25,6 +35,10 @@ const props = defineProps<Props>()
 
 const editId = ref('')
 const isEdit = ref(false)
+const editMode = ref<'form' | 'json'>('json')
+const nodeDraft = ref<CustomNodeDraft>(DefaultCustomNodeDraft('socks'))
+const nodeErrorField = ref('')
+const nodeErrorMessage = ref('')
 const loading = ref(false)
 const keywords = ref('')
 const proxyType = ref('')
@@ -62,6 +76,11 @@ const handleInspectProxy = async (record: App.Subscription['proxies'][0], edit =
   try {
     const proxy = await getProxyByTag(record.tag)
     details.value = JSON.stringify(proxy, null, 2)
+    const parsedDraft = outboundToCustomNodeDraft(proxy)
+    nodeDraft.value = parsedDraft || DefaultCustomNodeDraft('socks')
+    editMode.value = edit && parsedDraft ? 'form' : 'json'
+    nodeErrorField.value = ''
+    nodeErrorMessage.value = ''
     isEdit.value = edit
     editId.value = edit ? record.tag : ''
     toggleDetails()
@@ -173,18 +192,61 @@ const handleSave = async () => {
 const handleAdd = async () => {
   editId.value = ''
   details.value = ''
+  nodeDraft.value = DefaultCustomNodeDraft('socks')
+  editMode.value = 'form'
+  nodeErrorField.value = ''
+  nodeErrorMessage.value = ''
   isEdit.value = true
   toggleDetails()
 }
 
+const handleSwitchEditMode = (nextMode: string) => {
+  const mode = nextMode as 'form' | 'json'
+  if (mode === editMode.value) return
+  nodeErrorField.value = ''
+  nodeErrorMessage.value = ''
+  if (mode === 'json') {
+    const built = buildSingBoxOutbound(nodeDraft.value)
+    if (built.ok) {
+      details.value = JSON.stringify(built.outbound, null, 2)
+    }
+  } else if (details.value?.trim()) {
+    try {
+      const parsed = JSON.parse(details.value)
+      const converted = outboundToCustomNodeDraft(parsed)
+      if (converted) nodeDraft.value = converted
+    } catch {
+      // keep current form draft if JSON is incomplete
+    }
+  }
+  editMode.value = mode
+}
+
 const onEditEnd = async () => {
   let proxy: any
+  nodeErrorField.value = ''
+  nodeErrorMessage.value = ''
   try {
-    proxy = JSON.parse(details.value)
+    if (editMode.value === 'form') {
+      const built = buildSingBoxOutbound(nodeDraft.value)
+      if (!built.ok) {
+        nodeErrorField.value = built.field
+        nodeErrorMessage.value = t(built.error)
+        return false
+      }
+      proxy = built.outbound
+    } else {
+      proxy = JSON.parse(details.value)
+    }
 
     validateSubscriptionEntries([proxy])
-    if (sub.value.proxies.some((node) => node.tag === proxy.tag && node.tag !== editId.value))
+    if (sub.value.proxies.some((node) => node.tag === proxy.tag && node.tag !== editId.value)) {
+      if (editMode.value === 'form') {
+        nodeErrorField.value = 'tag'
+        nodeErrorMessage.value = t('subscribe.duplicateNodeTag', [proxy.tag])
+      }
       throw new Error(t('subscribe.duplicateNodeTag', [proxy.tag]))
+    }
     await initAllFieldsProxies()
   } catch (error: any) {
     console.log(error)
@@ -422,7 +484,24 @@ defineExpose({ modalSlots })
     max-height="80"
     max-width="80"
   >
-    <CodeEditor v-model="details" lang="json" :editable="isEdit" />
+    <div v-if="isEdit" class="mb-10">
+      <Radio
+        :model-value="editMode"
+        size="small"
+        :options="[
+          { label: 'subscribe.customNode.modeForm', value: 'form' },
+          { label: 'subscribe.customNode.modeJson', value: 'json' },
+        ]"
+        @update:model-value="handleSwitchEditMode(String($event))"
+      />
+    </div>
+    <CustomNodeEditor
+      v-if="isEdit && editMode === 'form'"
+      v-model="nodeDraft"
+      :error-field="nodeErrorField"
+      :error-message="nodeErrorMessage"
+    />
+    <CodeEditor v-else v-model="details" lang="json" :editable="isEdit" />
   </Modal>
 </template>
 

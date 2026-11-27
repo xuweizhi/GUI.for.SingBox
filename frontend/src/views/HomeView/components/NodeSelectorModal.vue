@@ -11,6 +11,7 @@ import type { NodeController } from '@/views/HomeView/useNodeController'
 
 const props = defineProps<{ controller: NodeController }>()
 const open = defineModel<boolean>('open', { default: false })
+const emit = defineEmits<{ openPreProxy: [] }>()
 const { t } = useI18n()
 const router = useRouter()
 
@@ -164,6 +165,19 @@ const openRoutePolicies = async () => {
       </Button>
       <Button v-else data-action="cancel-test" size="small" @click="controller.cancelGroupTest">
         {{ t('common.cancel') }}
+      </Button>
+      <Button
+        v-if="controller.activePreProxy?.value"
+        data-action="open-pre-proxy"
+        size="small"
+        :type="controller.activePreProxy.value.status === 'active' ? 'primary' : 'normal'"
+        @click="emit('openPreProxy')"
+      >
+        {{
+          controller.activePreProxy.value.status === 'active'
+            ? t('profileSimple.preProxyVia', [controller.activePreProxy.value.nodeName])
+            : t('home.nodes.preProxySelect')
+        }}
       </Button>
       <div v-if="batch.running || batch.completed" class="w-full">
         <Progress :percent="batchPercent" />

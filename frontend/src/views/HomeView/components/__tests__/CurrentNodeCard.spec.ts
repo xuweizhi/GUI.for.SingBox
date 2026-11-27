@@ -90,6 +90,10 @@ const mountCard = () =>
           props: ['open'],
           template: '<div class="selector-modal" :data-open="open" />',
         },
+        PreProxySelectorModal: {
+          props: ['open'],
+          template: '<div class="preproxy-modal" :data-open="open" />',
+        },
       },
       directives: {
         tips: {},
@@ -162,5 +166,13 @@ describe('CurrentNodeCard', () => {
     expect(mocks.startPolling).toHaveBeenCalled()
     wrapper.unmount()
     expect(mocks.stopPolling).toHaveBeenCalled()
+  })
+
+  it('opens the pre-proxy modal directly from the pre-proxy bar without opening the node selector', async () => {
+    const wrapper = mountCard()
+
+    await wrapper.get('[data-pre-proxy-trigger]').trigger('click')
+    expect(wrapper.get('.preproxy-modal').attributes('data-open')).toBe('true')
+    expect(wrapper.get('.selector-modal').attributes('data-open')).toBe('false')
   })
 })

@@ -708,4 +708,29 @@ describe('subscribes store', () => {
     saved.path = item.url
     expect((await generate()).outbounds).toContainEqual(expect.objectContaining({ tag: node.tag }))
   })
+
+  it('writes custom-node subscription file separately so profile related-write allowlist is respected', async () => {
+    const subscribesStore = useSubscribesStore()
+    const profilesStore = useProfilesStore()
+    const appSettingsStore = useAppSettingsStore()
+    const profile = profilesStore.getProfileTemplate('default')
+    profilesStore.profiles = [profile]
+    appSettingsStore.app.kernel.profile = profile.id
+    const writeProfilesSpy = vi.spyOn(profilesStore, 'writeProfiles').mockResolvedValue('')
+
+    const customSub = {
+      ...subscription('sub-custom'),
+      type: 'Manual' as const,
+      proxies: [{ id: 'n-1', tag: 'MySocks', type: 'socks' }],
+    }
+    const nodeJson = JSON.stringify([{ type: 'socks', tag: 'MySocks', server: '1.2.3.4', server_port: 443 }])
+    await subscribesStore.addSubscribe(customSub, true, nodeJson)
+
+    expect(writeFile).toHaveBeenCalledWith(customSub.path, nodeJson)
+    expect(writeProfilesSpy).toHaveBeenCalledWith(
+      expect.any(Array),
+      [expect.objectContaining({ path: 'data/subscribes.yaml' })],
+    )
+    expect(subscribesStore.subscribes.some((s) => s.id === 'sub-custom')).toBe(true)
+  })
 })
